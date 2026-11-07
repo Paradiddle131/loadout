@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# pre-commit of the repos a cloud session works on, set as their core.hooksPath by the session-start hook
+# (only in a repo with no hooks of its own): a commit may not add the repo's owner literally.
+set -euo pipefail
+exec bash "$(cd "$(dirname "$0")" && pwd)/check-portable.sh"

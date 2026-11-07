@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bakery newsletter</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;600;700;800&display=swap">
+<style>
+:root { --host-ground: #ffffff; --host-ink: #1f2328; --host-rule: #8a5a2b }
+body { margin: 0; background: var(--host-ground); color: var(--host-ink); font: 400 1.0625rem/1.6 Georgia, serif }
+.host { max-width: 46rem; margin: 0 auto; padding: 2rem 16px }
+.host h2 { font-size: 1.75rem; font-weight: 400; border-bottom: 1px solid var(--host-rule) }
+#report { border-radius: 12px; padding: 24px 16px }
+/* report-kit:css tokens base section bar grade table-sort tip scope=#report */
+#report {
+/* report-kit tokens. Two layers: primitives (raw values, named for what they are) and semantic tokens
+   (named for their job), which components use alone. Light is the default; dark follows the system unless
+   the page says data-theme="light", and data-theme="dark" forces it. bin/build.cjs inlines this file
+   between the report-kit:css markers; edit it here, never in a copy. */
+:root & {
+  /* primitives */
+  --porcelain: #f4f6fa; --navy: #0d1b3e; --cobalt: #2447c9; --green: #0b7d4b; --amber: #a35f00;
+  --scarlet: #cf2a1f; --petrol: #1d6f8c; --vermilion: #b83d16; --teal: #0f7480; --plum: #7a3b69;
+  --midnight: #0a1430; --cloud: #edf1f8; --cobalt-lt: #86a4ff; --green-lt: #3fcf8e; --amber-lt: #f2b23e;
+  --scarlet-lt: #ff6a5c; --petrol-lt: #6cc4e0; --vermilion-lt: #ff8f6b; --teal-lt: #4fd1c5; --plum-lt: #e39ad0;
+  --slate: #6f778a; --cobalt-md: #5b7de8; --slate-dk: #666e82; --vermilion-md: #e0663c;
+
+  /* semantic: surfaces and ink (no muted ink: every word is read at full contrast) */
+  --paper: var(--porcelain); --ink: var(--navy); --line: var(--cobalt);
+  --hair: color-mix(in srgb, var(--ink) 16%, transparent);
+  --row: color-mix(in srgb, var(--line) 6%, transparent);
+  --tip: var(--ink); --tip-ink: var(--paper);
+  --shadow: 0 6px 18px color-mix(in srgb, var(--navy) 22%, transparent); /* none on dark grounds, where a shadow reads as a glow */
+  /* status: each is also a mark shape (marks.css), never a colour alone */
+  --ok: var(--green); --warn: var(--amber); --bad: var(--scarlet); --info: var(--petrol);
+  /* chart series, after the line colour */
+  --viz-1: var(--line); --viz-2: var(--vermilion); --viz-3: var(--teal); --viz-4: var(--plum);
+  /* value grades, opt-in (grade.css): a diverging pair, blue for the good end and vermilion for the poor end, through
+     a neutral middle; checked for colour-blind separation on both grounds, and never alone (the number and the bar's
+     length carry the value) */
+  --grade-hi: var(--cobalt); --grade-mid: var(--slate); --grade-lo: var(--vermilion);
+
+  /* type: one family, a fixed scale; numbers are tabular */
+  --sans: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --t-word: 1rem; --t-num: 1.375rem; --t-find: 1.1875rem; --t-head: 1.375rem; --t-title: 2rem; --t-tip: .9375rem; --t-chart: .875rem;
+  /* hierarchy without a paler body: a heading is a size step above its text and two weight steps heavier; on a dark
+     ground light strokes spread (the irradiation illusion), so headings go one weight further and words get a touch
+     more tracking and leading, keeping the gap the light theme shows */
+  --w-head: 700; --lh-word: 1.45; --track-word: 0em;
+
+  /* space, on a 4px step */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px;
+  --gutter-l: max(16px, env(safe-area-inset-left, 0px)); --gutter-r: max(16px, env(safe-area-inset-right, 0px));
+  --measure: 40rem; --page: 80rem;
+
+  /* motion */
+  --t-fast: .15s;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) & {
+    --paper: var(--midnight); --ink: var(--cloud); --line: var(--cobalt-lt);
+    --ok: var(--green-lt); --warn: var(--amber-lt); --bad: var(--scarlet-lt); --info: var(--petrol-lt);
+    --viz-2: var(--vermilion-lt); --viz-3: var(--teal-lt); --viz-4: var(--plum-lt);
+    --grade-hi: var(--cobalt-md); --grade-mid: var(--slate-dk); --grade-lo: var(--vermilion-md);
+    --shadow: none;
+    --w-head: 800; --lh-word: 1.5; --track-word: .01em;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] & {
+  --paper: var(--midnight); --ink: var(--cloud); --line: var(--cobalt-lt);
+  --ok: var(--green-lt); --warn: var(--amber-lt); --bad: var(--scarlet-lt); --info: var(--petrol-lt);
+  --viz-2: var(--vermilion-lt); --viz-3: var(--teal-lt); --viz-4: var(--plum-lt);
+  --grade-hi: var(--cobalt-md); --grade-mid: var(--slate-dk); --grade-lo: var(--vermilion-md);
+  --shadow: none;
+  --w-head: 800; --lh-word: 1.5; --track-word: .01em;
+  color-scheme: dark;
+}
+/* report-kit base: the page ground, its one type family, the browser surfaces themed from the tokens
+   (selection, focus ring, scrollbar, underline), the screen-reader-only class and the page column. */
+* { box-sizing: border-box }
+& { scrollbar-color: var(--line) var(--paper); -webkit-text-size-adjust: 100%; text-size-adjust: 100% }
+& { margin: 0; background: var(--paper); color: var(--ink); font: 400 var(--t-word)/var(--lh-word) var(--sans);
+  letter-spacing: var(--track-word); font-variant-numeric: tabular-nums }
+::selection { background: var(--line); color: var(--paper) }
+:focus-visible { outline: 2.5px solid var(--line); outline-offset: 3px; border-radius: 4px }
+a { color: inherit; text-decoration: underline 1.5px var(--line); text-underline-offset: 4px }
+a:hover { text-decoration-thickness: 2.5px }
+h1, h2, h3 { text-wrap: balance }
+p { text-wrap: pretty }
+.rk-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap }
+.rk-wrap { max-width: var(--page); margin: 0 auto; padding: var(--s6) var(--gutter-r) var(--s7) var(--gutter-l) }
+.rk-title { margin: 0 0 var(--s2); font-family: var(--sans); font-size: var(--t-title); font-weight: var(--w-head); line-height: 1.15 }
+.rk-lede { margin: 0 0 var(--s6); max-width: var(--measure) }
+@media (prefers-reduced-motion: reduce) { *, ::before, ::after { scroll-behavior: auto !important } }
+/* report-kit section head: every section's heading in one style, 1.375rem bold over a 2px ink rule, with the
+   one control that changes only this section (a switch) beside it, wrapping under it when narrow. Headings rank
+   above their text by size, weight and space, never by a paler body: a finding's headline is a size step above
+   its sentence (--t-find), both heading levels are --w-head (heavier on a dark ground), and a headline sits
+   closer to its own sentence than to the row above. */
+.rk-section + .rk-section { margin-top: calc(var(--s7) + var(--s4)) }
+.rk-head { display: flex; flex-wrap: wrap; gap: var(--s3) var(--s5); align-items: flex-end; justify-content: space-between;
+  padding-bottom: var(--s3); border-bottom: 2px solid var(--ink); margin-bottom: var(--s5) }
+.rk-head h2 { margin: 0; font-family: var(--sans); font-size: var(--t-head); font-weight: var(--w-head); line-height: 1.2 }
+.rk-section h3 { margin: 0 0 6px; font-family: var(--sans); font-size: var(--t-find); font-weight: var(--w-head); line-height: 1.25 }
+/* a list of findings under a head: text left, one small picture right, dropping under it when narrow */
+.rk-rows { list-style: none; margin: 0; padding: 0; container-type: inline-size }
+.rk-rows > li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 30rem); gap: var(--s4) var(--s7); align-items: start;
+  padding: var(--s5) 0; border-bottom: 1px solid var(--hair) }
+.rk-rows > li p { margin: 0; max-width: 36rem }
+@container (max-width: 52rem) { .rk-rows > li { grid-template-columns: minmax(0, 1fr) } }
+/* right under a head, the head's own space is the gap: the first row adds none above it */
+.rk-head + .rk-rows > li:first-child { padding-top: 0 }
+/* a glossary: each term an anchor the bubble's "more" link can open */
+.rk-glossary { margin: 0; max-width: var(--measure) }
+.rk-glossary > div { padding: var(--s3) 0; border-bottom: 1px solid var(--hair); scroll-margin-top: var(--s7) }
+.rk-glossary dt { font-weight: 700 }
+.rk-glossary dd { margin: var(--s1) 0 0 }
+/* report-kit bar: the track is the whole 0-100 scale, the fill the value, the number beside it in the
+   number size. data-k on the fill takes a status colour; the default is the line colour. */
+.rk-bar { display: grid; grid-template-columns: minmax(0, 1fr) 2.75rem; gap: var(--s3); align-items: center; margin-top: 6px }
+.rk-track { display: block; height: 10px; border-radius: 5px; background: var(--hair); overflow: hidden }
+.rk-fill { display: block; height: 100%; width: calc(var(--v) * 1%); border-radius: 5px; background: var(--line) }
+.rk-fill[data-k="ok"] { background: var(--ok) } .rk-fill[data-k="warn"] { background: var(--warn) }
+.rk-fill[data-k="bad"] { background: var(--bad) } .rk-fill[data-k="info"] { background: var(--info) }
+.rk-bar b, .rk-pic .rk-end { font: 700 var(--t-num)/1 var(--sans); text-align: right }
+.rk-pic { min-width: 0; padding-top: 2px }
+.rk-pic .rk-pl { display: block; font-weight: 600; line-height: 1.3 }
+.rk-pic ul:not(.rk-key) { list-style: none; margin: 0; padding: 0 }
+.rk-pic ul:not(.rk-key) > li + li { margin-top: var(--s3) }
+/* a meter: a number over a thin bar, for a cell in a dense grid where many values sit side by side */
+.rk-meter { display: grid; gap: 5px; min-width: 3.5rem }
+.rk-meter b { font: 700 var(--t-num)/1.2 var(--sans); text-align: right }
+.rk-meter .rk-track { height: 5px; border-radius: 3px }
+.rk-meter .rk-fill { border-radius: 3px }
+/* report-kit grade, opt-in: a value coloured by where it falls on its scale, for dense grids where many numbers
+   sit side by side to be compared. data-g="hi" (the good end), "mid" or "lo" on a bar's fill, a range's span or
+   a key's swatch; grade.js sets it from the value and the cut points on a data-rk-grade container. The colour
+   only repeats what the number and the bar's length already say. */
+[data-g="hi"] { --g: var(--grade-hi) } [data-g="mid"] { --g: var(--grade-mid) } [data-g="lo"] { --g: var(--grade-lo) }
+.rk-fill[data-g], .rk-swatch[data-g] { background: var(--g) }
+.rk-span[data-g] { --c: var(--g) }
+.rk-swatch { display: inline-block; flex: none; width: 18px; height: 10px; border-radius: 5px; background: var(--line) }
+/* a lighter track under graded bars, so every grade, the neutral middle included, keeps 3:1 against it */
+[data-rk-grade] .rk-track { background: color-mix(in srgb, var(--ink) 7%, transparent) }
+/* report-kit table: a real <table>; words left, numbers right in the number size; every sortable header is one
+   button across the whole cell, its words flowing inline so a wrapped label keeps its column's mark on its first
+   word and the direction mark on its last. A table marked rk-stack turns each row into a block when its wrap is
+   narrower than data-rk-stack-at (56rem by default; table-sort.js sets is-stacked), every value then carrying its
+   column's label; rk-stack-compact keeps only the column's mark beside each number and turns the header into a
+   sort bar, for tables whose number columns all carry a mark. */
+.rk-table-wrap { container-type: inline-size; overflow-x: auto }
+.rk-table { width: 100%; border-collapse: collapse }
+.rk-table[hidden] { display: none !important }
+.rk-table thead th { font: 700 var(--t-word)/1.25 var(--sans); text-align: left; vertical-align: bottom; padding: 0 var(--s4) var(--s2) 0;
+  border-bottom: 2px solid var(--ink) }
+.rk-table thead th:not([data-sort]) { padding-bottom: calc(var(--s2) + 6px) }
+.rk-table th.rk-num, .rk-table td.rk-num { text-align: right }
+.rk-table thead th:last-child, .rk-table tbody > tr > :last-child { padding-right: 0 }
+.rk-table thead button { font: inherit; color: inherit; background: none; border: 0; padding: 6px 0; min-height: 32px; width: 100%;
+  cursor: pointer; display: block; text-align: inherit; text-wrap: balance; border-radius: 6px }
+.rk-table thead button:hover .rk-label { text-decoration: underline 2px; text-underline-offset: 5px }
+.rk-nw { white-space: nowrap }
+.rk-table thead .rk-mark { margin-right: 6px }
+.rk-sort-mark { display: inline-block; width: 9px; height: 13px; margin-left: 6px; vertical-align: -1px }
+.rk-table th[aria-sort="descending"] .rk-sort-mark .up, .rk-table th[aria-sort="ascending"] .rk-sort-mark .dn { display: none }
+.rk-table th[aria-sort="descending"] .rk-sort-mark, .rk-table th[aria-sort="ascending"] .rk-sort-mark { stroke-width: 2.4 }
+.rk-table tbody tr { border-bottom: 1px solid var(--hair) }
+.rk-table tbody tr:hover { background: var(--row) }
+.rk-table tbody th, .rk-table tbody td { padding: 10px var(--s4) 10px 0; vertical-align: middle; text-align: left }
+.rk-table tbody th { font-weight: 600 }
+.rk-table td.rk-num { font: 700 var(--t-num)/1 var(--sans); white-space: nowrap }
+.rk-table td.rk-num .rk-meter { margin-left: auto }
+.rk-cell-label { display: none }
+
+/* stacked: one block per row */
+.rk-table.is-stacked, .is-stacked thead, .is-stacked tbody, .is-stacked tr, .is-stacked th, .is-stacked td { display: block }
+.is-stacked thead tr { display: flex; flex-wrap: wrap; gap: 0 var(--s4); padding-bottom: var(--s1); border-bottom: 2px solid var(--ink) }
+.is-stacked thead th { border: 0; padding: 0 } .is-stacked thead th.rk-wide { display: none }
+.is-stacked thead th:not([data-sort]) { display: none }
+.is-stacked thead button { min-height: 44px; width: auto; text-align: left }
+.is-stacked tbody tr { display: grid; grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr)); gap: var(--s3); padding: var(--s4) 0 }
+.is-stacked tbody th, .is-stacked tbody td.rk-wide { grid-column: 1 / -1; padding: 0 }
+.is-stacked tbody td { padding: 0; text-align: left !important }
+.is-stacked td.rk-num { display: flex; flex-direction: column; gap: var(--s1) }
+.is-stacked td.rk-num:has(.rk-meter) { gap: var(--s2) } .is-stacked td.rk-num .rk-meter { margin-left: 0 } .is-stacked .rk-meter b { text-align: left }
+.is-stacked .rk-cell-label { display: inline-flex; gap: 6px; align-items: center; font: 400 var(--t-word)/1.25 var(--sans) }
+
+/* compact: a sort bar of two columns, and each number beside its column's mark alone */
+.rk-stack-compact.is-stacked thead tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) }
+.rk-stack-compact.is-stacked thead th[data-sort="default"] { grid-column: 1 / -1 }
+.rk-stack-compact.is-stacked tbody tr { grid-template-columns: repeat(auto-fill, minmax(4.5rem, 1fr)) }
+.rk-stack-compact.is-stacked td.rk-num { flex-direction: row; align-items: center; gap: var(--s2) }
+.rk-stack-compact.is-stacked .rk-cell-label:has(.rk-mark) .rk-cell-words { position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap }
+/* report-kit definition bubble: one reversed plate for every definition on the page, placed inside the viewport.
+   Pinned (when the page allows it), it gains a handle to drag it by, a close button and an optional link on. */
+.rk-tip { position: fixed; z-index: 20; left: 0; top: 0; max-width: min(20rem, calc(100vw - 32px)); padding: 10px 12px; border-radius: 8px;
+  background: var(--tip); color: var(--tip-ink); font: 400 var(--t-tip)/1.4 var(--sans); box-shadow: var(--shadow) }
+.rk-tip[hidden] { display: none }
+.rk-tip p { margin: 0 }
+.rk-tip :focus-visible { outline-color: var(--tip-ink); outline-offset: 2px }
+.rk-tip.is-pinned { position: absolute; padding-top: 4px; user-select: text }
+.rk-tip-bar { display: none; align-items: center; gap: var(--s2); margin: 0 -6px var(--s1) -6px }
+.rk-tip.is-pinned .rk-tip-bar { display: flex }
+.rk-tip-handle { flex: 1; min-width: 0; display: flex; gap: var(--s2); align-items: center; min-height: 32px; padding: 0 6px; border-radius: 6px;
+  font-weight: 700; cursor: grab; touch-action: none; user-select: none }
+.rk-tip-handle:hover { background: color-mix(in srgb, var(--tip-ink) 12%, transparent) }
+.rk-tip.is-dragging, .rk-tip.is-dragging .rk-tip-handle { cursor: grabbing }
+.rk-tip-handle svg, .rk-tip-close svg { flex: none }
+.rk-tip-close { flex: none; width: 32px; height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px;
+  background: transparent; color: inherit; cursor: pointer }
+.rk-tip-close:hover { background: color-mix(in srgb, var(--tip-ink) 12%, transparent) }
+.rk-tip-more { margin-top: var(--s2) !important; padding-top: var(--s2); border-top: 1px solid color-mix(in srgb, var(--tip-ink) 30%, transparent) }
+.rk-tip-more a { color: inherit; text-decoration-color: currentColor }
+/* words that carry a definition wear a dotted underline in the line colour */
+.rk-term { cursor: help; border-radius: 4px; text-decoration: underline dotted 1.5px var(--line); text-underline-offset: 5px }
+[data-tip] { cursor: help }
+button[data-tip], a[data-tip] { cursor: pointer }
+}
+
+/* /report-kit:css */
+</style>
+</head>
+<body>
+<div class="host">
+  <h2 id="host-h">News from the counter</h2>
+  <p>The host page keeps its own type and colours; the report below brings the kit's.</p>
+  <div id="report">
+    <section class="rk-section" aria-labelledby="grid-h">
+      <div class="rk-head"><h2 id="grid-h">On time by kind of order</h2></div>
+      <ul class="rk-rows"><li><div><h3>Bread travels well, large orders do not</h3>
+        <p>On-time orders in 100 by kind of order; press a column to sort by it.</p></div></li></ul>
+      <div class="rk-table-wrap" data-rk-grade="60 80"><table class="rk-table rk-stack rk-grid" data-rk-sort="toggle" data-rk-stack-at="26rem"><caption class="rk-sr">On-time orders in 100 by option and kind of order</caption><thead><tr><th scope="col" data-sort="default"><button type="button" data-tip="In the trial's order; press again to reverse it."><span class="rk-label">Option</span></button></th><th scope="col" class="rk-num" data-sort="number"><button type="button" data-tip="Loaves and rolls, packed flat in a paper bag."><span class="rk-label">Bread</span></button></th><th scope="col" class="rk-num" data-sort="number"><button type="button" data-tip="Whole cakes in a box that must stay level."><span class="rk-label">Cakes</span></button></th><th scope="col" class="rk-num" data-sort="number"><button type="button" data-tip="Orders of twenty items or more, often for an event."><span class="rk-label">Large</span></button></th><th scope="col" class="rk-num" data-sort="number"><button type="button" data-tip="Orders due before eight in the morning."><span class="rk-label">Early</span></button></th></tr></thead><tbody><tr><th scope="row">Own van</th><td class="rk-num" data-v="88"><span class="rk-meter"><b>88</b><span class="rk-track" aria-hidden="true"><span class="rk-fill" style="--v:88"></span></span></span></td><td class="rk-num" data-v="71"><span class="rk-meter"><b>71</b><span class="rk-track" aria-hidden="true"><span class="rk-fill" style="--v:71"></span></span></span></td><td class="rk-num" data-v="52"><span class="rk-meter"><b>52</b><span class="rk-track" aria-hidden="true"><span class="rk-fill" style="--v:52"></span></span></span></td><td class="rk-num" data-v="79"><span class="rk-meter"><b>79</b><span class="rk-track" aria-hidden="true"><span class="rk-fill" style="--v:79"></span></span></span></td></tr><tr><th scope="row">Bike courier</th><td class="rk-num" data-v="93"><span class="rk-meter"><b>93</b><span class="rk-track" aria-hidden="true"><span class="rk-fill" style="--v:93"></span></span></span></td><td class="rk-num" data-v="64"><span class="rk-meter"><b>64</b><span class="rk-track" aria-hidden="true"><span class="rk-fill" style="--v:64"></span></span></span></td><td class="rk-num" data-v="38"><span class="rk-meter"><b>38</b><span class="rk-track" aria-hidden="true"><span class="rk-fill" style="--v:38"></span></span></span></td><td class="rk-num" data-v="90"><span class="rk-meter"><b>90</b><span class="rk-track" aria-hidden="true"><span class="rk-fill" style="--v:90"></span></span></span></td></tr><tr><th scope="row">Partner app</th><td class="rk-num" data-v="81"><span class="rk-meter"><b>81</b><span class="rk-track" aria-hidden="true"><span class="rk-fill" style="--v:81"></span></span></span></td><td class="rk-num" data-v="49"><span class="rk-meter"><b>49</b><span class="rk-track" aria-hidden="true"><span class="rk-fill" style="--v:49"></span></span></span></td><td class="rk-num" data-v="44"><span class="rk-meter"><b>44</b><span class="rk-track" aria-hidden="true"><span class="rk-fill" style="--v:44"></span></span></span></td><td class="rk-num" data-v="58"><span class="rk-meter"><b>58</b><span class="rk-track" aria-hidden="true"><span class="rk-fill" style="--v:58"></span></span></span></td></tr><tr><th scope="row">Shared van</th><td class="rk-num" data-v="84"><span class="rk-meter"><b>84</b><span class="rk-track" aria-hidden="true"><span class="rk-fill" style="--v:84"></span></span></span></td><td class="rk-num" data-v="66"><span class="rk-meter"><b>66</b><span class="rk-track" aria-hidden="true"><span class="rk-fill" style="--v:66"></span></span></span></td><td class="rk-num" data-v="61"><span class="rk-meter"><b>61</b><span class="rk-track" aria-hidden="true"><span class="rk-fill" style="--v:61"></span></span></span></td><td class="rk-num" data-v="63"><span class="rk-meter"><b>63</b><span class="rk-track" aria-hidden="true"><span class="rk-fill" style="--v:63"></span></span></span></td></tr><tr><th scope="row">Collect in shop</th><td class="rk-num" data-v="97"><span class="rk-meter"><b>97</b><span class="rk-track" aria-hidden="true"><span class="rk-fill" style="--v:97"></span></span></span></td><td class="rk-num" data-v="92"><span class="rk-meter"><b>92</b><span class="rk-track" aria-hidden="true"><span class="rk-fill" style="--v:92"></span></span></span></td><td class="rk-num" data-v="85"><span class="rk-meter"><b>85</b><span class="rk-track" aria-hidden="true"><span class="rk-fill" style="--v:85"></span></span></span></td><td class="rk-num" data-v="89"><span class="rk-meter"><b>89</b><span class="rk-track" aria-hidden="true"><span class="rk-fill" style="--v:89"></span></span></span></td></tr></tbody></table></div><ul class="rk-key"><li><span class="" data-tip="80 or more of 100 on time."><i class="rk-swatch" data-g="hi" aria-hidden="true"></i>80 and over</span></li><li><span class="" data-tip="From 60 to 79 of 100 on time."><i class="rk-swatch" data-g="mid" aria-hidden="true"></i>60 to 79</span></li><li><span class="" data-tip="Fewer than 60 of 100 on time."><i class="rk-swatch" data-g="lo" aria-hidden="true"></i>under 60</span></li></ul>
+    </section>
+  </div>
+  <p>More news next week.</p>
+</div>
+<script>
+/* report-kit:js table-sort tip grade scope=#report */
+(window.ReportKit = window.ReportKit || {}).root = "#report";
+/* report-kit grade, opt-in. A container with data-rk-grade="40 70" (two cut points on the 0-100 scale) gives every
+   bar fill (.rk-fill, its value in --v) and range span (.rk-span, its --hi) inside it a data-g: "lo" under the first
+   cut, "mid" from the first to under the second, "hi" from the second up. data-rk-grade-dir="down" says lower is
+   better, so the ends swap. An element that already has data-g keeps it. API: ReportKit.grade(root), which grades
+   anything inside root again (after a generator's script adds rows). */
+(() => {
+  const RK = (window.ReportKit = window.ReportKit || {});
+  const num = (el, name) => parseFloat(el.style.getPropertyValue(name) || getComputedStyle(el).getPropertyValue(name));
+  function band(v, cuts, down) {
+    const g = v < cuts[0] ? "lo" : v < cuts[1] ? "mid" : "hi";
+    return down ? { lo: "hi", mid: "mid", hi: "lo" }[g] : g;
+  }
+  function grade(root = document) {
+    const scopes = [...(root.matches && root.matches("[data-rk-grade]") ? [root] : []), ...root.querySelectorAll("[data-rk-grade]")];
+    for (const s of scopes) {
+      const cuts = s.dataset.rkGrade.trim().split(/[\s,]+/).map(Number).sort((a, b) => a - b);
+      if (cuts.length !== 2 || cuts.some(Number.isNaN)) { console.warn("report-kit grade: data-rk-grade takes two cut points, as in \"40 70\"", s); continue; }
+      const down = s.dataset.rkGradeDir === "down";
+      for (const el of s.querySelectorAll(".rk-fill, .rk-span")) {
+        if (el.dataset.g && !el.dataset.rkGraded) continue;
+        const v = num(el, el.classList.contains("rk-span") ? "--hi" : "--v");
+        if (Number.isNaN(v)) continue;
+        el.dataset.g = band(v, cuts, down);
+        el.dataset.rkGraded = "";
+      }
+    }
+  }
+  RK.grade = grade;
+  (RK.inits = RK.inits || []).push(grade);
+})();
+/* report-kit sortable table. Markup: <table class="rk-table" data-rk-sort> whose header cells carry
+   data-sort="default" (the column that restores the page's own order), "number" or "text", each holding one
+   <button type="button">; a cell's sort value is its data-v, else its text. Numbers sort highest first on the
+   first press, text A to Z; a second press reverses. Ties keep the page's order.
+   Options on the table:
+     data-rk-sort="toggle"        two states: every press flips its column, and nothing returns to the page's own
+                                  order (a default column then flips the page's order too); no column needs to be
+                                  the default
+     data-rk-sort-group="name"    tables in one group share one sort: sorting one sorts the others the same way
+     data-rk-sort-restored="..."  what the live region says when the page's own order comes back
+     data-rk-flip                 rows slide to their new places (not under reduced motion)
+     data-rk-stack-at="40rem"     with rk-stack: the container width under which rows stack (default 56rem)
+   Header labels flow inline, so a wrapped label keeps its column's mark on its first word and the direction mark
+   on its last. Event rk:sort {detail: {table, key, dir}} on the table (not on the tables a group sorts with it). */
+(() => {
+  const RK = (window.ReportKit = window.ReportKit || {});
+  const MARK = '<svg class="rk-sort-mark" viewBox="0 0 10 14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+    'stroke-linecap="round" stroke-linejoin="round"><path class="up" d="M1.5 5 5 1.5 8.5 5"/><path class="dn" d="M1.5 9 5 12.5 8.5 9"/></svg>';
+  const motion = () => !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const done = new WeakSet();
+  function value(row, col, type) {
+    const c = row.cells[col];
+    const own = n => !(n.classList && n.classList.contains("rk-cell-label"));
+    const raw = c ? (c.dataset.v ?? [...c.childNodes].filter(own).map(n => n.textContent).join("").trim()) : "";
+    if (type === "text") return raw;
+    const n = parseFloat(String(raw).replace(/[^\d.+-]/g, ""));
+    return Number.isNaN(n) ? -Infinity : n;
+  }
+  const heads = table => [...table.tHead.rows[0].cells];
+  const toggles = table => table.dataset.rkSort === "toggle";
+  // the label's first word keeps the column's mark and its last word keeps the direction mark, on any wrap
+  function glue(b) {
+    const label = b.querySelector(".rk-label");
+    const mark = b.querySelector(":scope > .rk-mark");
+    const sortMark = b.querySelector(".rk-sort-mark");
+    if (!label || label.children.length) { if (!sortMark) b.insertAdjacentHTML("beforeend", MARK); return; }
+    const words = label.textContent.trim().split(/\s+/);
+    const nw = () => { const s = document.createElement("span"); s.className = "rk-nw"; return s; };
+    const first = nw(), last = words.length > 1 ? nw() : first;
+    if (mark) first.append(mark);
+    first.append(words[0]);
+    label.replaceChildren(first);
+    if (words.length > 2) label.append(" " + words.slice(1, -1).join(" "));
+    if (last !== first) { label.append(" "); last.append(words[words.length - 1]); label.append(last); }
+    if (sortMark) last.append(sortMark); else last.insertAdjacentHTML("beforeend", MARK);
+  }
+  function setup(table) {
+    if (done.has(table)) return;
+    done.add(table);
+    const hs = heads(table);
+    const body = table.tBodies[0];
+    [...body.rows].forEach((r, i) => { r.dataset.rkOrder = i; });
+    const status = document.createElement("p");
+    status.className = "rk-sr";
+    status.setAttribute("aria-live", "polite");
+    table.after(status);
+    table.rkStatus = status;
+    const sortable = hs.filter(th => th.dataset.sort);
+    const preset = sortable.some(h => h.hasAttribute("aria-sort"));
+    for (const th of sortable) {
+      const b = th.querySelector("button");
+      if (!b) continue;
+      glue(b);
+      if (!th.hasAttribute("aria-sort")) th.setAttribute("aria-sort", th.dataset.sort === "default" && !preset ? "ascending" : "none");
+      b.addEventListener("click", () => {
+        const kind = th.dataset.sort;
+        const was = th.getAttribute("aria-sort");
+        const first = kind === "number" ? "descending" : "ascending";
+        const flip = d => (d === "ascending" ? "descending" : "ascending");
+        const dir = kind === "default" && !toggles(table) ? "ascending" : was === "none" ? first : toggles(table) ? flip(was) : was === first ? flip(first) : first;
+        apply(table, th.cellIndex, kind, dir, true);
+        const group = table.dataset.rkSortGroup;
+        if (group) for (const t of document.querySelectorAll(`table[data-rk-sort-group="${CSS.escape(group)}"]`)) if (t !== table) apply(t, th.cellIndex, kind, dir, false);
+        table.dispatchEvent(new CustomEvent("rk:sort", { bubbles: true, detail: { table, key: labelOf(th), dir } }));
+      });
+    }
+    if (table.classList.contains("rk-stack")) stack(table, hs);
+  }
+  const labelOf = th => ((th.querySelector(".rk-label") || th).textContent || "").trim();
+  // sorts a table and marks its heads; speak: say so in the table's live region
+  function apply(table, col, kind, dir, speak) {
+    sort(table, col, kind, dir);
+    for (const h of heads(table)) if (h.dataset.sort) h.setAttribute("aria-sort", h.cellIndex === col ? dir : "none");
+    if (!speak || !table.rkStatus) return;
+    const th = heads(table)[col];
+    const restored = kind === "default" && dir === "ascending";
+    table.rkStatus.textContent = restored ? (table.dataset.rkSortRestored || "Back in the page's own order.")
+      : kind === "default" ? "In the page's own order, reversed."
+      : `Sorted by ${labelOf(th)}, ${kind === "text" ? (dir === "ascending" ? "A to Z" : "Z to A") : dir === "descending" ? "highest first" : "lowest first"}.`;
+  }
+  // the stacked layout: each value carries its column's head (its mark and words; the mark alone in rk-stack-compact)
+  function stack(table, hs) {
+    for (const r of table.tBodies[0].rows) for (const c of r.cells) {
+      const h = hs[c.cellIndex];
+      if (!h || c.tagName === "TH" || c.classList.contains("rk-wide") || c.querySelector(".rk-cell-label")) continue;
+      const lab = document.createElement("span");
+      lab.className = "rk-cell-label";
+      lab.setAttribute("aria-hidden", "true");
+      const mark = h.querySelector(".rk-mark");
+      if (mark) lab.append(mark.cloneNode(true));
+      const words = document.createElement("span");
+      words.className = "rk-cell-words";
+      words.textContent = labelOf(h);
+      lab.append(words);
+      c.prepend(lab);
+    }
+    const wrap = table.parentElement;
+    const at = () => {
+      const v = (table.dataset.rkStackAt || "56rem").trim();
+      const n = parseFloat(v);
+      return /rem$/.test(v) ? n * parseFloat(getComputedStyle(document.documentElement).fontSize) : /em$/.test(v) ? n * parseFloat(getComputedStyle(table).fontSize) : n;
+    };
+    const fit = () => table.classList.toggle("is-stacked", wrap.clientWidth < at());
+    fit();
+    if (window.ResizeObserver) new ResizeObserver(fit).observe(wrap);
+  }
+  function sort(table, col, kind, dir) {
+    const body = table.tBodies[0];
+    const rows = [...body.rows];
+    const animate = table.hasAttribute("data-rk-flip") && motion() && table.offsetParent;
+    const before = animate ? new Map(rows.map(r => [r, r.getBoundingClientRect().top])) : null;
+    const order = r => Number(r.dataset.rkOrder);
+    rows.sort((a, b) => {
+      if (kind === "default") return dir === "ascending" ? order(a) - order(b) : order(b) - order(a);
+      const va = value(a, col, kind), vb = value(b, col, kind);
+      const d = kind === "text" ? String(va).localeCompare(String(vb)) : va - vb;
+      return (dir === "ascending" ? d : -d) || order(a) - order(b);
+    }).forEach(r => body.appendChild(r));
+    if (before) rows.forEach(r => {
+      const dy = before.get(r) - r.getBoundingClientRect().top;
+      if (dy) r.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], { duration: 240, easing: "cubic-bezier(.2,.8,.2,1)" });
+    });
+  }
+  function init(root) { for (const t of root.querySelectorAll("table[data-rk-sort]")) setup(t); }
+  RK.tableSort = { sort, apply: (table, col, kind, dir) => apply(table, col, kind, dir, false) };
+  (RK.inits = RK.inits || []).push(init);
+})();
+/* report-kit definition bubble. Any element with data-tip="text" shows the text in one bubble on hover, on
+   keyboard focus and on tap (a tap shows it for a moment); Escape closes it. Screen readers get the same text
+   through aria-describedby, added when the element has none, and a non-control element is made focusable.
+   Options on the bubble, <div class="rk-tip" id="rk-tip" data-pin hidden></div> (made when absent):
+   data-pin lets a click or Enter on a non-control element pin its definition, which can then be dragged by its
+   handle (or moved with the arrow keys) and closed; data-tip-more="#id" on the element adds a link to a fuller
+   entry, labelled by data-tip-more-label. A bubble on an element the keyboard rests on stays through a scroll and
+   follows it; the pointer's bubble closes on a scroll. With the kit scoped to part of a page, each root has its
+   own bubble, inside the root (so it wears the root's tokens). API: ReportKit.tip.show(el), .hide(), .unpin(). */
+(() => {
+  const RK = (window.ReportKit = window.ReportKit || {});
+  const GRIP = '<svg viewBox="0 0 8 12" width="8" height="12" aria-hidden="true" fill="currentColor"><circle cx="2" cy="2" r="1.1"/>' +
+    '<circle cx="6" cy="2" r="1.1"/><circle cx="2" cy="6" r="1.1"/><circle cx="6" cy="6" r="1.1"/><circle cx="2" cy="10" r="1.1"/><circle cx="6" cy="10" r="1.1"/></svg>';
+  const CROSS = '<svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true"><path d="M2 2 12 12M12 2 2 12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
+  let uid = 0;
+  const CONTROL = "a[href], button, input, select, textarea, summary, [role=tab], [role=button]";
+  function init(root) {
+    const whole = root === document;
+    const els = [...root.querySelectorAll("[data-tip]")];
+    let box = root.querySelector(".rk-tip");
+    if (!box) {
+      if (!els.length) return;
+      box = document.createElement("div");
+      if (whole) box.id = "rk-tip";
+      box.className = "rk-tip"; box.hidden = true;
+      (whole ? document.body : root).append(box);
+    }
+    box.setAttribute("aria-hidden", "true");
+    const canPin = box.hasAttribute("data-pin");
+    const texts = document.createElement("div");
+    texts.hidden = true;
+    (whole ? document.body : root).append(texts);
+    for (const el of els) {
+      if (!el.hasAttribute("aria-describedby")) {
+        const d = document.createElement("span");
+        d.id = `rk-tip-${++uid}`; d.textContent = el.dataset.tip;
+        texts.append(d);
+        el.setAttribute("aria-describedby", d.id);
+      }
+      if (!el.matches(CONTROL) && !el.hasAttribute("tabindex")) el.tabIndex = 0;
+    }
+    const pinnable = el => canPin && !el.matches(CONTROL);
+
+    let owner = null, pinned = false, timer = 0, touched = false, drag = null, quiet = false;
+    addEventListener("pointerdown", e => { touched = e.pointerType === "touch"; }, { capture: true, passive: true });
+    addEventListener("keydown", () => { touched = false; }, { capture: true });
+
+    function place(el) {
+      const r = el.getBoundingClientRect(), b = box.getBoundingClientRect();
+      const vw = document.documentElement.clientWidth, vh = innerHeight;
+      const left = Math.max(16, Math.min(r.left, vw - 16 - b.width));
+      const below = r.bottom + 8 + b.height <= vh - 8;
+      const top = below ? r.bottom + 8 : Math.max(8, r.top - 8 - b.height);
+      moveTo(left, top);
+    }
+    // left, top in viewport px; a pinned bubble lives in page coordinates, so it scrolls with what it explains
+    function moveTo(left, top) {
+      const vw = document.documentElement.clientWidth, vh = innerHeight, b = box.getBoundingClientRect();
+      left = Math.max(8, Math.min(left, vw - 8 - b.width));
+      top = Math.max(8, Math.min(top, Math.max(8, vh - 8 - b.height)));
+      box.style.left = Math.round(left + (pinned ? scrollX : 0)) + "px";
+      box.style.top = Math.round(top + (pinned ? scrollY : 0)) + "px";
+    }
+    function show(el) {
+      if (pinned) return;
+      clearTimeout(timer);
+      owner = el;
+      box.textContent = el.dataset.tip;
+      box.hidden = false;
+      place(el);
+    }
+    function hide(now) {
+      if (pinned) return;
+      clearTimeout(timer);
+      const go = () => { box.hidden = true; owner = null; };
+      if (now) go(); else timer = setTimeout(go, 120);
+    }
+    function pin(el) {
+      unpin(false);
+      clearTimeout(timer);
+      owner = el;
+      const title = (el.dataset.tipTitle || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 48);
+      box.innerHTML = `<div class="rk-tip-bar"><span class="rk-tip-handle" role="button" tabindex="0" aria-label="Move this definition: drag it, or use the arrow keys">${GRIP}<span></span></span>` +
+        `<button type="button" class="rk-tip-close" aria-label="Close">${CROSS}</button></div><p class="rk-tip-body"></p>`;
+      box.querySelector(".rk-tip-handle span").textContent = title;
+      box.querySelector(".rk-tip-body").textContent = el.dataset.tip;
+      const more = el.dataset.tipMore;
+      if (more) {
+        const p = document.createElement("p"), a = document.createElement("a");
+        p.className = "rk-tip-more"; a.href = more; a.textContent = el.dataset.tipMoreLabel || "More";
+        a.addEventListener("click", () => unpin(false));
+        p.append(a); box.append(p);
+      }
+      const at = box.hidden ? null : box.getBoundingClientRect();
+      pinned = true;
+      box.classList.add("is-pinned");
+      box.setAttribute("role", "dialog");
+      box.setAttribute("aria-label", title ? `Definition: ${title}` : "Definition");
+      box.removeAttribute("aria-hidden");
+      box.hidden = false;
+      if (at) moveTo(at.left, at.top); else place(el);
+    }
+    function unpin(refocus) {
+      if (!pinned) return;
+      pinned = false; drag = null;
+      box.classList.remove("is-pinned", "is-dragging");
+      box.removeAttribute("role"); box.removeAttribute("aria-label");
+      box.setAttribute("aria-hidden", "true");
+      box.hidden = true;
+      const el = owner; owner = null;
+      // back on its element, quietly: the definition was just closed, so focus does not reopen it
+      if (refocus && el && document.contains(el)) { quiet = true; el.focus({ preventScroll: true }); quiet = false; }
+    }
+
+    for (const el of els) {
+      el.addEventListener("pointerenter", e => { if (e.pointerType !== "touch") show(el); });
+      el.addEventListener("pointerleave", () => hide(false));
+      el.addEventListener("focus", () => { if (quiet) return; show(el); if (touched && !pinnable(el)) timer = setTimeout(() => hide(true), 2600); });
+      el.addEventListener("blur", () => hide(true));
+      if (pinnable(el)) {
+        el.addEventListener("click", () => pin(el));
+        el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pin(el); } });
+      }
+    }
+    box.addEventListener("pointerenter", () => clearTimeout(timer));
+    box.addEventListener("pointerleave", () => hide(false));
+    box.addEventListener("click", e => { if (e.target.closest(".rk-tip-close")) unpin(true); });
+    box.addEventListener("pointerdown", e => {
+      const h = pinned && e.target.closest(".rk-tip-handle");
+      if (!h || e.button) return;
+      e.preventDefault();
+      const b = box.getBoundingClientRect();
+      drag = { id: e.pointerId, dx: e.clientX - b.left, dy: e.clientY - b.top };
+      try { h.setPointerCapture(e.pointerId); } catch (err) { /* capture is a nicety */ }
+      box.classList.add("is-dragging");
+    });
+    box.addEventListener("pointermove", e => { if (drag && e.pointerId === drag.id) moveTo(e.clientX - drag.dx, e.clientY - drag.dy); });
+    const endDrag = e => { if (drag && e.pointerId === drag.id) { drag = null; box.classList.remove("is-dragging"); } };
+    for (const t of ["pointerup", "pointercancel", "lostpointercapture"]) box.addEventListener(t, endDrag);
+    box.addEventListener("keydown", e => {
+      if (!pinned) return;
+      if (e.target.closest(".rk-tip-handle")) {
+        const s = e.shiftKey ? 40 : 10;
+        const d = { ArrowLeft: [-s, 0], ArrowRight: [s, 0], ArrowUp: [0, -s], ArrowDown: [0, s] }[e.key];
+        if (d) { e.preventDefault(); const b = box.getBoundingClientRect(); moveTo(b.left + d[0], b.top + d[1]); return; }
+        if (e.key === "Tab" && e.shiftKey && owner) { e.preventDefault(); quiet = true; owner.focus({ preventScroll: true }); quiet = false; }
+      }
+    });
+    // Tab from a pinned element goes into its bubble, so the keyboard can move and close it
+    document.addEventListener("keydown", e => {
+      if (e.key === "Escape") { if (pinned) unpin(true); else hide(true); return; }
+      if (e.key === "Tab" && !e.shiftKey && pinned && document.activeElement === owner) {
+        e.preventDefault();
+        box.querySelector(".rk-tip-handle").focus({ preventScroll: true });
+      }
+    });
+    // a scroll closes the pointer's bubble; the keyboard's stays on its element (the browser scrolls a focused
+    // element into view, which would otherwise close the bubble it just opened) and follows it
+    addEventListener("scroll", () => {
+      if (pinned || !owner) return;
+      if (document.activeElement === owner && owner.matches(":focus-visible") && !box.hidden) place(owner); else hide(true);
+    }, { passive: true });
+    addEventListener("resize", () => { if (pinned) { const b = box.getBoundingClientRect(); moveTo(b.left, b.top); } });
+    document.addEventListener("rk:tab", () => unpin(false));
+    RK.tip = { show, hide: () => hide(true), unpin: () => unpin(false), pin };
+  }
+  (RK.inits = RK.inits || []).push(init);
+})();
+(() => {
+  const RK = (window.ReportKit = window.ReportKit || {});
+  const on = new WeakSet();
+  RK.init = root => { if (on.has(root)) return; on.add(root); (RK.inits || []).forEach(f => f(root)); };
+  const go = () => (RK.root ? [...document.querySelectorAll(RK.root)] : [document]).forEach(RK.init);
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", go); else go();
+})();
+/* /report-kit:js */
+</script>
+</body>
+</html>

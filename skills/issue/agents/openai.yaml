@@ -1,0 +1,3 @@
+interface:
+  display_name: "Issue"
+  short_description: "File an issue that is quick to pick up, with the session's artifacts kept"

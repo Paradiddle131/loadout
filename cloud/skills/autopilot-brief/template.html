@@ -1,0 +1,365 @@
+<title>Overnight Brief</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a shift-handover sheet. The map of work, the code base's new parts, equal cards per piece of work, what went wrong (open first), wakes that did no work, and what needs the owner. Everything is drawn from the JSON block at the bottom. */
+:root {
+  --bg: #eef1f4; --panel: #ffffff; --ink: #17202b; --muted: #56616d; --faint: #8a949e; --line: #d3d9df; --accent: #a95c07;
+  --landed: #1d7656; --running: #9a6400; --needs: #b11f55; --queued: #6f7b87; --chip-ink: #ffffff;
+  --new-bg: #fbeed9; --changed-bg: #eef1f4; --code: #e6eaee; --hover: #f5f7f9;
+  --display: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f141a; --panel: #161d25; --ink: #e5eaef; --muted: #98a3ae; --faint: #66717c; --line: #2a3440; --accent: #f0a43a;
+  --landed: #47b98c; --running: #e3ad48; --needs: #f06e9a; --queued: #7f8b97; --chip-ink: #0f141a;
+  --new-bg: #3a2a12; --changed-bg: #1f2833; --code: #1f2833; --hover: #1b232c; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f141a; --panel: #161d25; --ink: #e5eaef; --muted: #98a3ae; --faint: #66717c; --line: #2a3440; --accent: #f0a43a;
+  --landed: #47b98c; --running: #e3ad48; --needs: #f06e9a; --queued: #7f8b97; --chip-ink: #0f141a;
+  --new-bg: #3a2a12; --changed-bg: #1f2833; --code: #1f2833; --hover: #1b232c; color-scheme: dark }
+
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--display); margin: 0 }
+.page { max-width: 1180px; margin: 0 auto; padding-block: 32px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 40px }
+h1, h2, h3 { text-wrap: balance; margin: 0; line-height: 1.2 }
+h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.01em }
+h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted) }
+h3 { font-size: 17px; font-weight: 600 }
+p { margin: 0 }
+a { color: inherit; text-decoration-color: var(--line); text-underline-offset: 3px }
+a:hover { text-decoration-color: var(--accent) }
+a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px }
+code { font: 0.86em var(--mono); background: var(--code); padding: 1px 4px; border-radius: 3px; overflow-wrap: anywhere }
+section { display: grid; gap: 16px; min-width: 0 }
+.lede { color: var(--muted); max-width: 72ch }
+
+/* Header */
+header { display: grid; gap: 12px }
+.eyebrow { font: 500 12px var(--mono); color: var(--accent); letter-spacing: 0.04em }
+.headline { font-size: 18px; max-width: 68ch }
+.stats { display: flex; flex-wrap: wrap; gap: 8px 24px; color: var(--muted); font-size: 14px }
+.stats b { color: var(--ink); font: 600 15px var(--mono) }
+.needs-pill { justify-self: start; display: inline-flex; gap: 8px; align-items: center; padding: 4px 12px;
+  border: 1.5px solid var(--needs); color: var(--needs); border-radius: 999px; font-weight: 600; text-decoration: none; font-size: 14px }
+.needs-pill:hover { background: var(--hover) }
+
+/* Status: a pip whose shape and colour both carry the state */
+.pip { display: inline-block; width: 10px; height: 10px; border-radius: 2px; border: 1.5px solid transparent; flex: none }
+.pip.landed { background: var(--landed) }
+.pip.running { border-color: var(--running); background: linear-gradient(90deg, var(--running) 50%, transparent 50%) }
+.pip.needs { background: var(--needs); transform: rotate(45deg) scale(0.85) }
+.pip.queued { border: 1.5px dashed var(--queued) }
+.pips { display: inline-flex; gap: 4px; align-items: center }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; color: var(--muted); align-items: center }
+.legend > span { display: inline-flex; gap: 6px; align-items: center }
+
+/* Issue chips (cards only): the number, the state as its pip */
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 1px 8px 1px 6px; border-radius: 4px; font: 500 12px var(--mono);
+  text-decoration: none; border: 1px solid var(--line); color: var(--muted); white-space: nowrap }
+a.chip:hover { color: var(--ink); border-color: var(--accent) }
+.chips { display: flex; flex-wrap: wrap; gap: 4px }
+
+/* Map */
+.epic { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; display: grid; gap: 16px; min-width: 0 }
+.epic-head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: baseline }
+.epic-head a { color: var(--muted); font: 13px var(--mono) }
+.topics { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 24px 16px; align-items: start }
+.topic { display: grid; gap: 12px; padding-top: 12px; border-top: 3px solid var(--line); min-width: 0 }
+.topic.has-needs { border-top-color: var(--needs) }
+.topic-name { font-weight: 700; font-size: 16px }
+.topic-line { color: var(--muted); font-size: 13px; margin-top: -8px }
+.sub { display: grid; gap: 4px; min-width: 0 }
+.sub-head { display: flex; gap: 8px; align-items: baseline; justify-content: space-between }
+.sub-name { font-weight: 600; font-size: 15px; text-decoration: none; line-height: 1.3 }
+.sub-name:hover { color: var(--accent) }
+.sub details { border: 0; padding: 0 }
+.sub summary { font-size: 12px; color: var(--muted); cursor: pointer; width: fit-content }
+.sub summary:hover { color: var(--ink) }
+.items { list-style: none; margin: 6px 0 0; padding: 0 0 0 2px; display: grid; gap: 6px }
+.items li { display: grid; grid-template-columns: 12px 1fr; gap: 8px; align-items: baseline; font-size: 13px; line-height: 1.4 }
+.items .pip { transform: translateY(1px) } .items .pip.needs { transform: translateY(1px) rotate(45deg) scale(0.85) }
+.items a { color: var(--faint); font: 11px var(--mono); text-decoration: none; white-space: nowrap }
+.items a:hover { color: var(--accent) }
+
+/* Code base tree, in the manner of a pull request's file list */
+.tree { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 0; overflow-x: auto }
+.tree-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 0 16px 8px; border-bottom: 1px solid var(--line);
+  font: 12px var(--mono); color: var(--muted) }
+.tree ul { list-style: none; margin: 0; padding: 0 }
+.tree ul ul { margin-left: 19px; border-left: 1px solid var(--line) }
+.node { display: grid; grid-template-columns: minmax(max-content, 280px) 1fr; gap: 16px; align-items: baseline; padding: 3px 16px 3px 12px;
+  font: 13px/1.5 var(--mono); min-width: max-content }
+.tree > ul > li > .node { padding-left: 16px }
+.node .nm { display: inline-flex; gap: 8px; align-items: baseline }
+.node .nm::before { content: ""; width: 8px; flex: none }
+.node.dir .nm::before { content: "▸"; color: var(--faint); font-size: 11px }
+.node .note { font: 13px var(--display); color: var(--muted); white-space: normal; min-width: 240px }
+.node.same .nm { color: var(--faint) }
+.node.more .nm { color: var(--faint); font-style: italic }
+.node.changed { background: var(--changed-bg) }
+.node.new { background: var(--new-bg) }
+.node.new .nm { color: var(--ink); font-weight: 500 }
+.badge { font: 500 10px var(--mono); text-transform: uppercase; letter-spacing: 0.06em; padding: 0 5px; border-radius: 3px; white-space: nowrap }
+.badge.new { background: var(--accent); color: var(--chip-ink) }
+.badge.changed { border: 1px solid var(--muted); color: var(--muted) }
+.count { color: var(--muted); font-size: 12px }
+
+/* Work cards */
+.topic-block { display: grid; gap: 12px }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; align-items: start }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; display: grid; gap: 8px;
+  min-width: 0; scroll-margin-top: 16px }
+.card.wide { grid-column: span 2 }
+@media (max-width: 720px) { .card.wide { grid-column: auto } }
+.card:target { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) }
+.card-head { display: flex; gap: 8px; justify-content: space-between; align-items: start }
+.state { font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center }
+.state.landed { color: var(--landed) } .state.running { color: var(--running) }
+.state.needs { color: var(--needs) } .state.queued { color: var(--muted) }
+.field { display: grid; grid-template-columns: 64px 1fr; gap: 8px; font-size: 14px }
+.field > span:first-child { font: 500 11px/2 var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted) }
+.field > span:last-child { min-width: 0 }
+details { border-top: 1px solid var(--line); padding-top: 8px; min-width: 0 }
+summary { cursor: pointer; font-size: 13px; color: var(--muted); font-weight: 500 }
+summary:hover { color: var(--ink) }
+details[open] > summary { margin-bottom: 8px }
+.notes { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 14px }
+.links { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; margin-top: 8px }
+.scroll { overflow-x: auto; min-width: 0 }
+table { border-collapse: collapse; font-size: 13px; width: 100% }
+th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top }
+th { font-weight: 600; color: var(--muted) }
+td.n, th.n { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap }
+tr.hi td { font-weight: 600 }
+
+/* Went wrong, wakes and needs you: one row each, details folded */
+.rows { display: grid; gap: 8px }
+.group-label { font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-top: 8px }
+.row { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; display: grid; gap: 8px; min-width: 0 }
+.row.open { border-left: 3px solid var(--needs) }
+.row-head { display: grid; grid-template-columns: 132px 1fr auto; gap: 12px; align-items: baseline }
+@media (max-width: 640px) { .row-head { grid-template-columns: 1fr } }
+.kind { font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent) }
+.row.need .kind { color: var(--needs) }
+.tag { font: 12px var(--mono); color: var(--muted); white-space: nowrap }
+.tag.open { color: var(--needs) }
+.empty { color: var(--muted); font-size: 14px }
+@media (prefers-reduced-motion: no-preference) { .card:target { transition: box-shadow .2s } }
+</style>
+
+<main class="page" id="app">
+  <p class="empty">Loading the brief…</p>
+</main>
+
+<!--
+  The brief's content. Edit only this block: add or remove an entry and the page redraws.
+  status: landed | running | needs | queued.
+  A sub's issues: [number, status, "the work item's one-line headline"].
+  A card's detail: an optional table, notes and links (no diffs: the code is on the forge; the tree shows where it went).
+  tree nodes: { name, state: new | changed | same | more, note, count, children }.
+  wrong[].status: open | still unknown | known | filed | fixed (the page lists them in that order).
+-->
+<script type="application/json" id="brief">
+{
+  "repo": "example-owner/example-repo",
+  "repoUrl": "https://github.com/example-owner/example-repo",
+  "title": "Overnight brief",
+  "window": "routine on at 22:00Z, brief at 08:00Z",
+  "headline": "Example data: the exporter now writes Parquet, and one migration waits on your answer.",
+  "stats": [["wakes", "9"], ["issues worked", "6"], ["commits", "21"]],
+  "epics": [
+    {
+      "n": 10, "title": "Map: move the exporter to Parquet",
+      "topics": [
+        {
+          "name": "Writer", "line": "Parquet out, CSV kept behind a flag.",
+          "subs": [
+            {
+              "id": "writer", "name": "Parquet writer", "status": "landed",
+              "issues": [[11, "landed", "The exporter writes Parquet by default."], [12, "landed", "A `--csv` flag keeps the old output."]],
+              "changed": "The exporter writes Parquet by default; `--csv` keeps the old output.",
+              "know": "Files are 4x smaller; downstream readers need pyarrow.",
+              "table": { "head": ["", "Before", "After"], "rows": [["Size of a day", "1.2 GB", "290 MB"], ["Write time", "41 s", "18 s"]] },
+              "links": [["the finding", "https://github.com/example-owner/example-repo"]]
+            }
+          ]
+        },
+        {
+          "name": "Migration", "line": "Waiting on you.",
+          "subs": [
+            {
+              "id": "migration", "name": "Backfill old days", "status": "needs",
+              "issues": [[14, "needs", "How far back to backfill, a decision packet."]],
+              "changed": "Nothing yet: a decision packet is on the issue.",
+              "know": "Recommended B: backfill the last 30 days only."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "tree": {
+    "line": "One new writer beside the old one; the rest of the exporter is untouched.",
+    "stats": "6 files, +410 −35",
+    "nodes": [
+      { "name": "exporter/", "state": "changed", "children": [
+        { "name": "csv_writer.py", "state": "same" },
+        { "name": "parquet_writer.py", "state": "new", "note": "the new default writer" },
+        { "name": "cli.py", "state": "changed", "note": "the `--csv` flag" },
+        { "name": "4 more", "state": "more" }
+      ] },
+      { "name": "tests/", "state": "changed", "count": "+2 files", "note": "the writer's round trip" }
+    ]
+  },
+  "wrong": [
+    { "kind": "environment", "line": "The registry rate-limited pulls for an hour.", "cost": "1 wake", "status": "fixed",
+      "notes": ["Pulled through the mirror after the second 429."] },
+    { "kind": "setup", "line": "The queue gave two issues one shared daily pass.", "cost": "1 issue not started", "status": "open",
+      "notes": ["Profile change: give each issue its own share."] }
+  ],
+  "wakes": {
+    "line": "Every wake picked up work but one.",
+    "rows": [{ "kind": "no work", "line": "The 03:00Z wake found nothing pickable and ended after Orient.", "status": "expected" }]
+  },
+  "needs": [
+    { "line": "Pick how far back the backfill goes.", "issue": 14, "unblocks": "the migration",
+      "notes": ["A: everything (6 h of compute).", "B: 30 days (recommended).", "C: none."] }
+  ]
+}
+</script>
+
+<script>
+(() => {
+  const data = JSON.parse(document.getElementById("brief").textContent);
+  const app = document.getElementById("app");
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  // Backticks become code; nothing else is parsed, so copy stays plain.
+  const txt = s => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>");
+  const issueUrl = n => `${data.repoUrl}/issues/${n}`;
+  const STATE = { landed: "Landed", running: "In progress", needs: "Needs you", queued: "Not started" };
+  const pip = st => `<span class="pip ${esc(st)}" role="img" aria-label="${esc(STATE[st] || st)}"></span>`;
+  const chip = ([n, st, label]) =>
+    `<a class="chip" href="${esc(issueUrl(n))}" title="${esc(label || "")}">${pip(st)}#${esc(n)}</a>`;
+  const needCount = (data.needs || []).length;
+  const notes = n => n && n.length ? `<ul class="notes">${n.map(x => `<li>${txt(x)}</li>`).join("")}</ul>` : "";
+  const links = l => l && l.length ? `<p class="links">${l.map(([k, h]) => `<a href="${esc(h)}">${txt(k)}</a>`).join("")}</p>` : "";
+  const table = t => `<div class="scroll"><table><thead><tr>${t.head.map((h, i) => `<th${i ? ' class="n"' : ""}>${txt(h)}</th>`).join("")}</tr></thead>
+    <tbody>${t.rows.map(r => `<tr${t.hi && t.hi.includes(r[0]) ? ' class="hi"' : ""}>${r.map((c, i) => `<td${i ? ' class="n"' : ""}>${txt(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+  const folded = (s, label = "Details") => {
+    const body = (s.table ? table(s.table) : "") + notes(s.notes) + links(s.links);
+    return body ? `<details><summary>${label}</summary>${body}</details>` : "";
+  };
+
+  const header = `
+    <header>
+      <p class="eyebrow">${esc(data.repo)} · ${esc(data.window)}</p>
+      <h1>${esc(data.title)}</h1>
+      <p class="headline">${txt(data.headline)}</p>
+      <p class="stats">${(data.stats || []).map(([k, v]) => `<span><b>${esc(v)}</b> ${esc(k)}</span>`).join("")}</p>
+      ${needCount ? `<a class="needs-pill" href="#needs">${needCount} ${needCount === 1 ? "thing needs" : "things need"} you</a>` : ""}
+    </header>`;
+
+  const legend = `<p class="legend">${Object.entries(STATE).map(([k, v]) => `<span>${pip(k)}${v}</span>`).join("")}</p>`;
+  const subOnMap = s => `
+    <div class="sub">
+      <div class="sub-head"><a class="sub-name" href="#s-${esc(s.id)}">${txt(s.name)}</a>
+        <span class="pips">${s.issues.map(([, st]) => pip(st)).join("")}</span></div>
+      <details><summary>${s.issues.length} work item${s.issues.length === 1 ? "" : "s"}</summary>
+        <ul class="items">${s.issues.map(([n, st, label]) =>
+          `<li>${pip(st)}<span>${txt(label)} <a href="${esc(issueUrl(n))}">#${esc(n)}</a></span></li>`).join("")}</ul>
+      </details>
+    </div>`;
+  const map = `
+    <section aria-labelledby="h-map">
+      <h2 id="h-map">The map of the work</h2>
+      ${legend}
+      ${data.epics.map(e => `
+        <div class="epic">
+          <div class="epic-head"><h3>${txt(e.title)}</h3>${e.n ? `<a href="${esc(issueUrl(e.n))}">#${esc(e.n)}</a>` : ""}</div>
+          <div class="topics">${e.topics.map(t => `
+            <div class="topic${t.subs.some(s => s.issues.some(([, st]) => st === "needs")) ? " has-needs" : ""}">
+              <div class="topic-name">${txt(t.name)}</div>
+              <div class="topic-line">${txt(t.line)}</div>
+              ${t.subs.map(subOnMap).join("")}
+            </div>`).join("")}
+          </div>
+        </div>`).join("")}
+    </section>`;
+
+  const node = n => `<li>
+      <div class="node ${esc(n.state)}${n.children ? " dir" : ""}">
+        <span class="nm">${esc(n.name)}${n.state === "new" || n.state === "changed" ? ` <span class="badge ${n.state}">${n.state}</span>` : ""}${n.count ? ` <span class="count">${esc(n.count)}</span>` : ""}</span>
+        <span class="note">${txt(n.note || "")}</span>
+      </div>
+      ${n.children ? `<ul>${n.children.map(node).join("")}</ul>` : ""}
+    </li>`;
+  const tree = data.tree ? `
+    <section aria-labelledby="h-tree">
+      <h2 id="h-tree">What is new in the code base</h2>
+      <p class="lede">${txt(data.tree.line)}</p>
+      <div class="tree">
+        <div class="tree-head"><span>${esc(data.tree.stats || "")}</span>
+          <span><span class="badge new">new</span> &nbsp;<span class="badge changed">changed</span> &nbsp;grey: already there</span></div>
+        <ul>${data.tree.nodes.map(node).join("")}</ul>
+      </div>
+    </section>` : "";
+
+  const work = `
+    <section aria-labelledby="h-work">
+      <h2 id="h-work">What changed</h2>
+      ${data.epics.flatMap(e => e.topics).map(t => `
+        <div class="topic-block">
+          <h3>${txt(t.name)}</h3>
+          <div class="cards">${t.subs.map(s => `
+            <article class="card${s.wide ? " wide" : ""}" id="s-${esc(s.id)}">
+              <div class="card-head"><h3>${txt(s.name)}</h3><span class="state ${esc(s.status)}">${pip(s.status)}${esc(STATE[s.status] || s.status)}</span></div>
+              <div class="chips">${s.issues.map(chip).join("")}</div>
+              <p class="field"><span>Changed</span><span>${txt(s.changed)}</span></p>
+              <p class="field"><span>Know</span><span>${txt(s.know)}</span></p>
+              ${folded(s)}
+            </article>`).join("")}
+          </div>
+        </div>`).join("")}
+    </section>`;
+
+  const row = (r, cls, kind, tag) => `
+    <div class="row ${cls}">
+      <div class="row-head"><span class="kind">${kind}</span><span>${txt(r.line)}</span>${tag}</div>
+      ${folded(r)}
+    </div>`;
+  // Open problems first, then what stays unknown, then what is known or filed, then what is fixed.
+  const RANK = [/open/, /unknown/, /known/, /filed/, /fixed/];
+  const rank = s => { const i = RANK.findIndex(re => re.test(s || "")); return i < 0 ? 1 : i; };
+  const wrongRows = (data.wrong || []).map((r, i) => ({ ...r, i })).sort((a, b) => rank(a.status) - rank(b.status) || a.i - b.i);
+  const openCount = wrongRows.filter(r => rank(r.status) === 0).length;
+  const wrong = `
+    <section aria-labelledby="h-wrong">
+      <h2 id="h-wrong">What went wrong</h2>
+      ${wrongRows.length ? `<p class="lede">${openCount ? `${openCount} still open, listed first; then what stays unknown, what is known or filed, and what is fixed.` : "Nothing is still open."}</p>
+        <div class="rows">${wrongRows.map(r => row(r, rank(r.status) === 0 ? "open" : "", txt(r.kind),
+          `<span class="tag${rank(r.status) === 0 ? " open" : ""}">${esc(r.cost ? r.cost + " · " : "")}${esc(r.status)}</span>`)).join("")}</div>`
+        : `<p class="empty">Nothing went wrong in this window.</p>`}
+    </section>`;
+  const wakes = data.wakes ? `
+    <section aria-labelledby="h-wakes">
+      <h2 id="h-wakes">Wakes that did no work</h2>
+      <p class="lede">${txt(data.wakes.line)}</p>
+      ${(data.wakes.rows || []).length ? `<div class="rows">${data.wakes.rows.map(r => row(r, "", txt(r.kind),
+        `<span class="tag">${esc(r.status || "")}</span>`)).join("")}</div>` : ""}
+    </section>` : "";
+  const needs = `
+    <section aria-labelledby="needs">
+      <h2 id="needs">Needs you</h2>
+      ${needCount ? `<div class="rows">${data.needs.map(r => row(r, "need",
+        r.issue ? `<a href="${esc(issueUrl(r.issue))}">#${esc(r.issue)}</a>` : "owner",
+        `<span class="tag">unblocks ${esc(r.unblocks || "")}</span>`)).join("")}</div>`
+        : `<p class="empty">Nothing waits on you.</p>`}
+    </section>`;
+
+  app.innerHTML = header + map + tree + work + wrong + wakes + needs;
+})();
+</script>

@@ -1,0 +1,3 @@
+interface:
+  display_name: "Draw architecture"
+  short_description: "Draw architecture diagrams in the house style, checked"

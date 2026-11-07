@@ -1,0 +1,9 @@
+__pycache__/
+.pytest_cache/
+node_modules/
+# never commit these, even by mistake
+.env
+.env.*
+*.pem
+*.key
+**/*.credentials.json

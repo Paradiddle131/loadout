@@ -1,0 +1,3 @@
+interface:
+  display_name: "Report kit"
+  short_description: "Build single-file HTML report pages from a checked kit"

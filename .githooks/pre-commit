@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# This repo's pre-commit (git config core.hooksPath .githooks; the cloud session-start hook sets it).
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+# Every plugin's skill paths must hold a skill, or Claude Code drops the whole plugin.
+bin/check-plugins.sh
+# Every link, backticked repo path and plugin skill name must resolve.
+bin/check-refs
+# No secrets in what is staged.
+if command -v gitleaks >/dev/null || [ -x ~/.local/bin/gitleaks ]; then
+  "$(command -v gitleaks || echo ~/.local/bin/gitleaks)" protect --staged --no-banner --redact -v
+else
+  echo "pre-commit: gitleaks is not installed, so staged files were NOT scanned for secrets (https://github.com/gitleaks/gitleaks)" >&2
+fi
+# Content stays generic (AGENTS.md).
+mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACM | grep -vE '(^|/)tests/' | grep -vx 'bin/check-generic.sh' || true)
+[ ${#staged[@]} -eq 0 ] && exit 0
+bin/check-generic.sh "${staged[@]}"

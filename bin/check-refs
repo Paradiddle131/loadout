@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""Every reference in this repo's shared files must resolve.
+
+Checked in every tracked Markdown, HTML, shell and Python file:
+
+- relative Markdown links `[text](path)`, anchors stripped, must name a file or directory;
+- repo paths written in backticks (`skills/<name>/SKILL.md`, `bin/check-generic.sh`) must exist, from the
+  repo root, the file's folder or its skill's root;
+- plugin skill names (`<plugin>:<name>`, for each plugin in `.claude-plugin/marketplace.json`) must name a
+  skill that plugin ships.
+
+Links into a tracker (`../../issues/N`), URLs, placeholders (`<name>`, `*`, `{a,b}`) and paths
+outside the repo are skipped. Run with no arguments; exits 1 and lists each broken reference.
+The pre-commit hook runs it, so deleting or renaming a file that something still names fails.
+"""
+
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                           check=True).stdout.strip())
+TOP = ("bin/", "skills/", "cloud/", "ways/", ".githooks/", ".claude-plugin/")
+SUFFIXES = {".md", ".html", ".sh", ".py", ".cjs", ".js", ".json", ""}
+LINK = re.compile(r"\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+TICK = re.compile(r"`([^`\s]+)`")
+PLACEHOLDER = re.compile(r"[<>*{}$]|\.\.\.")
+
+
+def tracked():
+    out = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True).stdout
+    for name in out.splitlines():
+        p = ROOT / name
+        if p.suffix not in SUFFIXES or not p.is_file():
+            continue
+        if p.suffix == "" and not name.startswith(("bin/", ".githooks/", "cloud/githooks/")):
+            continue
+        yield p
+
+
+def plugin_skills():
+    market = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text())
+    skills = {}
+    for plugin in market["plugins"]:
+        names = set()
+        for entry in plugin.get("skills", []):
+            base = ROOT / plugin.get("source", "./") / entry
+            if (base / "SKILL.md").exists():
+                names.add(base.name)
+            else:
+                names |= {d.name for d in base.iterdir() if (d / "SKILL.md").exists()}
+        skills[plugin["name"]] = names
+    return skills
+
+
+def exists(target, src):
+    target = target.split("#", 1)[0].split("?", 1)[0]
+    if not target:
+        return True
+    p = (src.parent / target) if not target.startswith("/") else Path(target)
+    try:
+        p.resolve().relative_to(ROOT)
+    except ValueError:
+        return True  # outside the repo: not this check's business
+    return p.exists()
+
+
+def resolves(token, src):
+    """A backticked path resolves from the repo root, the file's folder, or the root of its skill."""
+    token = token.split("#")[0]
+    bases = [ROOT, src.parent]
+    skill = next((d for d in src.parents if (d / "SKILL.md").exists()), None)
+    if skill:
+        bases.append(skill)
+    return any((base / token).exists() for base in bases)
+
+
+def main():
+    skills, problems = plugin_skills(), []
+    skill = re.compile(r"\b(" + "|".join(map(re.escape, skills)) + r"):([a-z0-9][a-z0-9-]*)\b")
+    for src in tracked():
+        rel = src.relative_to(ROOT)
+        for n, line in enumerate(src.read_text(errors="replace").splitlines(), 1):
+            if src.suffix == ".md":
+                for target in LINK.findall(line):
+                    if re.match(r"[a-z]+:|#|\.\./\.\./(issues|pull)", target) or PLACEHOLDER.search(target):
+                        continue
+                    if not exists(target, src):
+                        problems.append(f"{rel}:{n}: link to {target} names nothing")
+            for token in TICK.findall(line):
+                token = token.rstrip(".,:;)")
+                if token.startswith(TOP) and not PLACEHOLDER.search(token) and not resolves(token, src):
+                    problems.append(f"{rel}:{n}: `{token}` names nothing in this repo")
+            for plugin, name in skill.findall(line):
+                if name not in skills.get(plugin, set()):
+                    problems.append(f"{rel}:{n}: {plugin}:{name} is no skill of the {plugin} plugin")
+    for p in problems:
+        print(p)
+    print(f"check-refs: {'%d broken' % len(problems) if problems else 'every reference resolves'}", file=sys.stderr)
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

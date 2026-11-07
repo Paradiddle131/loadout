@@ -1,0 +1,4 @@
+# Third-party plugins cloud/setup.sh installs, each cloned at a pinned tag (never a moving branch):
+# <name> <git-url> <tag> [command run in the clone after install]
+# The marketplace and the plugin share <name>. Bump a tag by PR after reading the upstream changes.
+impeccable https://github.com/pbakaus/impeccable skill-v4.8.0 sh plugin/skills/impeccable/scripts/impeccable engine-probe

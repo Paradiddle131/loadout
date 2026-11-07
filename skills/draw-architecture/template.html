@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Example service</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700&family=Atkinson+Hyperlegible+Mono:wght@400;500&display=swap">
+<style>
+/* A draw-architecture diagram. Between the sheet: markers is the kit, refreshed by its bin/build.cjs;
+   draw below, in the module script, from y 64 down (the headline holds the top), then run bin/check.cjs. */
+/* sheet:css */
+/* /sheet:css */
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="bar" id="bar"></div>
+  <figure>
+    <svg class="sheet" id="d" viewBox="0 0 1200 452" role="img" aria-label="Example: a caller asks an API in a Kubernetes cluster; the API checks each request against a catalog, asks a model which tool to use, and reads its database through a read-only role."></svg>
+  </figure>
+</div>
+<script>
+/* sheet:logos */
+/* /sheet:logos */
+/* sheet:js */
+/* /sheet:js */
+Sheet.ready().then(() => {
+  const S = Sheet(document.getElementById('d'), {
+    logos: LOGOS,
+    modes: [{ id: 'local', label: 'Local' }, { id: 'cloud', label: 'Cloud' }],
+    solidIn: 'cloud',
+    bar: document.getElementById('bar'),
+    storageKey: 'example-sheet-mode',
+    headline: 'How each request is checked, routed and kept read-only',
+  });
+
+  S.card({ x: 24, y: 108, w: 104, h: 52, title: 'caller', lines: [{ mono: 'curl' }] });
+  S.edge('M128,126 H200', { label: { text: 'asks', at: [154, 120] } });
+  S.edge('M200,144 H128', { label: { text: 'answer', at: [154, 160] } });
+
+  S.frame({ x: 184, y: 72, w: 660, h: 300, title: { local: 'kind cluster', cloud: 'GKE' }, note: 'namespace api', logo: 'kubernetes' });
+  S.card({ x: 200, y: 104, w: 180, h: 64, title: 'server', lines: [{ mono: 'uvicorn' }], pkg: 'a package' });
+  S.card({ x: 412, y: 104, w: 200, h: 64, title: 'handler.py', lines: ['checks every request'] });
+  S.edge('M380,136 H412');
+  S.phantom({ x: 400, y: 192, w: 432, h: 104, label: { local: 'replaced in the cloud', cloud: 'managed tool' } });
+  S.card({ x: 412, y: 216, w: 200, h: 64, title: 'tools.py', lines: [{ mono: 'query' }, { mono: 'describe' }] });
+  S.card({ x: 644, y: 216, w: 176, h: 64, title: 'catalog', lines: ['the names a request may use'] });
+  S.edge('M512,168 V216');
+  S.edge('M612,248 H644', { reads: true });
+
+  S.frame({ x: 876, y: 72, w: 300, h: 300, title: 'outside the cluster' });
+  S.card({ x: 892, y: 104, w: 268, h: 64, title: 'the model', lines: ['chooses the tool and its arguments'], hatch: true });
+  S.edge('M612,128 H644 V120 H892', { label: { text: 'asks', at: [760, 114] } });
+  S.region({ x: 892, y: 208, w: 268, h: 132, tone: 'cobalt', title: 'database', role: 'read-only' });
+  S.card({ x: 904, y: 228, w: 244, h: 44, title: { local: 'Postgres', cloud: 'Cloud SQL' }, logo: { local: 'postgresql' } });
+  S.edge('M832,250 H904', { reads: true, tone: 'cobalt', label: { text: 'SQL', at: [860, 244] } });
+
+  S.legend(24, 424, [['card', "this repo's code"], ['pkg', 'a package'], ['hatch', 'the model'], ['phantom', 'replaced in the cloud'], ['calls', 'calls, writes'], ['reads', 'reads'], ['cobalt', 'read-only role']]);
+  S.done();
+});
+</script>
+</body>
+</html>
