@@ -196,7 +196,7 @@ One item of a list at a time (STANDARDS.md says when): the row of controls sits 
 ```
 
 - The page's script swaps the item and writes the position; the item takes its own height (reserve no field's tallest content).
-- At an end, set `disabled` on that button: it keeps its slot, empty, so the other stays put; if it held the focus, focus the other.
+- At an end, set `disabled` on that button: it stays in its slot, dimmed to 4.5:1 or more, so the other stays put; if it held the focus, focus the other.
 - `.rk-step-end` pushes a further control to the row's end; buttons and `a.rk-step-btn` links in the row share one look.
 
 ### Dialog
@@ -214,6 +214,7 @@ One item of a list at a time (STANDARDS.md says when): the row of controls sits 
 - Its headings go on from its h2 (h3, then h4); it sits on `--paper` with a 1px ink edge over `--scrim`.
 - A `data-tip` inside it shows its bubble inside the dialog (above it); the first Escape closes the bubble, the next the dialog; a closing dialog sends the bubble home.
 - `ReportKit.dialog.open(id)`, `.close(id)`; a dialog built later is wired by `ReportKit.init(el)`.
+- On a scoped page (`scope=<selector>`) the dialog sits inside the scoped element, never appended to `<body>`: the kit's CSS reaches only what is inside the scope, and a top-layer dialog still covers the whole page from there.
 
 ### Tabs
 
