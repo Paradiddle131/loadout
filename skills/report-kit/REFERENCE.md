@@ -303,7 +303,7 @@ Components read the semantic tokens; primitives (`--porcelain`, `--navy`, `--cob
 | `--tip`, `--tip-ink` | ink, paper | ink, paper | the bubble, a reversed plate |
 | `--shadow` | a soft navy shadow | none | the bubble's lift (a shadow on a dark ground reads as a glow) |
 | `--sans` | Atkinson Hyperlegible Next | | the one family |
-| `--t-word`, `--t-num`, `--t-find`, `--t-head`, `--t-title`, `--t-tip`, `--t-chart` | 1, 1.375, 1.1875, 1.375, 2, .9375, .875rem | | the type scale |
+| `--t-word`, `--t-num`, `--t-find`, `--t-head`, `--t-title`, `--t-tip`, `--t-chart` | 1, 1.375, 1.1875, 1.5, 2, .9375, .875rem | | the type scale |
 | `--w-head` | 700 | 800 | heading weight: one step further on a dark ground, where light strokes spread |
 | `--lh-word`, `--track-word` | 1.45, 0 | 1.5, .01em | the words' leading and tracking, opened a touch on a dark ground |
 | `--grade-hi`, `--grade-mid`, `--grade-lo` | `#2447c9`, `#6f778a`, `#b83d16` | `#5b7de8`, `#666e82`, `#e0663c` | value grades (opt-in) |
