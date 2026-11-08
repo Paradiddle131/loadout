@@ -7,8 +7,11 @@ The licence covers the drawing; the names and marks stay their owners' trademark
 |---|---|---|---|---|
 | `adk` | Agent Development Kit | the `google-adk` wheel on PyPI, `google/adk/cli/browser/adk_favicon.svg` | Apache-2.0 | |
 | `apacheairflow` | Apache Airflow | `@iconify-json/logos` on npm (`airflow-icon`, from gilbarbara/logos) | CC0-1.0 | |
+| `celery` | Celery | `simple-icons` (`celery`), in its brand colour | CC0-1.0 | |
 | `dbt` | dbt | `@iconify-json/logos` (`dbt-icon`) | CC0-1.0 | |
+| `docker` | Docker | `@iconify-json/logos` (`docker-icon`) | CC0-1.0 | |
 | `github` | GitHub | `@iconify-json/logos` (`github-icon`) | CC0-1.0 | dark |
+| `googleartifactregistry` | Artifact Registry | cloud.google.com/icons, legacy icons zip (`artifact_registry`) | Google Cloud icons, offered for architecture diagrams and docs | |
 | `googlebigquery` | BigQuery | cloud.google.com/icons, core products zip (`BigQuery-512-color`) | Google Cloud icons, offered for architecture diagrams and docs | |
 | `googlecloudcomposer` | Cloud Composer | cloud.google.com/icons, legacy icons zip (`cloud_composer`) | Google Cloud icons, offered for architecture diagrams and docs | |
 | `googlecloudfirestore` | Firestore | cloud.google.com/icons, legacy icons zip (`firestore`) | Google Cloud icons, offered for architecture diagrams and docs | |
@@ -35,6 +38,8 @@ The licence covers the drawing; the names and marks stay their owners' trademark
 - **MetricFlow:** no official mark exists in its repository or package; never borrow another product's (dbt's) for it.
 - **OAuth:** its mark is a white letter on a black disc, so its one-ink copy on a dark card is a blank disc.
 - **Model Armor:** Google publishes no product icon for it (only Cloud Armor's, a different product).
+- **KEDA, A2A, AG-UI, agentgateway:** no open icon set (Iconify, Simple Icons) carries them; their marks live in their own repositories, to import from there when a session may read them.
+- **uv, git-sync, fake-gcs-server, StatsD:** tooling a diagram could swap without changing its picture, or no published mark.
 - **Model providers (OpenRouter, a model family):** a diagram's model is a setting, swapped without changing the picture; it carries no logo by policy (SKILL.md), so none is kept.
 
 ## Adding one

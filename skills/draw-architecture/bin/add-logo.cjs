@@ -83,6 +83,8 @@ if (!id || !file || !flag('title') || !flag('source') || !flag('license')) {
     const colour = strip(parse());
     if (colour.nodeName !== 'svg') throw new Error('not an SVG file');
     prefix(colour, `${id}-`);
+    // a single-colour mark that paints with currentColor (Iconify's copies do) takes the brand colour too
+    if (hex) for (const n of colour.querySelectorAll('[fill="currentColor"], [stroke="currentColor"]')) for (const a of ['fill', 'stroke']) if (n.getAttribute(a) === 'currentColor') n.setAttribute(a, `#${hex}`);
     const rootFill = colour.getAttribute('fill') === 'none' ? 'none' : hex ? `#${hex}` : 'currentColor';
     //    the one-ink copy
     const mono = strip(parse());
