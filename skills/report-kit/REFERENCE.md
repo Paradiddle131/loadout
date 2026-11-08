@@ -35,7 +35,7 @@ Running it again replaces what it wrote, so a page is rebuilt in place after a k
 |---|---|---|
 | `tokens` | css | primitives and semantic tokens, light and dark |
 | `base` | css | page ground, type, themed selection, focus ring, scrollbar and links; `.rk-wrap`, `.rk-title`, `.rk-lede`, `.rk-sr` |
-| `section` | css | section head (heading over a 2px ink rule, a control beside it), finding rows, glossary |
+| `section` | css | section head (heading over a 2px ink rule, a control beside it), finding rows, glossary; parts, a side column beside a stage, a figure with its key and caption |
 | `marks` | css | the five status shapes on `data-k`, and the `.rk-key` legend |
 | `dots` | css | a share of 100 as 100 marks |
 | `bar`, `range`, `slope` | css | small pictures on the 0-100 scale; `bar` also holds the meter (a number over a thin bar) |
@@ -63,6 +63,43 @@ Running it again replaces what it wrote, so a page is rebuilt in place after a k
 Finding rows (text left, one picture right, the picture dropping under the text in a narrow container): `<ul class="rk-rows"><li><div><h3>Headline</h3><p>One sentence.</p></div><div class="rk-pic">...</div></li></ul>`.
 The headline is `--t-find` at `--w-head`, a size step and two weight steps over its sentence; right under a `.rk-head`, the first row adds no space of its own.
 A glossary: `<dl class="rk-glossary"><div id="term-late"><dt>Late</dt><dd>...</dd></div></dl>`; the ids are what a bubble's "more" link points at.
+
+### Levels inside a section
+
+A section holds parts, and a part holds items (STANDARDS.md, Inside a section); each level is set off by its own space token and head:
+
+| Level | Head | Set off by |
+|---|---|---|
+| section | `h2` in `.rk-head`, `--t-head` | the 2px ink rule under its head; `--gap-section` above |
+| part | `h3` at `--t-find`; `h4` at 1rem bold inside a stage | a 1px ink rule above it (`.rk-part`); `--gap-part` above |
+| item | `h4` (or a bold lead word), 1rem bold | `--gap-item` above; no rule |
+
+A head sits 6px over its own text, and a paragraph or list right under it adds no space of its own.
+A part right under a section head drops its rule (the head's rule is its own).
+
+```html
+<div class="rk-split">
+  <nav class="rk-aside" aria-labelledby="pick-h"><h3 id="pick-h">Cheapest first</h3>
+    <ul><li><a href="#own-van">Own van</a></li><li><a href="#bike" aria-current="true">Bike courier</a></li> ...</ul></nav>
+  <div class="rk-stage">
+    <h3>Bike courier</h3>
+    <p>One sentence on what it is.</p>
+    <figure class="rk-fig">(the drawing) <ul class="rk-key">...</ul><figcaption>What the drawing cannot say.</figcaption></figure>
+    <div class="rk-parts">
+      <div class="rk-part"><h4>What changes from Own van</h4>...</div>
+      <div class="rk-part"><h4>On one order</h4>...</div>
+    </div>
+  </div>
+</div>
+```
+
+- `.rk-split` lays a side column (`.rk-aside`, on `--panel`) beside a stage (`.rk-stage`, on the ground); the column wraps above the stage once the stage would fall under 60% of the row.
+- In the column, a list's links are full-width rows; `aria-current="true"` (or `"page"`) makes the chosen one a reversed plate in bold.
+  A picker that changes the stage in place uses buttons with `aria-pressed` or radios with `aria-checked`, styled the same way by the page.
+- `.rk-parts` sets sibling parts side by side (each at least 18rem) and stacks them when narrow; each `.rk-part` keeps its own rule, broken by the column gap.
+  A lone `.rk-part` anywhere in a section takes the same rule and `--gap-part`.
+- `.rk-fig` holds a drawing, its key and its caption: the key and the caption sit `--s2` from what precedes them, the caption last, within the reading measure.
+  A chart keeps `.rk-chart`, whose `figcaption` leads as its title with its units.
 
 ### Marks
 
@@ -271,6 +308,8 @@ Components read the semantic tokens; primitives (`--porcelain`, `--navy`, `--cob
 | `--lh-word`, `--track-word` | 1.45, 0 | 1.5, .01em | the words' leading and tracking, opened a touch on a dark ground |
 | `--grade-hi`, `--grade-mid`, `--grade-lo` | `#2447c9`, `#6f778a`, `#b83d16` | `#5b7de8`, `#666e82`, `#e0663c` | value grades (opt-in) |
 | `--s1` to `--s7` | 4, 8, 12, 16, 24, 32, 48px | | space |
+| `--gap-section`, `--gap-part`, `--gap-item` | 64, 32, 12px | | the space above a section, a part, an item |
+| `--panel` | `#ffffff` | `#1c2640` | the one raised surface, for a side column: a step lighter than the ground in both themes |
 
 Every status and series colour reaches 4.5:1 on its ground, so it can also colour text.
 
@@ -301,6 +340,7 @@ Embed a diagram as the light and dark PNGs its checker exports, in a `<picture>`
 - a sort whose presses do not go first direction, reverse, and (two-state) reverse again, or that leaves a table in its sort group sorted another way;
 - a control it cannot reach or press in time (it scrolls each target into view and lets it settle before pointing at it);
 - console and page errors, a web font that did not load, a switch with more than four segments;
+- a heading (`h1` to `h4`) paler than the text around it, by its colour or its opacity;
 - in the source (the vendored libraries left out): a raw colour outside a `:root` token block (a drawing's own colours inside an `<svg>`, such as a brand mark, are exempt), gradient text, emoji, a banned first font (Inter, Roboto, Arial, Helvetica), dark tokens missing one of the three blocks.
 
 Visibility is judged with `checkVisibility({visibilityProperty: true})`, so a part hidden by `visibility` is not measured.
