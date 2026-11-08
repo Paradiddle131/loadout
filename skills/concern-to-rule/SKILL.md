@@ -1,6 +1,6 @@
 ---
-name: teach-then-trial
-description: "Use when a reviewer's concern about one piece of work should become a reusable rule in this collection, proven by a blind agent that applies it."
+name: concern-to-rule
+description: "Use when someone's concern about one piece of work should become a reusable rule in this collection, proven by a blind agent that applies it."
 ---
 
 A concern a reviewer raises once ("these parts don't read apart", "this says the same thing three times") usually names a gap in the collection's rules, not only a flaw in one page.
@@ -33,7 +33,7 @@ Run every subagent in the foreground, or wait for its report before acting: noth
    Done when the collection's own checks pass on the branch and its PR states each new rule in one line.
 
 4. **Trial.**
-   Give a fresh subagent the trial brief in [BRIEFS.md](BRIEFS.md): the reviewer's words, the collection at the teach branch, and the work in its own worktree; nothing of your diagnosis or the research note.
+   Give a fresh subagent the trial brief in [BRIEFS.md](BRIEFS.md), which carries exactly three things: the reviewer's words, the collection at the teach branch, and the work in its own worktree.
    It fixes the work, runs the work's checks, commits locally, and reports which rules it used and where the collection left it guessing.
    Done when its report names, for each part of the concern, what it changed and which rule led it there.
 
@@ -45,7 +45,7 @@ Run every subagent in the foreground, or wait for its report before acting: noth
    |---|---|---|
    | what a reader would see | lapse (the rule was there and clear) / missing rule / unclear rule / missing support (a component, a check) | the work, or the teach PR |
 
-   Done when every row has a kind and a home, and no rule the trial ignored was missed for want of reading.
+   Done when every row has a kind and a home, and every lapse names the rule the trial had and passed over.
 
 6. **Fold in and fix.**
    Bring the trial into the work's branch, fix every miss in the work, and fix every gap on the teach branch (a rule, its wording, a component, a check); the work may carry a stopgap until the collection's fix lands.
@@ -54,10 +54,11 @@ Run every subagent in the foreground, or wait for its report before acting: noth
 
 7. **Report.**
    Give the owner, in one message: the work's preview and the trial's (or one page comparing before, trial and final), the rules the collection gained, the scorecard (rules the trial used, its misses by kind), and what still needs them.
+   Done when the owner can open each preview and every miss is fixed in the work or carried by the teach PR.
 
 ## Ground rules
 
-- **Blind means blind:** the trial brief carries the reviewer's words and the collection, never your diagnosis, the research note or a hint at the fix; a trial that was told the answer proves nothing about the rules.
-- **Generic in the collection, specific in the work:** a rule that names the work, its project or its data stays in the work; the collection's own writing rules (its `AGENTS.md`) decide.
+- **Blind means blind:** the trial brief carries only the reviewer's words, the collection and the work, so whatever the trial gets right, the rules taught it.
+- **Generic in the collection, specific in the work,** as the collection's `AGENTS.md` defines generic.
 - **Long checks run once per stage,** in the background, against a frozen copy of the build, so a rebuild cannot change the page under them.
 - **Show every visible change** to the reviewer where they look (the preview), after each stage that changes what they would see.
