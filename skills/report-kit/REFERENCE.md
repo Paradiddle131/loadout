@@ -54,7 +54,7 @@ Running it again replaces what it wrote, so a page is rebuilt in place after a k
   <h1 class="rk-title">Delivery options, a twelve-week trial</h1>
   <p class="rk-lede">One sentence on what the page shows.</p>
   <section class="rk-section" aria-labelledby="options-h">
-    <div class="rk-head"><h2 id="options-h">Options</h2> <!-- the section's one control, if any --></div>
+    <div class="rk-head"><h2 id="options-h">Options</h2> <!-- the section's one control, if any; two (a switch and a filter) sit in <div class="rk-head-tools"> --></div>
     ...
   </section>
 </main>
@@ -125,6 +125,16 @@ Name the cut points in a key, with `.rk-swatch` marks:
 
 The colours are `--grade-hi`, `--grade-mid` and `--grade-lo`, a blue to vermilion pair through a neutral grey, checked with the dataviz skill's validator on both grounds (colour-blind separation between every pair; the grey is neutral by design); a graded container lightens its tracks so every grade keeps 3:1 against its track.
 
+### Tint
+
+Opt-in, for a dense grid of numbers on one 0-100 scale where no cut point means anything to the reader (otherwise grade).
+A block with class `rk-tint` and its value in `--v` takes one hue (`--tint`, the right-answer green unless the page sets another) from none at 0 to half strength at 100; `data-rk-tint="down"` on it or a container says lower is better.
+The number stays in the cell, so the tint needs no key; ink keeps 4.5:1 on the strongest step on both grounds.
+
+```html
+<td class="rk-num" data-v="66"><span class="rk-tint" style="--v:66">66</span></td>
+```
+
 ### Tabs
 
 ```html
@@ -151,6 +161,20 @@ The colours are `--grade-hi`, `--grade-mid` and `--grade-lo`, a blue to vermilio
 ```
 
 Every element with `data-rk-when="<name>=<value>"` shows only while that value is chosen; `ReportKit.switches.set(name, value)`; each change fires `rk:switch` with `{name, value}`.
+
+### Filter
+
+Options a reader may never need, folded behind one button beside the section's head (in `.rk-head-tools` when a switch sits there too); its panel opens over the page, never pushing the content down.
+
+```html
+<details class="rk-filter" data-rk-filter><summary>Filter <span class="rk-filter-count"></span></summary>
+  <div class="rk-filter-panel"><fieldset><legend>Family</legend>
+    <label class="rk-check"><input type="checkbox" checked> Google's agents</label> ...</fieldset>
+    <div class="rk-filter-foot"><button type="button" class="rk-filter-reset">Show all</button></div></div></details>
+```
+
+The count says how many boxes are off ("2 off"); "Show all" ticks every box and fires one change per box it ticked; Escape or a click outside closes the panel, focus back on its button.
+The page filters its own rows on the boxes' `change` events: the component only folds the controls away.
 
 ### Sortable table
 

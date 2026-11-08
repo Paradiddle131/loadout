@@ -27,7 +27,7 @@
 
   /* type: one family, a fixed scale; numbers are tabular */
   --sans: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
-  --t-word: 1rem; --t-num: 1.375rem; --t-find: 1.1875rem; --t-head: 1.375rem; --t-title: 2rem; --t-tip: .9375rem; --t-chart: .875rem;
+  --t-word: 1rem; --t-num: 1.375rem; --t-find: 1.1875rem; --t-head: 1.5rem; --t-title: 2rem; --t-tip: .9375rem; --t-chart: .875rem;
   /* hierarchy without a paler body: a heading is a size step above its text and two weight steps heavier; on a dark
      ground light strokes spread (the irradiation illusion), so headings go one weight further and words get a touch
      more tracking and leading, keeping the gap the light theme shows */
