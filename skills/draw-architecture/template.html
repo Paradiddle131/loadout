@@ -54,7 +54,7 @@ Sheet.ready().then(() => {
   S.card({ x: 892, y: 104, w: 268, h: 64, title: 'the model', lines: ['chooses the tool and its arguments'], hatch: true });
   S.edge('M612,128 H644 V120 H892', { label: { text: 'asks', at: [760, 114] } });
   S.region({ x: 892, y: 208, w: 268, h: 132, tone: 'cobalt', title: 'database', role: 'read-only' });
-  S.card({ x: 904, y: 228, w: 244, h: 44, title: { local: 'Postgres', cloud: 'Cloud SQL' }, logo: { local: 'postgresql' } });
+  S.card({ x: 904, y: 228, w: 244, h: 44, title: { local: 'Postgres', cloud: 'Cloud SQL' }, logo: { local: 'postgresql', cloud: 'googlecloudsql' } });
   S.edge('M832,250 H904', { reads: true, tone: 'cobalt', label: { text: 'SQL', at: [860, 244] } });
 
   S.legend(24, 424, [['card', "this repo's code"], ['pkg', 'a package'], ['hatch', 'the model'], ['phantom', 'replaced in the cloud'], ['calls', 'calls, writes'], ['reads', 'reads'], ['cobalt', 'read-only role']]);

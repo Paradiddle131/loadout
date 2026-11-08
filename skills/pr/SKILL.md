@@ -197,4 +197,8 @@ Concrete evidence that the change works. Show a before and after.
 
 Screenshots are S-tier - when the environment is set up for it and the change is visual.
 
+- **Show the change, not the whole picture.** For a visual change (a diagram, a page, a chart), crop the region that changed and show it before and after, same view, theme and scale, side by side in a table or stacked when wide; a new picture shows the part a reviewer must judge, and links the full file.
+- **Host images by commit.** The REST API cannot attach images to a body: commit the crops on the PR's branch under `.pr-images/<pr>/`, remove them in the next commit, and link them by the first commit's SHA (`blob/<sha>/<path>?raw=true`), so they outlive the merge and never reach the tree.
+- **A public repo never hosts a private one's content,** in a commit, an image or a link: check both repos' visibility first, and draw the evidence from public material.
+
 Execution-based evidence is A-tier. Test results, console output. Show the exact test that now fails and passes, using pseudocode.

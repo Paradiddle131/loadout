@@ -6,6 +6,7 @@ description: "Use when drawing an architecture or system diagram (components, bo
 A diagram is a **sheet**: black ink on paper, drawn the way a draughtsman would, where every mark means one thing and the legend says what.
 This is the house style for architecture and system diagrams: reach for it first, and for another style only when the repo's own `DESIGN.md` asks.
 It ships as a kit: one standalone HTML file per diagram, built from [`kit/`](kit/), checked by [`bin/check.cjs`](bin/check.cjs), exported to the light and dark PNGs a README embeds.
+The kit draws in two styles, the **sheet** (the default, below) and the **board** ([Two styles](#two-styles)); the drawing, its words and every check are the same in both.
 
 ## Steps
 
@@ -34,20 +35,32 @@ The sheet is done when the checker is clean in every theme and mode and every ma
 - **Spare.** No icons as decoration, no badges, pills, gradients or shadows, no `·`-joined lists or arrows inside text: a list is commas, an alternative is `/`.
 - **Modes, when the picture has two worlds.** A switch above the sheet relabels each stand-in with its counterpart (`{lab: '…', gcp: '…'}` on any text or logo); chain lines go solid in the mode where the thing is real.
 
+## Two styles
+
+Pick the style by the reader; `Sheet(svg, {style: 'board'})` switches a drawing, nothing else changes.
+
+- **Sheet** (default): black ink on paper, for a README, a PR or an issue, read by the people who work on the system.
+- **Board**: soft white panels on a cool canvas, rounded cards with a hairline and a faint lift, for a pitch, a deck or a reader outside the work, where a modern look earns attention.
+  - A card's **accent** (`accent: 'teal' | 'violet' | 'amber'`) is a bar on its left edge naming its role (this repo's code, the cloud's services, the org's platform), one meaning per hue, stated in the legend; the sheet draws no bar, so its two pencils stay.
+  - **Steps** (`S.step(x, y, n)`) number the main path in order on its edges, so the edges need no words; the legend says what the numbers follow. The sheet draws them as ink rings.
+  - Logos are 20 units, not 14, and more of them earn a place: a board names the cloud services around the core (the database, logging, the identity proxy) by their marks too.
+  - Frames, the chain line, hatching, cobalt and vermilion keep their meanings; the headline is set bold, one size up.
+- Both hold the same word budget: a card says what a thing is in at most 12 words (its package overline aside); a configuration list, a plugin list or a sentence goes in the doc beside the sheet, never on a card.
+
 ## Logos
 
 A logo names a **technology the sheet shows** at a glance: the platform, the orchestrator, the transformation tool, the agent framework, the warehouse, the services around them.
 A swappable detail gets none: a model provider, a library choice, anything the picture would not change for; the registry holds only marks worth showing, so every one it knows that a sheet names appears on it.
 The mechanics keep logos coherent, so place them only through the API:
 
-- **One size, two slots.** Every logo is 14 units square, either in a card's slot (8 in from its right edge, centred on its first text row) or before a frame's title in its top line; never beside a title in running text, never scaled to the space.
-- **Brand colour, normalised.** The registry ([`logos/`](logos/)) holds each mark in its brand colours (a single-colour mark in its brand colour), fitted to a 24-unit square with its ink coverage equalised (dense marks shrink, thin single-colour marks get a hairline of their own colour), so a solid disc and an outline read at the same weight. Recognition is the point of a logo, and colour carries most of it: one ink loses marks whose shapes are drawn by colour (Cloud Run's chevrons, Airflow's pinwheel).
-- **One-ink fallback per theme, measured.** Beside the colour copy the registry keeps a one-ink copy; a theme draws it where under half the mark's pixels reach 2:1 against that theme's card (GitHub and Helm on dark, Google's pale blue on light). The bar is visibility, not WCAG's 3:1 for graphics: the name is always printed beside the logo, so the logo carries no information of its own.
+- **One size, two slots.** Every logo is 14 units square (20 on the board), either in a card's slot (8 in from its right edge, centred on its first text row) or before a frame's title in its top line; never beside a title in running text, never scaled to the space.
+- **Brand colour, normalised.** The registry ([`logos/`](logos/)) holds each mark as its owner draws it, masks and gradients included, in its brand colours (a single-colour mark in its brand colour), fitted to a 24-unit square with its ink coverage equalised (dense marks shrink, thin single-colour marks get a hairline of their own colour), so a solid disc and an outline read at the same weight. Recognition is the point of a logo, and colour carries most of it: one ink loses marks whose shapes are drawn by colour (Cloud Run's chevrons, Airflow's pinwheel).
+- **One-ink fallback per theme, measured.** Beside the colour copy the registry keeps a one-ink copy; a theme draws it where under a third of the mark's pixels reach 2:1 against that theme's card (GitHub and Helm on dark, Google's pale blue on light). The bar is visibility, not WCAG's 3:1 for graphics: the name is always printed beside the logo, so the logo carries no information of its own.
 - **Once each, every one named.** A technology's logo appears once, on its most representative element; the checker fails a repeat, a hand-placed logo, a logo crowding text, more than twelve, and a technology the registry knows that the sheet names (its title or an alias, in any text) without showing its logo. A name that only says what something stands in for, or what replaces it elsewhere, may stay unmarked: say why in `S.done({unmarked: {id: 'why'}})`.
 - **A mark that does not read is left out.** Add one with `bin/add-logo.cjs`, regenerate the proof beside the registry (`node bin/check.cjs --proof logos/proof.png`) and look at it, and record its source, licence, or why it was left out, in [`logos/SOURCES.md`](logos/SOURCES.md).
 
 ## What the checker proves
 
-For every theme and mode: exactly one headline, not empty, at most 60 characters (read in one glance, about half the sheet's width), with no full stop at its end, no second sentence, not the `<title>` again, and nothing drawn beside or above it; no text under 11 px; text inside its card, off other cards, off edges, off frame lines except where knocked out, and clear of other text; every box at least 8 units inside the box around it, and no two boxes half overlapping; no edge through a card it does not start or end at, along a card's border, or through a logo; every edge crossing bridged (the count is reported); text contrast at least 4.5:1 against what is behind it (its card, its band, or the paper); the palette itself: a package card at least 6 CIELAB lightness from a plain card (light's step is 7.4; a luminance ratio flattens dark steps), and ink and muted text at least 4.5:1 on it, whether or not the sheet draws one; the logo rules above; the web fonts loaded (widths measured in a fallback font are wrong); no console error.
+For every theme and mode, in either style: exactly one headline, not empty, at most 60 characters (read in one glance, about half the sheet's width), with no full stop at its end, no second sentence, not the `<title>` again, and nothing drawn beside or above it; no text under 11 px; text inside its card, off other cards, off edges, off frame lines except where knocked out, and clear of other text; every box at least 8 units inside the box around it, and no two boxes half overlapping; no edge through a card it does not start or end at, along a card's border, or through a logo; every edge crossing bridged (the count is reported); text contrast at least 4.5:1 against what is behind it (a step badge, its card, its band, or the paper); at most 12 words on a card; the palette itself: a package card at least 6 CIELAB lightness from a plain card (light's step is 7.4; a luminance ratio flattens dark steps), and ink and muted text at least 4.5:1 on it, whether or not the sheet draws one; the logo rules above; the web fonts loaded (widths measured in a fallback font are wrong); no console error.
 
 Requirements: Node and Playwright with Chromium (`require('playwright')` must resolve; `npx playwright install chromium` where it does not), and network access to Google Fonts.
