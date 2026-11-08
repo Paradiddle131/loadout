@@ -81,7 +81,7 @@ Labelled facts, the label beside its value and above it once the list is under 3
 - The label column takes the longest label's width, up to `--facts-label` (14rem by default), and every row shares it, so the values start on one left edge; labels are 1rem bold in full ink, values 1rem.
   Never set the column to a fixed width in rem: the dark ground's extra tracking would wrap a label that fits in light.
 - Rules: 1px ink over the list (dropped right under a section or part head, whose rule it would double), a hairline under each row.
-- `.rk-facts-tight` sets facts inside an entry (a glossary term's count or example): no rules, a short gap, the same sizes, the label beside its value down to 20rem.
+- `.rk-facts-tight` sets facts inside an entry (a glossary term's count or example): no rules, a `--s1` step between facts, the same size, labels at 600 under the term's `--w-head`, the label beside its value down to 20rem.
 - A part holding a glossary or a facts list keeps the reading measure, so its rule ends where the entries do.
 
 ### Levels inside a section
@@ -297,8 +297,9 @@ A long reference list narrowed in place (STANDARDS.md says when), in the page's 
   A group with no match hides.
 - Chips are optional: one is pressed at a time, `data-value=""` is every type; each `.rk-chip-n` is filled with the matches in its type for what is typed.
   The row wraps; never set it to scroll sideways.
+- The typed words are marked in each item shown (`<mark class="rk-find-hit">`, as typed, ignoring case: a 20% tint of `--line` under full ink, 11:1 in both themes, with a 2px `--line` underline, 6.9:1 and 7.6:1 against the ground); clearing the box takes the marks away.
 - The count reads "9 terms", or "2 of 9 terms shown" while something narrows the list (`data-rk-find-noun`, default "items"); nothing matching shows `.rk-find-none`, whose button clears the box and the type and puts the focus back in the box.
-- A hash naming an entry the list hides (a bubble's "more" link, a link from another part) clears the search and the type first, then the tabs open its part and scroll to it; `ReportKit.find.reveal(el)` does the same for a page's own links, `ReportKit.find.apply(list)` re-filters after the page changes the list, and each change fires `rk:find` on the list with `{list, shown, total}`.
+- A hash naming an entry the list hides (a bubble's "more" link, a link from another part) clears the search and the type first, then the tabs open its part and scroll to it; `ReportKit.find.reveal(el)` does the same for a page's own links (a page with its own router calls it before it scrolls), `ReportKit.find.apply(list)` re-filters after the page changes the list, and each change fires `rk:find` on the list with `{list, shown, total}`.
 
 ### Sortable table
 
@@ -430,7 +431,7 @@ A drawing whose script lays text out by measuring it (wrapped labels, boxes size
 - a sort whose presses do not go first direction, reverse, and (two-state) reverse again, or that leaves a table in its sort group sorted another way;
 - a control it cannot reach or press in time (it scrolls each target into view and lets it settle before pointing at it);
 - console and page errors, a web font that did not load, a switch with more than four segments;
-- a box that scrolls up and down inside the page (a dialog, a form control and a box marked `data-rk-scroll` are exempt), and a box that scrolls sideways with its scrollbar hidden;
+- a box that scrolls up and down inside the page (a dialog, a form control and a box marked `data-rk-scroll` are exempt), and a box that scrolls sideways with its scrollbar hidden (exempt when marked `data-rk-scroll`: a head that follows a visible bar under it);
 - a heading (`h1` to `h6`) paler than the text around it, by its colour or its opacity;
 - a heading that skips a level on the way down (an `h2` straight to an `h4`), with each open modal dialog an outline of its own from its `h2`;
 - in the source (the vendored libraries left out): a raw colour outside a `:root` token block (a drawing's own colours inside an `<svg>`, such as a brand mark, are exempt), gradient text, emoji, a banned first font (Inter, Roboto, Arial, Helvetica), dark tokens missing one of the three blocks.

@@ -35,8 +35,11 @@ const { chromium } = require('playwright');
   want(s.groups.join() === 'option', 'a group with no match hides');
   want(s.count === '2 of 9 terms shown', `the count follows ("${s.count}")`);
   want(s.chips.option.n === 2 && s.chips.outcome.n === 0, 'each chip counts the matches in its type');
+  const marks = await page.$$eval('mark.rk-find-hit', ms => ms.map(m => m.textContent.toLowerCase()));
+  want(marks.length >= 2 && marks.every(m => m === 'van'), `the typed word is marked in each entry shown (${marks})`);
 
   await page.fill('.rk-find-box input', '');
+  want(await page.$$eval('mark.rk-find-hit', ms => ms.length) === 0, 'clearing the box takes the marks away');
   await page.click('.rk-chips button[data-value="outcome"]');
   s = await state();
   want(s.shown.length === 4 && s.groups.join() === 'outcome' && s.chips.outcome.on && !s.chips.all.on, 'a chip shows one type, pressed alone');
