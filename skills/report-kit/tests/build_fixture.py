@@ -346,13 +346,60 @@ def weekly():
     ]
 
 
+# label, fact: how the trial ran, as a short list of labelled facts
+METHOD = [
+    ("Orders", "100 weekday and 100 weekend orders per option, taken in the order they came."),
+    ("Weeks", "Twelve, from the first week of spring."),
+    ("On time", "Within the hour the customer chose, by the courier's own scan at the door."),
+    ("Left out", "Orders the customer cancelled before they left the shop."),
+]
+# group key, group head, the glossary entries in it
+GROUPS = [
+    ("option", "Ways to deliver", GLOSSARY[: len(OPTIONS)]),
+    ("outcome", "What became of an order", GLOSSARY[len(OPTIONS) :]),
+]
+
+
+def method_facts():
+    return "".join(f"<div><dt>{esc(k)}</dt><dd>{esc(v)}</dd></div>" for k, v in METHOD)
+
+
+def glossary_parts():
+    """The glossary in place: a find box with its label shown, type chips that wrap, the count as a status, then one
+    part per type (an h3 over its rule), each a definition list; an option's entry carries its own facts."""
+    extra = {f"term-{n.lower().replace(' ', '-')}": (wd[0], we[0]) for n, _, wd, we in OPTIONS}
+    def entry(i, t, d):
+        facts = ""
+        if i in extra:
+            facts = ('<dl class="rk-facts rk-facts-tight">'
+                     f"<div><dt>On time, weekdays</dt><dd><b>{extra[i][0]}</b> in 100</dd></div>"
+                     f"<div><dt>On time, weekends</dt><dd><b>{extra[i][1]}</b> in 100</dd></div></dl>")
+        return f'<div id="{i}" data-rk-find-item><dt>{esc(t)}</dt><dd><p>{esc(d)}</p>{facts}</dd></div>'
+    chips = '<button type="button" data-value="" aria-pressed="true">Every type<span class="rk-chip-n"></span></button>' + "".join(
+        f'<button type="button" data-value="{k}" aria-pressed="false">{esc(h)}<span class="rk-chip-n"></span></button>' for k, h, _ in GROUPS
+    )
+    parts = "".join(
+        f'<div class="rk-part" data-rk-find-group="{k}"><h3>{esc(h)}</h3><dl class="rk-glossary">'
+        + "".join(entry(*e) for e in entries) + "</dl></div>"
+        for k, h, entries in GROUPS
+    )
+    return (
+        '<div class="rk-find" data-rk-find="glossary-list" data-rk-find-noun="terms">'
+        '<label class="rk-find-box">Find a term<input type="search" autocomplete="off" spellcheck="false" aria-controls="glossary-list"></label>'
+        f'<div class="rk-chips" role="group" aria-label="Type of term">{chips}</div>'
+        '<p class="rk-find-count" role="status"></p></div>'
+        f'<div id="glossary-list">{parts}'
+        '<p class="rk-find-none" hidden>No term matches. <button type="button">Show every term</button></p></div>'
+    )
+
+
 def page():
     switch = "".join(
         f'<button type="button" data-value="{v}" data-tip="{esc(t)}" aria-pressed="{str(i == 0).lower()}">{esc(label)}</button>'
         for i, (v, label, t) in enumerate(DAYS)
     )
     tables = "".join(table(v, i > 0) for i, (v, *_) in enumerate(DAYS))
-    glossary = "".join(f'<div id="{i}"><dt>{esc(t)}</dt><dd>{esc(d)}</dd></div>' for i, t, d in GLOSSARY)
+    glossary = glossary_parts()
     data = weekly()
     names = list(dict.fromkeys(d["name"] for d in data))
     key = "".join(
@@ -418,9 +465,13 @@ def page():
   </div>
   <div id="notes" role="tabpanel" aria-labelledby="tab-notes" hidden></div>
   <div id="glossary" role="tabpanel" aria-labelledby="tab-glossary" hidden>
+    <section class="rk-section" aria-labelledby="method-h">
+      <div class="rk-head"><h2 id="method-h">How the trial ran</h2></div>
+      <dl class="rk-facts">{method_facts()}</dl>
+    </section>
     <section class="rk-section" aria-labelledby="glossary-h">
       <div class="rk-head"><h2 id="glossary-h">Glossary</h2></div>
-      <dl class="rk-glossary">{glossary}</dl>
+      {glossary}
     </section>
   </div>
 </main>
