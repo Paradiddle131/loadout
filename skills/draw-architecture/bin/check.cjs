@@ -17,6 +17,30 @@ const COVERAGE = [0.25, 0.4]; // the band add-logo.cjs normalises every mark int
 // A headline is read in one glance: 60 characters, a title tag's or a commit subject's length, spans about
 // half the sheet at its size and stays legible where a README scales the sheet down.
 const HEADLINE_MAX = 60;
+// A package card must read apart from a plain card in both themes: the CIELAB lightness step between
+// --card and --pkg (light's #fff to #ebeae5 is 7.4; a luminance ratio flattens dark steps, so it is not used).
+const PKG_STEP = 6;
+
+// Runs in the page once per theme: the palette's own pairs, which hold whether or not a sheet uses them.
+function palette({ pkgStep }) {
+  const probe = document.createElement('i');
+  document.body.append(probe);
+  const rgb = v => { probe.style.color = `var(${v})`; return (getComputedStyle(probe).color.match(/[\d.]+/g) || []).slice(0, 3).map(Number); };
+  const lin = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+  const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  const lstar = c => { const y = lum(c); return y > 216 / 24389 ? 116 * Math.cbrt(y) - 16 : (y * 24389) / 27; };
+  const ratio = (a, b) => { const [l1, l2] = [lum(a), lum(b)].sort((p, q) => q - p); return (l1 + 0.05) / (l2 + 0.05); };
+  const out = [];
+  const [card, pkg] = [rgb('--card'), rgb('--pkg')];
+  const step = Math.abs(lstar(card) - lstar(pkg));
+  if (step < pkgStep) out.push(`palette: --pkg is ${step.toFixed(1)} lightness from --card, under ${pkgStep}: a package card reads as a plain one`);
+  for (const t of ['--ink', '--muted']) {
+    const r = ratio(rgb(t), pkg);
+    if (r < 4.5) out.push(`palette: ${t} on --pkg is ${r.toFixed(2)}:1, under 4.5:1`);
+  }
+  probe.remove();
+  return out;
+}
 
 // Runs in the page, after the sheet is drawn and set to one mode.
 function inspect({ maxLogos, coverage, aliases, headlineMax }) {
@@ -209,6 +233,9 @@ async function proof(file) {
       try { await page.waitForFunction(() => window.__sheet, null, { timeout: 15000 }); } catch { errors.push('the sheet never finished drawing (no S.done())'); }
       const fonts = await page.evaluate(() => [...document.fonts].filter(f => f.status === 'loaded').map(f => f.family));
       if (!fonts.some(f => f.includes('Atkinson'))) errors.push('the Atkinson fonts did not load (offline?): widths would be wrong');
+      const pal = await page.evaluate(palette, { pkgStep: PKG_STEP });
+      pal.forEach(p => console.log(`    ${path.basename(file)} ${theme}: ${p}`));
+      if (pal.length) failed = true;
       const modes = (await page.evaluate(() => window.__sheet?.modes ?? [null])).filter(m => m !== undefined);
       for (const m of modes.length ? modes : [null]) {
         if (m) await page.evaluate(id => window.__sheet.setMode(id), m);
