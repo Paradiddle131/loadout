@@ -55,6 +55,11 @@ Each says when it does not apply.
   When not: more views, or views of different things, are tabs or a select.
 - **Parts as tabs** when a page has more than one job; each part has its own URL, and an empty part drops out.
   When not: a short page reads top to bottom with no tabs.
+- **Headings step down one level at a time, a dialog's included:** under an h2 comes an h3, never an h4 or an h5; the number follows the outline, and the look follows the kit's levels (section, part, item), so a heading that should look smaller takes a smaller level's style, never a deeper heading number.
+  A modal dialog is an outline of its own that opens at its h2, whatever level the button that opened it sits under.
+  A skipped level tells a screen-reader user, who moves by headings, that a level is missing, and leaves the page's look and its outline telling two stories.
+  Grounds: W3C WAI, [Headings](https://www.w3.org/WAI/tutorials/page-structure/headings/) ("Skipping heading ranks can be confusing and should be avoided where possible"; an h2 is never followed directly by an h4); WCAG 2.2, [Info and Relationships](https://www.w3.org/WAI/WCAG22/Understanding/info-and-relationships.html).
+  When not: going back up may jump a level (an h4 closing its part, then the next h2).
 - **Single file:** the kit, the charts' libraries and the data are inlined; the page opens from disk or a link with nothing beside it.
   When not: the web font loads from Google Fonts, with fallbacks; a page that must work offline drops the link and uses the fallbacks.
 - **A report inside a larger page is scoped** (`scope=<selector>` in the build markers): the kit's look and scripts stay inside that element, and the host page keeps its own.
@@ -85,6 +90,16 @@ Each says when it does not apply.
   The key decodes marks only, and the caption says only what the drawing cannot (its units, its sample, the one thing to see); a key or note that drifts past other blocks reads as belonging to them.
   Grounds: Caltech Hixon Writing Center, [figure captions](https://writing.caltech.edu/documents/27629/HWC-FigureCaptionHandout.1-2024.pdf) (a caption adds what the figure does not show, never repeats it); a figure with its caption should stand alone.
   When not: one key shared by several figures sits once above them, under the section's lead.
+- **One item at a time: Previous and Next above it, in place:** a list read one item at a time (an example of each kind, one case per screen) steps with Previous and Next side by side above the item, then its position in words ("Order 3 of 12"), all in one control style (`.rk-step`); a further control in that row (a "See all 12") wears the same look.
+  The item takes its own height: the reader pressed for the change, so what moves below the controls is expected, while fields that each reserve the tallest content any item gives them leave empty bands that read as a broken layout.
+  At an end the button is disabled and keeps its slot, so the other never moves under the pointer, and the focus passes to the other; the position is a polite live region, so a screen reader hears it without leaving the button.
+  Grounds: web.dev, [Cumulative Layout Shift](https://web.dev/articles/cls) (a shift close to the reader's own press is expected, and shifts within 500 ms of input are left out); WCAG 2.2, [Status Messages](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html) (a change the focus does not move to is announced); GOV.UK Design System, [Pagination](https://design-system.service.gov.uk/components/pagination/) (Previous and Next through related content; no Previous on the first page).
+  When not: a list of a screen or less shows whole; a list the reader searches rather than steps through is browsed (below).
+- **A long list is browsed in place, with a find box:** a list too long to step through (dozens of items) is the side column of its own split (`.rk-split`), the chosen item on the stage beside it, with a find box over the list that narrows it as the reader types, the count shown said as a status ("12 of 84 shown"), and, when nothing matches, a sentence that says so and a button that clears the box.
+  A choice of scope over the list (this kind, every kind) is a switch.
+  It is not a modal: a browse is not a short exchange, and a modal covers the page the reader came from and repeats a stage the page already has.
+  Grounds: NN/g, [Modal and nonmodal dialogs](https://www.nngroup.com/articles/modal-nonmodal-dialog/) (modals for short, direct exchanges; not for decisions that need information outside them); WCAG 2.2, [Status Messages](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html) (its example: the count of search results announced without moving the focus).
+  When not: a list of a screen or less needs no find box.
 - **One statement per fact:** each fact has one home, by role: a name names; a tag line places it (a group, a rung) in words that repeat neither the name nor each other; a lead says once what it is; the figure shows; a list of changes lists without restating the lead; a caption adds what the figure cannot show, or is left out.
   A fact said three times in three styles (a tag line, a description, a caption) takes three reads to find it is one fact, and makes neighbouring blocks look alike.
   Test: hide each sentence in turn; if the reader loses nothing, delete it.
@@ -105,6 +120,10 @@ Each says when it does not apply.
   When not: a table long enough that the slide hides where a row went.
 - **Narrow tables stack** each row into a block whose values carry their column's label and mark; set the width where a table stacks (`data-rk-stack-at`) from its own columns, and use the compact stack (each number beside its column's mark alone, the header as a sort bar) when every number column has a mark.
   When not: a table of two or three narrow columns fits as it is.
+- **A long table stays one table:** its rows are never split into two tables side by side to save height; split, the halves repeat their heads, sort apart, read as two groups, and at a large text size their columns squeeze into each other.
+  Columns take their width from their content, never a fixed width in `em`; a long table shows its first rows and a control that names the rest ("12 more"), or scrolls inside its own wrap.
+  Grounds: WCAG 2.2, [Reflow](https://www.w3.org/WAI/WCAG22/Understanding/reflow.html) (a data table keeps its two-dimensional layout and may scroll in its own container) and [Resize Text](https://www.w3.org/WAI/WCAG22/Understanding/resize-text.html) (text at 200% loses no content).
+  When not: two tables of different rows are two tables.
 - **Three states by default, two for a comparison grid:** a table that has an order of its own (a sequence, a ranking the page argues from) keeps the default: the page's order, highest first, lowest first, with one column that brings the page's order back.
   A grid whose rows have no meaningful order of their own, read by comparing columns (options by kinds of question), takes `data-rk-sort="toggle"`: each press flips its column between highest first and lowest first, with no reset state to press through.
   When not: a toggle table whose page order still matters gives that order a default column, which then flips between the page's order and its reverse.
@@ -115,6 +134,10 @@ Each says when it does not apply.
 
 - **Proportions out of 100 as dot arrays**: 100 marks, shape-coded by status, in the order of the columns that count them.
   When not: shares that are not counts of like things (a budget split) are bars.
+- **A run of outcomes is a row of marks:** a few outcomes of one thing (three tries, four weeks) sit in a cell as `.rk-marks`, one status mark per outcome in order, each in a slot of its own so runs line up from row to row; an outcome that does not exist (not run, no data) is a small ink dot, never a sixth status colour; the run says itself in words (its `aria-label`), and the key names the dot too.
+  The same five shapes the rest of the page uses read the same in a small cell; a private set of squares for one table makes the reader learn a second code, and its tints fall apart on a dark ground.
+  Grounds: WCAG 2.2, [Use of Color](https://www.w3.org/WAI/WCAG22/Understanding/use-of-color.html) (colour is never the only cue).
+  When not: more than about ten outcomes are a count or a dot array.
 - **Pointing at a category lights its marks** across every row in its section and steps the rest back; leaving resets them, and a sort or a tap never leaves them lit.
   When not: a section with one row has nothing to compare.
 - **Small inline pictures are HTML, CSS and SVG** on the same 0-100 scale as the table: a bar (the whole track is 100), a meter (a number over a thin bar, for a grid cell), a range (lowest to highest), a slope (one value to another).
@@ -141,5 +164,8 @@ Each says when it does not apply.
   When not: a page whose definitions are one line each leaves pinning off.
 - **Visible focus on every focusable element**, in the line colour.
   When not: never.
-- **A modal dialog traps focus and Escape closes it**; the pinned bubble is not modal: it traps nothing, Tab moves into it from its element, and Escape closes it.
-  When not: never.
+- **A modal dialog is for a short, direct exchange** (a method note, a definition too long for the bubble), as `.rk-dialog`: a native `<dialog>` opened modal, named by its visible h2 (`aria-labelledby`), headed like a section (the h2 over the 2px ink rule, a close button beside it, no eyebrow above it).
+  The focus starts on its heading, Tab stays inside it (and the browser's own controls), the first Escape closes the innermost thing (a bubble open in it, then the dialog), and closing gives the focus back to what opened it; definitions inside it show above it.
+  The pinned bubble is not modal: it traps nothing, Tab moves into it from its element, and Escape closes it.
+  Grounds: WAI-ARIA APG, [Dialog (Modal) pattern](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/) (a visible title by `aria-labelledby`; Escape closes; focus to a static element at the top when the content is long; focus back to the opener); NN/g, [Modal and nonmodal dialogs](https://www.nngroup.com/articles/modal-nonmodal-dialog/).
+  When not: never a modal for browsing a long list (browse it in place).
