@@ -21,7 +21,7 @@ Running it again replaces what it wrote, so a page is rebuilt in place after a k
 ```
 
 - `all` names every component; a component brings what it needs (`dots`, `slope` and `highlight` bring `marks`); the CSS list must name `tokens`.
-- `node bin/build.cjs --list` prints the components: `tokens base section marks dots bar range grade slope tabs switch table-sort tip highlight plot-theme`.
+- `node bin/build.cjs --list` prints the components: `tokens base section marks dots bar range grade tint slope tabs switch filter fold step dialog table-sort tip highlight plot-theme`.
 - `scope=<selector>` in the css and the js marker runs the kit inside part of a page, as in `/* report-kit:css all scope=#report */`: the CSS nests under the selector (`:root` and `body` rules land on the scoped element, so the tokens, the ground and the type stop there), and the scripts wire only what sits inside each match, each with its own bubble.
   The page's own theme switch (`data-theme` on `<html>`) still reaches the scope; `@keyframes` stay global, under their `rk-` names.
   `ReportKit.init(el)` wires an element added later (each element once).
@@ -42,6 +42,8 @@ Running it again replaces what it wrote, so a page is rebuilt in place after a k
 | `grade` | css, js | opt-in: a bar or span coloured by where its value falls on its scale |
 | `tabs` | css, js | the page's parts, hash-routed; empty parts drop out |
 | `switch` | css, js | a segmented control of two to four views of the same data |
+| `step` | css | one item of a list at a time: Previous and Next above it, its position, one control style |
+| `dialog` | css, js | a modal `<dialog>` for a short exchange, headed like a section; focus in, Escape out, focus back |
 | `table-sort` | css, js | sortable columns, aria-sort, a restorable order, optional row slide, a stacked narrow layout |
 | `tip` | css, js | the one definition bubble; optional pin, drag and "more" link |
 | `highlight` | css, js | pointing at a category lights its marks; leaving resets them |
@@ -110,6 +112,8 @@ A part right under a section head drops its rule (the head's rule is its own).
 ### Marks
 
 `data-k` takes `ok` (filled circle), `no` (ring), `warn` (square), `bad` (diamond) or `info` (triangle), on `<i class="rk-mark">`, on a dot, on a slope point.
+A run of outcomes in a cell, one slot per outcome in order, an `<i class="rk-mark">` with no `data-k` for one that does not exist (a small ink dot), the run said in words:
+`<span class="rk-marks" role="img" aria-label="on time, late, not sent"><i class="rk-mark" data-k="ok"></i><i class="rk-mark" data-k="warn"></i><i class="rk-mark"></i></span>`.
 A key: `<ul class="rk-key"><li><span data-tip="..." data-lit="ok"><i class="rk-mark" data-k="ok" aria-hidden="true"></i>On time</span></li></ul>`.
 
 ### Dot array
@@ -177,6 +181,39 @@ The number stays in the cell, so the tint needs no key; ink keeps 4.5:1 on the s
 ```html
 <td class="rk-num" data-v="66"><span class="rk-tint" style="--v:66">66</span></td>
 ```
+
+### Step
+
+One item of a list at a time (STANDARDS.md says when): the row of controls sits above the item.
+
+```html
+<div class="rk-step">
+  <span class="rk-step-pair"><button type="button" aria-label="Previous order" disabled>(chevron)Previous</button>
+    <button type="button" aria-label="Next order">Next(chevron)</button></span>
+  <span class="rk-step-pos" aria-live="polite">Order 1 of 12</span>
+  <button type="button" class="rk-step-end">See all 12</button></div>
+<article aria-labelledby="order-name"><h3 id="order-name">Café on the corner</h3>...</article>
+```
+
+- The page's script swaps the item and writes the position; the item takes its own height (reserve no field's tallest content).
+- At an end, set `disabled` on that button: it keeps its slot, empty, so the other stays put; if it held the focus, focus the other.
+- `.rk-step-end` pushes a further control to the row's end; buttons and `a.rk-step-btn` links in the row share one look.
+
+### Dialog
+
+```html
+<button type="button" data-rk-open="how-scored">How a Saturday is scored</button>
+<dialog class="rk-dialog" id="how-scored" aria-labelledby="how-h">
+  <div class="rk-dialog-top"><h2 id="how-h">How a Saturday is scored</h2>
+    <button type="button" class="rk-dialog-close" aria-label="Close">(a cross)</button></div>
+  <p>...</p><h3>On time</h3><p>...</p>
+</dialog>
+```
+
+- `data-rk-open="<id>"` opens the dialog with `showModal()` (the page behind is inert) and focuses its h2 (given `tabindex="-1"`), so a long content starts at its top; the close button, Escape and a click on the scrim close it, and the focus returns to the opener.
+- Its headings go on from its h2 (h3, then h4); it sits on `--paper` with a 1px ink edge over `--scrim`.
+- A `data-tip` inside it shows its bubble inside the dialog (above it); the first Escape closes the bubble, the next the dialog; a closing dialog sends the bubble home.
+- `ReportKit.dialog.open(id)`, `.close(id)`; a dialog built later is wired by `ReportKit.init(el)`.
 
 ### Tabs
 
@@ -307,6 +344,7 @@ Components read the semantic tokens; primitives (`--porcelain`, `--navy`, `--cob
 | `--ok`, `--warn`, `--bad`, `--info` | `#0b7d4b`, `#a35f00`, `#cf2a1f`, `#1d6f8c` | `#3fcf8e`, `#f2b23e`, `#ff6a5c`, `#6cc4e0` | status marks, each also a shape |
 | `--viz-1` to `--viz-4` | line, `#b83d16`, `#0f7480`, `#7a3b69` | line, `#ff8f6b`, `#4fd1c5`, `#e39ad0` | chart series |
 | `--tip`, `--tip-ink` | ink, paper | ink, paper | the bubble, a reversed plate |
+| `--scrim` | navy at 45% | black at 60% | behind a modal dialog |
 | `--shadow` | a soft navy shadow | none | the bubble's lift (a shadow on a dark ground reads as a glow) |
 | `--sans` | Atkinson Hyperlegible Next | | the one family |
 | `--t-word`, `--t-num`, `--t-find`, `--t-head`, `--t-title`, `--t-tip`, `--t-chart` | 1, 1.375, 1.1875, 1.5, 2, .9375, .875rem | | the type scale |
@@ -348,10 +386,12 @@ A drawing whose script lays text out by measuring it (wrapped labels, boxes size
 - a sort whose presses do not go first direction, reverse, and (two-state) reverse again, or that leaves a table in its sort group sorted another way;
 - a control it cannot reach or press in time (it scrolls each target into view and lets it settle before pointing at it);
 - console and page errors, a web font that did not load, a switch with more than four segments;
-- a heading (`h1` to `h4`) paler than the text around it, by its colour or its opacity;
+- a heading (`h1` to `h6`) paler than the text around it, by its colour or its opacity;
+- a heading that skips a level on the way down (an `h2` straight to an `h4`), with each open modal dialog an outline of its own from its `h2`;
 - in the source (the vendored libraries left out): a raw colour outside a `:root` token block (a drawing's own colours inside an `<svg>`, such as a brand mark, are exempt), gradient text, emoji, a banned first font (Inter, Roboto, Arial, Helvetica), dark tokens missing one of the three blocks.
 
 Visibility is judged with `checkVisibility({visibilityProperty: true})`, so a part hidden by `visibility` is not measured.
+[`tests/dialog.test.cjs`](tests/dialog.test.cjs) checks the fixture's step row and dialog: Next keeps its place, the dialog's focus and Escape order, the bubble inside it.
 [`tests/scope.test.cjs`](tests/scope.test.cjs) checks a scoped page ([`tests/scoped.html`](tests/scoped.html)): the host keeps its look and the kit works inside its scope.
 `--quick` checks 400 and 1280 only; `--shots <dir>` saves a full-page PNG per width and theme; `--selftest <page.html>` plants one case of each geometry kind in the page and fails unless each is found.
 
