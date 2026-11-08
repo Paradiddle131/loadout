@@ -42,6 +42,9 @@ if (!id || !file || !flag('title') || !flag('source') || !flag('license')) {
   const browser = await chromium.launch();
   const page = await browser.newPage();
   await page.setContent('<!doctype html><body></body>');
+  // a mask or a filter draws part of the mark (Gemini's full-colour sparkle is blurred shapes under a
+  // mask); both are stripped below, so what is left may not be the mark: say so, and look at the proof
+  if (/<(mask|filter)\b/.test(fs.readFileSync(file, 'utf8'))) console.warn(`${id}: the source draws with a mask or a filter, which are stripped: check the proof, and prefer a source without them`);
   const out = await page.evaluate(async ({ svgText, id, hex, TARGET, MIN_SCALE, MAX_WEIGHT, CARDS, VISIBLE }) => {
     const NS = 'http://www.w3.org/2000/svg';
     const parse = () => new DOMParser().parseFromString(svgText, 'image/svg+xml').documentElement;

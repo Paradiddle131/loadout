@@ -15,7 +15,7 @@ The licence covers the drawing; the names and marks stay their owners' trademark
 | `googlecloudrun` | Cloud Run | `@iconify-json/logos` (`google-cloud-run`) | CC0-1.0 | |
 | `googlecloudsql` | Cloud SQL | cloud.google.com/icons, core products zip (`CloudSQL-512-color`) | Google Cloud icons, offered for architecture diagrams and docs | |
 | `googlecloudstorage` | Cloud Storage | `simple-icons`, in its brand colour | CC0-1.0 | light |
-| `googlegemini` | Gemini Enterprise | `@iconify-json/logos` (`google-gemini-icon`) | CC0-1.0 | |
+| `googlegemini` | Gemini Enterprise | `simple-icons` (`googlegemini`), in its brand colour | CC0-1.0 | |
 | `googlepubsub` | Pub/Sub | `simple-icons`, in its brand colour | CC0-1.0 | light |
 | `grafana` | Grafana | `@iconify-json/logos` (`grafana`) | CC0-1.0 | |
 | `helm` | Helm | `@iconify-json/logos` (`helm`) | CC0-1.0 | dark |
@@ -29,6 +29,7 @@ The licence covers the drawing; the names and marks stay their owners' trademark
 ## Left out, and why
 
 - **MetricFlow:** no official mark exists in its repository or package; never borrow another product's (dbt's) for it.
+- **Gemini's full-colour mark** (`@iconify-json/logos` `google-gemini-icon`): it paints its sparkle with blurred shapes under a mask, which `add-logo.cjs` strips, leaving loose coloured blobs; the one-colour sparkle is kept instead.
 - **OAuth:** its mark is a white letter on a black disc, so its one-ink copy on a dark card is a blank disc.
 - **Model Armor:** Google publishes no product icon for it (only Cloud Armor's, a different product).
 - **Model providers (OpenRouter, a model family):** a diagram's model is a setting, swapped without changing the picture; it carries no logo by policy (SKILL.md), so none is kept.
