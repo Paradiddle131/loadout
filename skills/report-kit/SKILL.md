@@ -13,12 +13,15 @@ It ships as a kit: components in [`kit/`](kit/) inlined by [`bin/build.cjs`](bin
    Done when a stranger could hold the finished page against those three lines and say whether it passes.
 2. **Direction.** Use the impeccable skill: its new-work flow for a new page, its refinement rules for a restyle (the incumbent look is kept unless the brief replaces it).
    Read its craft floor (`reference/craft-floor.md`) before the first edit, every time.
+   A restyle onto the kit keeps each part's shape (its container, its controls, its order) unless the owner names that shape as the problem: a description of what a part is ("a table in its own scroll box") is not a complaint, and moving it to the kit's look is not a licence to rebuild it.
+   A new shape is a redesign: show it to the owner as an option, beside the part as it is, before building it into the page.
 3. **Compose** from the kit's components, following [STANDARDS.md](STANDARDS.md) and the contracts in [REFERENCE.md](REFERENCE.md).
    A generator (Python, Node, anything) writes the markup and the build markers; [`tests/build_fixture.py`](tests/build_fixture.py) is a worked example.
    Diagrams come from `loadout:draw-architecture`; charts are chosen with the dataviz skill and drawn with Observable Plot through `ReportKit.plot`, which gives them the kit's theme.
 4. **Build:** `node bin/build.cjs <page.html>` inlines the kit and the pinned Plot and d3, checked against `kit/vendor/checksums.txt`; run it again after every kit or generator change.
 5. **Check:** `node bin/check.cjs <page.html>` until it prints `0 problems`, then the impeccable skill's detector (`impeccable detect --json <page.html>`, empty) and its audit.
    Look at the page yourself in both themes and at a phone width (`--shots <dir>` saves them): the checker proves geometry, contrast and behaviour, not sense.
+   Hold each changed part against its "before" shots as its reader would; if it reads worse, keep the before, whatever the checks say.
 6. **Record** the page's design in `DESIGN.md` beside it, from [`templates/DESIGN.md`](templates/DESIGN.md): what it changes from the kit's defaults, and why.
 
 The page is done when the checker and the detector are clean, the audit has no P0 or P1, and every brief line holds.

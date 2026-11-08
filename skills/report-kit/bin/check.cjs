@@ -237,6 +237,21 @@ async function inspect() {
   for (const d of document.querySelectorAll('dialog[open]')) outline(heads.filter(h => h.closest('dialog') === d), 1);
   const sw = document.documentElement.scrollWidth, cw = document.documentElement.clientWidth;
   if (sw > cw) out.push({ kind: 'hscroll', text: `the page scrolls sideways (${sw} > ${cw})`, where: 'page' });
+  // a blank tail: the page scrolls on past everything a reader can see (a hidden part's absolutely placed text, a
+  // stale min-height), so the reader scrolls into empty screens and wonders what failed to load
+  const se = document.scrollingElement || document.documentElement, sh = se.scrollHeight; // body in quirks mode
+  const clipBottom = el => { let b = Infinity; for (let a = el.parentElement; a && a !== document.body && a !== document.documentElement; a = a.parentElement) {
+    if (/(hidden|auto|scroll|clip)/.test(getComputedStyle(a).overflowY)) b = Math.min(b, a.getBoundingClientRect().bottom); } return b; };
+  let lastSeen = 0;
+  for (const el of document.body.querySelectorAll('*')) {
+    const cs = getComputedStyle(el);
+    if (cs.visibility !== 'visible' || cs.position === 'fixed' || !el.getClientRects().length) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) continue;
+    lastSeen = Math.max(lastSeen, Math.min(r.bottom, clipBottom(el)) + window.scrollY);
+  }
+  const tail = Math.round(sh - lastSeen), allow = Math.max(240, window.innerHeight / 2);
+  if (lastSeen && tail > allow) out.push({ kind: 'tail', text: `the page scrolls ${tail}px past the last thing in sight`, where: 'page' });
   for (const g of document.querySelectorAll('[data-rk-switch]')) {
     const n = g.querySelectorAll('button').length;
     if (n > 4) out.push({ kind: 'switch', text: `a switch with ${n} segments: four at most, else tabs or a select`, where: where(g) });
@@ -563,6 +578,7 @@ async function selftest(browser, file) {
       <p><span>one</span><span style="margin-left:-20px">two on top</span></p>
       <button type="button" style="outline:none">no focus ring</button>
       <div style="width:3000px">wider than the page</div>
+      <div style="visibility:hidden"><span style="position:absolute;top:9000px">a hidden part's text far down</span></div>
       <div style="height:40px;overflow:auto;line-height:20px"><div>in view</div><div>in view too</div><div>scrolled out of sight</div></div><p style="margin-top:0;line-height:20px">just below the box</p>`;
     document.querySelector('main').prepend(s);
   });
@@ -571,7 +587,7 @@ async function selftest(browser, file) {
   found.push(...await page.evaluate(focusCheck));
   found.push(...staticChecks('<style>.x { color: #abcdef; background-clip: text; font-family: Arial }</style><p>\u{1F680}</p>'));
   const brand = staticChecks('<svg viewBox="0 0 8 8"><path fill="#7262ff" d="M0 0h8v8z"/></svg>');
-  const want = { clip: /cut by its box/, overflow: /ellipsis/, contrast: /faint words/, viewbox: /past the viewBox/, overlap: /one|two on top/, muted: /a grey sub-head/, outline: /skipped a level/, focus: /no focus ring/, hscroll: /sideways/, static: /raw colour/ };
+  const want = { clip: /cut by its box/, overflow: /ellipsis/, contrast: /faint words/, viewbox: /past the viewBox/, overlap: /one|two on top/, muted: /a grey sub-head/, outline: /skipped a level/, focus: /no focus ring/, hscroll: /sideways/, tail: /past the last thing in sight/, static: /raw colour/ };
   let missed = 0;
   for (const [kind, re] of Object.entries(want)) {
     const hit = found.some(f => f.kind === kind && re.test(f.text));

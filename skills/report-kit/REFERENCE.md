@@ -380,7 +380,7 @@ A drawing whose script lays text out by measuring it (wrapped labels, boxes size
 
 `node bin/check.cjs <page.html>` loads the page in Chromium at 360, 400, 768, 1024, 1280 and 1440 pixels, light and dark, and again at a 200% browser text size (light), in every tab and every switch view, and reports:
 
-- page-level sideways scroll; text clipped by a box, outside the page, overflowing a hidden box, outside an SVG's viewBox, or on top of other text;
+- page-level sideways scroll, and a page that scrolls on more than half a screen (at least 240px) past the last thing in sight (a hidden part's absolutely placed text, a stale height); text clipped by a box, outside the page, overflowing a hidden box, outside an SVG's viewBox, or on top of other text;
 - text under 4.5:1 against what is behind it (3:1 for large text);
 - a focusable element whose focus changes nothing visible (at 1280);
 - tabs that do not open only their part or leave the URL behind, a switch that shows the wrong views, a sort that disagrees with its `aria-sort` or cannot return to the page's order, a highlight that stays lit after the pointer leaves or a click, a bubble that does not open, close, pin, drag or follow its "more" link;
