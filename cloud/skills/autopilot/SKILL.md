@@ -7,7 +7,7 @@ description: Protocol for one unattended wake of a scheduled cloud run on a repo
 
 One **wake** works one issue of one **target repo**, then hands off.
 The target's `docs/agents/autopilot.md` is the **profile** (start one from `profile-template.md`): it fills the slots below and wins inside them.
-The target's `CLAUDE.md` still binds; `~/.claude/CLAUDE.md` imports this collection's standing rules and cloud conditions (`RULES.md`, `cloud/CLAUDE.md`) and names its clone; the documents follow its `ways/`.
+The target's `CLAUDE.md` still binds; `~/.claude/CLAUDE.md` imports this collection's standing rules and cloud conditions (`RULES.md`, `FEEDBACK.md`, `cloud/CLAUDE.md`) and names its clone; the documents follow its `ways/`.
 Nobody answers during a wake, a usage limit can cut it off at any step, and other wakes may run beside it: claim before working, push early, leave GitHub resumable.
 `$AP` below is this skill's folder, `cloud/skills/autopilot` in the collection's clone (the `cloud` plugin reads it in place). Its `scripts/` do the mechanical steps; run them from the target's root (`--dry-run` prints every write).
 

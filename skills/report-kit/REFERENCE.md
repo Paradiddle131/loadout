@@ -360,7 +360,7 @@ Every status and series colour reaches 4.5:1 on its ground, so it can also colou
 
 ### Beside draw-architecture
 
-A report and a diagram from `loadout:draw-architecture` share their names where they share a job, so one page can hold both:
+A report and a diagram from the `draw-architecture` skill share their names where they share a job, so one page can hold both:
 
 | report-kit | draw-architecture `kit/sheet.css` | Note |
 |---|---|---|

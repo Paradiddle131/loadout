@@ -3,6 +3,8 @@
 Rules for an agent working in any repo, on any machine.
 Import them from your user-level instructions (`@<clone>/RULES.md` in `~/.claude/CLAUDE.md`, or paste them into `AGENTS.md`); `cloud/setup.sh` does it on Claude Code on the web.
 A repo's own `CLAUDE.md` or `AGENTS.md` wins where it is more specific.
+A rule that names a skill applies where that skill is installed.
+Every rule here acts inside the repo being worked on; the one rule that writes to this collection's own repo is in [`FEEDBACK.md`](FEEDBACK.md), imported beside this file only where it is wanted.
 
 - Make small, typed, testable changes, and validate them before calling the work done; report outcomes faithfully, including what you could not verify.
 - Prefer a mature, framework-native solution to a bespoke workaround; when the better path is a larger refactor, lay out the options with a recommendation instead of choosing the workaround silently.
@@ -17,5 +19,3 @@ A repo's own `CLAUDE.md` or `AGENTS.md` wins where it is more specific.
 - Commit in the repo's message style (conventional commits by default), with no agent co-author and no session trailer.
 - Put each sentence of long Markdown on its own line.
 - Follow the [ways of working](ways/README.md) in a repo whose `CLAUDE.md` opts in.
-- Improve this collection as you use it: when one of its skills, ways or rules gets something wrong or lacks what the work needed, or the owner corrects how you worked in a way likely to recur in other repos, open a PR on the repo that holds this file (branch `claude/<slug>`), written generic, saying what you hit, the evidence and the smallest change.
-  It waits for the owner's review and is never merged by an agent; the current work carries on with a local workaround meanwhile.

@@ -4,28 +4,37 @@ Agent skills, ways of working and standing rules, packaged as a [Claude Code](ht
 
 ## What's inside
 
-| Plugin | Skills | For |
+| Plugin | Holds | For |
 |---|---|---|
-| `loadout` | `pr`, `issue`, `draw-architecture`, `report-kit`, `grilling`, `writing-for-agents` | any machine |
+| `pr`, `issue`, `draw-architecture`, `report-kit`, `grilling`, `writing-for-agents`, `concern-to-rule` | one skill each, of the same name | any machine |
 | `cloud` | `autopilot`, `autopilot-brief`, `image-cache`, and session hooks | [Claude Code on the web](cloud/README.md) |
 
 - [`RULES.md`](RULES.md): standing rules for an agent in any repo.
+- [`FEEDBACK.md`](FEEDBACK.md): the one rule that writes back to this collection's own repo, kept apart so a machine can leave it out.
 - [`ways/`](ways/README.md): ways of working a repo can adopt with one line in its `CLAUDE.md`.
 
 The skills follow the [Agent Skills](https://agentskills.io) format, so agents other than Claude Code can read them from `skills/` as they are.
 
 ## Install
 
+Each skill is a plugin of its own, so a machine gets the skills it names and nothing else:
+
 ```bash
 git clone https://github.com/<owner>/loadout ~/loadout
 claude plugin marketplace add ~/loadout
-claude plugin install loadout@loadout
+claude plugin install pr@loadout
+claude plugin install issue@loadout
 ```
 
-A directory marketplace is read in place: `git pull` in the clone, and the next session has the change.
-To use the standing rules, add `@~/loadout/RULES.md` to `~/.claude/CLAUDE.md`.
+A directory marketplace is read in place: `git pull` in the clone, and the next session has the change to the installed skills.
+A skill added to the collection later stays off until it is installed by name.
+These plugins hold skills only: no hooks, no MCP servers, no downloads, and no change to settings or to other repos.
+Everything that does more is in the `cloud` plugin and `cloud/setup.sh`, which only Claude Code on the web runs.
 
-On Claude Code on the web, attach this repo to the environment instead; [`cloud/README.md`](cloud/README.md) has the Setup line.
+The rules are imported, not installed: add `@~/loadout/RULES.md` to `~/.claude/CLAUDE.md`, and `@~/loadout/FEEDBACK.md` too only where the work may be described in this collection's repo.
+A rule that names a skill applies where that skill is installed.
+
+On Claude Code on the web, attach this repo to the environment instead; [`cloud/README.md`](cloud/README.md) has the Setup line, which installs every plugin and imports both rule files.
 
 ## Skills adapted from elsewhere
 

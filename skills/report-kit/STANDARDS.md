@@ -9,7 +9,7 @@ Each says when it does not apply.
 - **The first screen answers the brief's question** before any detail, so the reader knows the outcome without scrolling; what leads depends on the kind of page.
   A data report leads with its three to five headline numbers.
   A decision page leads with the recommendation and the one reason that decides it, then compares only the real contenders on the same criteria, marks the chosen one, and names the riskiest assumption.
-  An explainer leads with one overview diagram of the whole shape (`loadout:draw-architecture`), then one section per part.
+  An explainer leads with one overview diagram of the whole shape (the `draw-architecture` skill), then one section per part.
   When not: a reference page read by lookup (a glossary, an index) leads with its search or its table.
 - **A headline number stands beside what it is judged against:** a prior period, a target, or the best option; alone, it reads as neither good nor bad.
   When not: a count that only sets the scope (the number of runs a page covers).
@@ -149,7 +149,7 @@ Each says when it does not apply.
   This is guidance, not a rule: weigh it per picture.
   When not: a main table already carrying dot arrays (their marks colour the outcomes; a second colour code competes with them); a handful of numbers with one bar each, which read at a glance anyway; a picture whose colour already means a status (the green of "on time").
 - **Charts through Observable Plot** with the kit's theme (`ReportKit.plot`), chart type chosen with the dataviz skill, a key in HTML, shapes as well as colours for series.
-  When not: an architecture or system diagram is drawn with `loadout:draw-architecture`.
+  When not: an architecture or system diagram is drawn with the `draw-architecture` skill.
 
 ## Behaviour
 

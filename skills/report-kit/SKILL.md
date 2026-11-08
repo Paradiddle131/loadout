@@ -15,7 +15,7 @@ It ships as a kit: components in [`kit/`](kit/) inlined by [`bin/build.cjs`](bin
    Read its craft floor (`reference/craft-floor.md`) before the first edit, every time.
 3. **Compose** from the kit's components, following [STANDARDS.md](STANDARDS.md) and the contracts in [REFERENCE.md](REFERENCE.md).
    A generator (Python, Node, anything) writes the markup and the build markers; [`tests/build_fixture.py`](tests/build_fixture.py) is a worked example.
-   Diagrams come from `loadout:draw-architecture`; charts are chosen with the dataviz skill and drawn with Observable Plot through `ReportKit.plot`, which gives them the kit's theme.
+   Diagrams come from the `draw-architecture` skill; charts are chosen with the dataviz skill and drawn with Observable Plot through `ReportKit.plot`, which gives them the kit's theme.
 4. **Build:** `node bin/build.cjs <page.html>` inlines the kit and the pinned Plot and d3, checked against `kit/vendor/checksums.txt`; run it again after every kit or generator change.
 5. **Check:** `node bin/check.cjs <page.html>` until it prints `0 problems`, then the impeccable skill's detector (`impeccable detect --json <page.html>`, empty) and its audit.
    Look at the page yourself in both themes and at a phone width (`--shots <dir>` saves them): the checker proves geometry, contrast and behaviour, not sense.

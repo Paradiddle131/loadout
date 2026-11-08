@@ -3,17 +3,63 @@
   "owner": {
     "name": "loadout"
   },
-  "description": "Agent skills and a Claude Code on the web setup, loaded in place from a clone.",
+  "description": "Agent skills, one plugin each so a machine installs only the ones it picks, and a Claude Code on the web setup, loaded in place from a clone.",
   "plugins": [
     {
-      "name": "loadout",
+      "name": "concern-to-rule",
       "source": "./",
       "strict": false,
-      "description": "Skills for any machine: PR and issue bodies, architecture diagrams, HTML report pages, design grilling, writing for agents.",
+      "description": "Turns a reviewer's concern about one piece of work into a reusable rule in this collection, proven by a blind agent.",
       "license": "MIT",
-      "skills": [
-        "./skills/"
-      ]
+      "skills": ["./skills/concern-to-rule"]
+    },
+    {
+      "name": "draw-architecture",
+      "source": "./",
+      "strict": false,
+      "description": "Architecture and system diagrams in the house style, with its kit, logos and checks.",
+      "license": "MIT",
+      "skills": ["./skills/draw-architecture"]
+    },
+    {
+      "name": "grilling",
+      "source": "./",
+      "strict": false,
+      "description": "Stress-tests a plan, decision or idea by questioning it relentlessly.",
+      "license": "MIT",
+      "skills": ["./skills/grilling"]
+    },
+    {
+      "name": "issue",
+      "source": "./",
+      "strict": false,
+      "description": "Files and edits GitHub issues, and saves a session's plan, analysis or visual onto one.",
+      "license": "MIT",
+      "skills": ["./skills/issue"]
+    },
+    {
+      "name": "pr",
+      "source": "./",
+      "strict": false,
+      "description": "Writes and edits PR bodies.",
+      "license": "MIT",
+      "skills": ["./skills/pr"]
+    },
+    {
+      "name": "report-kit",
+      "source": "./",
+      "strict": false,
+      "description": "Standalone HTML report pages built from the house kit of tokens, components and checks.",
+      "license": "MIT",
+      "skills": ["./skills/report-kit"]
+    },
+    {
+      "name": "writing-for-agents",
+      "source": "./",
+      "strict": false,
+      "description": "Writing skills and agent instruction files (AGENTS.md, CLAUDE.md).",
+      "license": "MIT",
+      "skills": ["./skills/writing-for-agents"]
     },
     {
       "name": "cloud",
@@ -21,9 +67,7 @@
       "strict": false,
       "description": "Claude Code on the web: session-start hook, save-work and GCP guard hooks, and the autopilot, autopilot-brief and image-cache skills.",
       "license": "MIT",
-      "skills": [
-        "./skills/"
-      ]
+      "skills": ["./skills/"]
     }
   ]
 }
