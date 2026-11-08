@@ -6,9 +6,8 @@ Checked in every tracked Markdown, HTML, shell and Python file:
 - relative Markdown links `[text](path)`, anchors stripped, must name a file or directory;
 - repo paths written in backticks (`skills/<name>/SKILL.md`, `bin/check-generic.sh`) must exist, from the
   repo root, the file's folder or its skill's root;
-- plugin skill names (`<plugin>:<name>`, for each plugin in `.claude-plugin/marketplace.json` that ships
-  several skills) must name a skill that plugin ships; a plugin of one skill is named by the bare skill
-  name, so the same shape after it is other text, such as the report kit's `report-kit:css` markers.
+- plugin skill names (`<plugin>:<name>`, for each plugin in `.claude-plugin/marketplace.json`) must name a
+  skill that plugin ships.
 
 Links into a tracker (`../../issues/N`), URLs, placeholders (`<name>`, `*`, `{a,b}`) and paths
 outside the repo are skipped. Run with no arguments; exits 1 and lists each broken reference.
@@ -79,7 +78,7 @@ def resolves(token, src):
 
 
 def main():
-    skills, problems = {p: s for p, s in plugin_skills().items() if len(s) > 1}, []
+    skills, problems = plugin_skills(), []
     skill = re.compile(r"\b(" + "|".join(map(re.escape, skills)) + r"):([a-z0-9][a-z0-9-]*)\b")
     for src in tracked():
         rel = src.relative_to(ROOT)
