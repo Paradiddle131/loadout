@@ -2,7 +2,9 @@
    sheet:js markers; edit it here, never in a copy. SKILL.md documents the calls. */
 function Sheet(svg, opt = {}) {
   const NS = 'http://www.w3.org/2000/svg';
-  const LOGO = 14; // the one logo size on every sheet, in user units
+  // the one logo size on a sheet, in user units: 14 in the sheet style, 20 on the board, where colour
+  // carries more of the picture
+  const LOGO = opt.style === 'board' ? 20 : 14;
   const INSET = 8; // a card's logo slot: this far in from its right edge, centred on its first text row
   const modes = opt.modes ?? [];
   const ids = modes.map(m => m.id);
@@ -126,7 +128,8 @@ function Sheet(svg, opt = {}) {
       const mono = line !== null && typeof line === 'object' && 'mono' in line;
       text(g, x + 12, y1, mono ? line.mono : line, (mono ? 'mono dim' : 'sub') + halo);
     });
-    if (id) { const lg = logo(g, id, 'card'); lg.box.setAttribute('x', x + w - INSET - LOGO); lg.box.setAttribute('y', row - LOGO / 2); }
+    // centred on the first text row, kept 6 inside the card's top (a board's larger logo on an overline)
+    if (id) { const lg = logo(g, id, 'card'); lg.box.setAttribute('x', x + w - INSET - LOGO); lg.box.setAttribute('y', Math.max(row - LOGO / 2, y + 6)); }
     return r;
   };
 
@@ -324,7 +327,7 @@ function Sheet(svg, opt = {}) {
       const want = params.get('mode') ?? saved;
       if (want && ids.includes(want) && want !== mode) setMode(want);
     }
-    window.__sheet = { modes: ids, setMode, mode: () => mode, unmarked };
+    window.__sheet = { modes: ids, setMode, mode: () => mode, unmarked, logo: LOGO };
   };
 
   return { el, text, frame, card, phantom, region, edge, tick, equal, step, legend, done, setMode, LOGO, TOP, style };

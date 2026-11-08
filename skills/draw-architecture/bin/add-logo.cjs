@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Adds (or replaces) a logo in logos/registry.json, in its brand colours and normalised so every logo
 // reads at the same size and weight:
-//  1. keep the colours: fills, strokes and gradients stay (gradient ids get the logo's id as a prefix,
+//  1. keep the colours: fills, strokes and gradients stay (a <style> block's class paints are inlined first) (gradient ids get the logo's id as a prefix,
 //     so two logos on one page never share one); a single-colour mark takes its brand colour (--hex);
 //     clip paths, masks, styles and metadata go. A one-ink copy is kept beside it (every paint becomes
 //     currentColor) for the theme where the colours do not read;
@@ -9,9 +9,10 @@
 //  3. weigh: rasterised at 240 px, the share of the square the ink covers is measured; a mark denser
 //     than the target is shrunk by sqrt(target / coverage) (never below MIN_SCALE), so a solid disc and
 //     a thin outline carry about the same ink;
-//  4. embolden: a single-colour mark lighter than the target keeps the full square and gets a thin
-//     stroke of its own colour (at most MAX_WEIGHT units of 24) until it reaches 80% of the target, as a
-//     typeface's optical size would, so an outline does not fade to a hairline at 14 px;
+//  4. embolden: a mark lighter than the target keeps the full square and gets a thin stroke (at most
+//     MAX_WEIGHT units of 24) until it reaches 80% of the target, as a typeface's optical size would, so an
+//     outline does not fade to a hairline at 14 px: a single-colour mark in its colour, a multi-colour
+//     mark each shape in its own fill;
 //  5. contrast: on each theme's card, the share of its ink pixels at VISIBLE:1 or more against the card
 //     is measured; under half, that theme draws the one-ink copy instead. The bar is visibility, not
 //     WCAG's 3:1 for graphics: a sheet always prints the technology's name beside its logo, so the
@@ -45,7 +46,16 @@ if (!id || !file || !flag('title') || !flag('source') || !flag('license')) {
     const NS = 'http://www.w3.org/2000/svg';
     const parse = () => new DOMParser().parseFromString(svgText, 'image/svg+xml').documentElement;
     const strip = root => {
+      // a product icon paints by class in a <style> block: inline each class's paint as attributes first
+      const rules = {};
+      for (const st of root.querySelectorAll('style')) for (const [, sel, body] of st.textContent.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+        const props = Object.fromEntries(body.split(';').map(p => p.split(':').map(v => v.trim())).filter(p => p.length === 2 && /^(fill|stroke|fill-rule|stroke-width)$/.test(p[0])));
+        for (const c of sel.split(',')) Object.assign((rules[c.trim().replace(/^\./, '')] ??= {}), props);
+      }
+      for (const n of root.querySelectorAll('[class]')) for (const c of n.getAttribute('class').split(/\s+/)) for (const [k, v] of Object.entries(rules[c] ?? {})) if (!n.hasAttribute(k)) n.setAttribute(k, v);
       root.querySelectorAll('title, desc, metadata, style, script, clipPath, mask').forEach(n => n.remove());
+      // an invisible shape (a product icon's bounding square) would pick up the emboldening stroke
+      root.querySelectorAll('[fill="none"]:not([stroke]):not(g):not(svg)').forEach(n => n.remove());
       for (const n of root.querySelectorAll('*')) {
         for (const a of ['clip-path', 'mask', 'filter', 'style', 'class', 'opacity']) n.removeAttribute(a);
         for (const a of [...n.attributes]) if (a.name.includes(':') && a.name !== 'xlink:href') n.removeAttribute(a.name);
@@ -75,6 +85,13 @@ if (!id || !file || !flag('title') || !flag('source') || !flag('license')) {
     const monoFill = mono.getAttribute('fill') === 'none' ? 'none' : 'currentColor';
     const vb = colour.getAttribute('viewBox') ?? `0 0 ${parseFloat(colour.getAttribute('width'))} ${parseFloat(colour.getAttribute('height'))}`;
     const colourInner = inner(colour), monoInner = inner(mono);
+    //    the colour copy with each painted shape outlined in its own fill, for emboldening a multi-colour mark
+    const outlined = colour.cloneNode(true);
+    for (const n of outlined.querySelectorAll('path, rect, circle, ellipse, polygon, polyline')) {
+      const f = n.getAttribute('fill');
+      if (!n.hasAttribute('stroke') && f && f !== 'none') n.setAttribute('stroke', f);
+    }
+    const outlinedInner = inner(outlined);
     const multi = !hex && /fill="(?!none|currentColor)[^"]+"|stroke="(?!none|currentColor)[^"]+"|Gradient/.test(colourInner);
 
     // 2. fit the bounding box into the 24-unit square
@@ -88,10 +105,10 @@ if (!id || !file || !flag('title') || !flag('source') || !flag('license')) {
     const wrap = (s, w, fill, body, strokeColour) => {
       const k = ((24 - w) / Math.max(b.width, b.height)) * s; // a stroke of w units stays inside the square
       const tx = 12 - (b.x + b.width / 2) * k, ty = 12 - (b.y + b.height / 2) * k;
-      const stroke = w ? ` stroke="${strokeColour}" stroke-width="${r(w / k)}" stroke-linejoin="round"` : '';
+      const stroke = w ? `${strokeColour ? ` stroke="${strokeColour}"` : ''} stroke-width="${r(w / k)}" stroke-linejoin="round"` : '';
       return `<g fill="${fill}"${stroke} transform="matrix(${r(k)} 0 0 ${r(k)} ${r(tx)} ${r(ty)})">${body}</g>`;
     };
-    const colourBody = (s, w) => wrap(s, w, rootFill, colourInner, hex ? `#${hex}` : 'currentColor');
+    const colourBody = (s, w) => (multi && w ? wrap(s, w, rootFill, outlinedInner, null) : wrap(s, w, rootFill, colourInner, hex ? `#${hex}` : 'currentColor'));
     const monoBody = (s, w) => wrap(s, w, monoFill, monoInner, 'currentColor');
     const raster = async (svgBody, bg) => {
       const svg = `<svg xmlns="${NS}" viewBox="0 0 24 24" width="240" height="240" style="color:black">${svgBody}</svg>`;
@@ -108,9 +125,9 @@ if (!id || !file || !flag('title') || !flag('source') || !flag('license')) {
     const coverage = async body => { const d = await raster(body); let ink = 0; for (let i = 3; i < d.length; i += 4) ink += d[i] / 255; return ink / (240 * 240); };
     const full = await coverage(colourBody(1, 0));
     const scale = Math.max(MIN_SCALE, Math.min(1, Math.sqrt(TARGET / full)));
-    // 4. embolden a light single-colour mark with its own colour
+    // 4. embolden a light mark in its own colours
     let weight = 0;
-    if (full < 0.8 * TARGET && !multi) {
+    if (full < 0.8 * TARGET) {
       for (let w = 0.2; w <= MAX_WEIGHT + 1e-9; w += 0.2) { weight = Math.round(w * 10) / 10; if (await coverage(colourBody(1, weight)) >= 0.8 * TARGET) break; }
     }
     // 5. contrast of the colours against each theme's card

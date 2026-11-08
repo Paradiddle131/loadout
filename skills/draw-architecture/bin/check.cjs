@@ -48,6 +48,7 @@ function inspect({ maxLogos, coverage, aliases, headlineMax, cardWords, pkgStep 
   const ratioOf = (p, q) => { const [l1, l2] = [lum(p), lum(q)].sort((m, n) => n - m); return (l1 + 0.05) / (l2 + 0.05); };
   const edges = all('path.edge');
   const logos = all('svg.logo').filter(n => n.getAttribute('data-logo'));
+  const size = window.__sheet?.logo ?? 14; // the style's one logo size
   const out = [];
 
   for (const a of texts) {
@@ -172,12 +173,12 @@ function inspect({ maxLogos, coverage, aliases, headlineMax, cardWords, pkgStep 
     seen[id] = true;
     if (!window.LOGOS?.[id]) out.push(`logo "${id}" is not inlined (run bin/build.cjs)`);
     else if (window.LOGOS[id].coverage < coverage[0] || window.LOGOS[id].coverage > coverage[1]) out.push(`logo "${id}" ink ${window.LOGOS[id].coverage} outside ${coverage.join('-')} (re-import it)`);
-    if (b.w !== 14 || b.h !== 14) out.push(`logo "${id}" is ${b.w}x${b.h}, not 14x14`);
+    if (b.w !== size || b.h !== size) out.push(`logo "${id}" is ${b.w}x${b.h}, not ${size}x${size}`);
     const slot = n.getAttribute('data-slot');
     if (slot === 'card') {
-      if (!cards.some(r => Math.abs(r.x + r.w - 8 - 14 - b.x) < 0.6 && b.y >= r.y + 4 && b.y + 14 <= r.y + r.h - 4)) out.push(`logo "${id}" is not in a card's slot (8 in from its right edge, inside it)`);
+      if (!cards.some(r => Math.abs(r.x + r.w - 8 - size - b.x) < 0.6 && b.y >= r.y + 4 && b.y + size <= r.y + r.h - 4)) out.push(`logo "${id}" is not in a card's slot (8 in from its right edge, inside it)`);
     } else if (slot === 'frame') {
-      if (!outlines.some(f => (Math.abs(f.y - (b.y + 7)) < 0.6 || Math.abs(f.y + f.h - (b.y + 7)) < 0.6) && b.x > f.x && b.x < f.x + f.w) || !knocks.some(k => inside({ x: b.x + 7, y: b.y + 7 }, k))) out.push(`logo "${id}" is not in a frame's title line`);
+      if (!outlines.some(f => (Math.abs(f.y - (b.y + size / 2)) < 0.6 || Math.abs(f.y + f.h - (b.y + size / 2)) < 0.6) && b.x > f.x && b.x < f.x + f.w) || !knocks.some(k => inside({ x: b.x + size / 2, y: b.y + size / 2 }, k))) out.push(`logo "${id}" is not in a frame's title line`);
     } else out.push(`logo "${id}" placed by hand: use card({logo}) or frame({logo})`);
     for (const a of texts) if (overlap(a, b, 3)) out.push(`logo "${id}" crowds text "${a.s}"`);
   }
