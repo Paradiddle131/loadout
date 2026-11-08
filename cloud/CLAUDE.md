@@ -1,6 +1,6 @@
 # Claude Code on the web
 
-Conditions of the cloud VM that every session meets, whatever the repo; `cloud/setup.sh` imports this file after [`RULES.md`](../RULES.md) into `~/.claude/CLAUDE.md`.
+Conditions of the cloud VM that every session meets, whatever the repo; `cloud/setup.sh` imports this file after [`RULES.md`](../RULES.md) and [`FEEDBACK.md`](../FEEDBACK.md) into `~/.claude/CLAUDE.md`.
 Work with them: they are not incidents to report or file issues about.
 
 - Unattended run: follow the routine prompt and the target repo's `docs/agents/autopilot.md`, if it has one (the `autopilot` skill).

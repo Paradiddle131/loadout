@@ -41,8 +41,20 @@ for m in json.load(sys.stdin):
     claude plugin marketplace remove "$stale" >/dev/null 2>&1 && echo "plugins: removed stale marketplace $stale"
   done
   claude plugin marketplace add "$ROOT" >/dev/null 2>&1 || echo "plugins: marketplace add FAILED"
-  for p in $(python3 -c 'import json,sys; print(" ".join(p["name"] for p in json.load(open(sys.argv[1]))["plugins"]))' "$ROOT/.claude-plugin/marketplace.json"); do
+  listed=$(python3 -c 'import json,sys; print(" ".join(p["name"] for p in json.load(open(sys.argv[1]))["plugins"]))' "$ROOT/.claude-plugin/marketplace.json")
+  # Every listed plugin: this is the full install. A plugin of this marketplace the list no longer holds (a split or
+  # renamed one, kept by an older snapshot) is uninstalled, so no skill loads twice.
+  for p in $listed; do
     claude plugin install "$p@$market" >/dev/null 2>&1 || echo "plugins: $p FAILED"
+  done
+  claude plugin list --json 2>/dev/null | python3 -c '
+import json, sys
+market, listed = sys.argv[1], sys.argv[2].split()
+for p in json.load(sys.stdin):
+    name, _, m = p.get("id", "").rpartition("@")
+    if m == market and name not in listed:
+        print(p["id"])' "$market" "$listed" | while read -r id; do
+    claude plugin uninstall "$id" >/dev/null 2>&1 && echo "plugins: removed $id, no longer listed"
   done
   echo "plugins: $(claude plugin list 2>/dev/null | grep -c "@$market") from $market"
   # A plugin can install and still fail to load a part (a hook, a skill path): say so, never pass it silently.

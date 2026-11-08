@@ -19,8 +19,8 @@ The setup result is cached for days; the session-start hook re-runs the setup wh
 
 | Piece | Effect |
 |---|---|
-| [`setup.sh`](setup.sh) | installs this repo's plugins (read in place from the clone) and the pinned ones in [`plugins.txt`](plugins.txt), writes `~/.claude/CLAUDE.md` ([`memory.sh`](memory.sh)), turns commit and PR attribution off, installs gitleaks, points Docker at a pull-through mirror, and runs the target's `docs/agents/cloud-setup.local.sh` if it has one |
-| [`CLAUDE.md`](CLAUDE.md) | the cloud VM's known conditions, imported after [`RULES.md`](../RULES.md) |
+| [`setup.sh`](setup.sh) | installs this repo's plugins (read in place from the clone; one the marketplace no longer lists is uninstalled) and the pinned ones in [`plugins.txt`](plugins.txt), writes `~/.claude/CLAUDE.md` ([`memory.sh`](memory.sh)), turns commit and PR attribution off, installs gitleaks, points Docker at a pull-through mirror, and runs the target's `docs/agents/cloud-setup.local.sh` if it has one |
+| [`CLAUDE.md`](CLAUDE.md) | the cloud VM's known conditions, imported after [`RULES.md`](../RULES.md) and [`FEEDBACK.md`](../FEEDBACK.md) |
 | [`hooks/`](hooks/hooks.json) | session start (rules, `dockerd`, the target's own SessionStart hooks in multi-repo sessions, commit guards in the other clones), and save-work (unsaved work pushed to `claude/wip/*` when a turn ends on an API error, and every 20 minutes) |
 | [`gcp/`](gcp/README.md) | a guard and a session-start status that keep an attached GCP project at $0.00 |
 | [`githooks/`](githooks/pre-commit) | the pre-commit set in the other clones: a commit may not add the repo owner's login |

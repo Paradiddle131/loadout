@@ -7,6 +7,7 @@ This repo is read by people and agents who never saw where it came from: everyth
 - [`ways/portable.md`](ways/portable.md) is the long form of both rules.
 - A skill adapted from another repo keeps `metadata.upstream*` in its frontmatter and that repo's licence beside it; take upstream changes by hand after `bin/check-upstream --diff <skill>`, then move `upstream-commit`.
 - A new skill goes in `skills/` (any machine) or `cloud/skills/` (Claude Code on the web only), and is added to nothing else: the plugins pick up every folder there.
+- One skill names another by its bare name (the `issue` skill), which holds whether it came in a plugin or alone (`npx skills`, `gh skill`).
 - Writing a skill or an instruction file: the `writing-for-agents` skill.
 
 ## Checks
