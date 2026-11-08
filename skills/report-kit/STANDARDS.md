@@ -59,6 +59,38 @@ Each says when it does not apply.
 - **A report inside a larger page is scoped** (`scope=<selector>` in the build markers): the kit's look and scripts stay inside that element, and the host page keeps its own.
   When not: a page that is the report from top to bottom.
 
+## Inside a section
+
+- **Three levels inside a section, each with its own cues:** the section (its head at `--t-head` over the 2px ink rule, `--gap-section` above), a part (its head at `--t-find`, or 1rem bold inside a stage, over a 1px ink rule, `--gap-part` above), an item (a 1rem bold head, `--gap-item` above, no rule).
+  Each step down in rank is a step down in space and in rule weight, and what sits inside a level is never looser than the space around it, so the eye groups by distance before it reads a word.
+  With no paler grey to rank by, size, weight, space and the rule must carry the level together; a 1rem bold head alone looks like a bold sentence.
+  Grounds: NN/g, [Proximity](https://www.nngroup.com/articles/gestalt-proximity/) (varying whitespace to unite or separate is how groups are read) and [Visual hierarchy](https://www.nngroup.com/articles/visual-hierarchy-ux-definition/) (no more than three sizes; less space binds a heading to its content); the inner-and-outer spacing rule ([inner ≤ outer](https://cases.media/article/the-inner-and-outer-spacing-principle)).
+  When not: a section of one block has no part level; a part of one paragraph needs no item level.
+- **Space first, then one rule, then one surface:** group by the space steps above, add a part's rule where two parts meet, and keep the one raised surface (`--panel`) for a side column; never a box inside a box.
+  A boundary overpowers proximity, so each extra line or tint spends the strongest grouping cue the page has, and a row of boxes reads as clutter.
+  Grounds: NN/g, [Common region](https://www.nngroup.com/articles/common-region/) (a boundary is stronger than proximity; boxes added for decoration add clutter); Wathan and Schoger, *Refactoring UI* ("use fewer borders": space or a change of ground instead).
+  When not: a dense grid whose cells must read apart (a table) keeps its hairlines.
+- **A side column sits on the raised surface; the stage it drives stays on the ground:** a list to choose from (a picker, a contents, a ladder of options) beside what the choice shows goes in `.rk-aside` within `.rk-split`, with its own head at the stage head's level, and the chosen item is a reversed plate, marked by weight and plate as well as colour.
+  The surface tells controls from content without a border, and keeps the column one region however long it runs; the stage's parts keep their rules, so the two halves never share a device.
+  On a narrow screen the column comes first: keep it short, folding a long one (a `<details>`, a select) so the stage starts on the first screen.
+  Grounds: IBM Carbon, [layering model](https://carbondesignsystem.com/elements/color/usage/) (a side panel is a layer: White on a Gray 10 ground, one step lighter on a dark one); Every Layout, [The Sidebar](https://every-layout.dev/layouts/sidebar/) (the column wraps above the content when the content would get too narrow).
+  When not: two to four choices of one view are a switch beside the section's head.
+- **Parts side by side each keep their own head and rule:** sibling parts in `.rk-parts` each start with a head over their own 1px ink rule, and the column gap breaks the rule between them; stacked, they keep the same rule and `--gap-part`.
+  One hairline across both columns makes two parts read as one block with two columns of text.
+  When not: two blocks that are one thing (a table and its note) are one part.
+- **A figure holds its key and its caption:** one `<figure>` (`.rk-fig`, or `.rk-chart` for a chart) holds the drawing, its key right against it, and a reading note last, each a short step (`--s2`) from the drawing, with the next part a `--gap-part` away.
+  The key decodes marks only, and the caption says only what the drawing cannot (its units, its sample, the one thing to see); a key or note that drifts past other blocks reads as belonging to them.
+  Grounds: Caltech Hixon Writing Center, [figure captions](https://writing.caltech.edu/documents/27629/HWC-FigureCaptionHandout.1-2024.pdf) (a caption adds what the figure does not show, never repeats it); a figure with its caption should stand alone.
+  When not: one key shared by several figures sits once above them, under the section's lead.
+- **One statement per fact:** each fact has one home, by role: a name names; a tag line places it (a group, a rung) in words that repeat neither the name nor each other; a lead says once what it is; the figure shows; a list of changes lists without restating the lead; a caption adds what the figure cannot show, or is left out.
+  A fact said three times in three styles (a tag line, a description, a caption) takes three reads to find it is one fact, and makes neighbouring blocks look alike.
+  Test: hide each sentence in turn; if the reader loses nothing, delete it.
+  When not: the first screen restates the findings below it by design, and a definition bubble may repeat a term's gloss.
+- **Raised is lighter, in both themes:** the panel is a step lighter than the ground on light and on dark, about 1.1:1 against light ground and 1.2:1 against dark, since a dark step must be larger to be seen; rules are full ink in both, and nothing lifts by a shadow on a dark ground.
+  One model (a raised layer is nearer the light) keeps the same region reading as the same thing when the theme flips, and a lighter panel keeps every status and series colour at 4.5:1 where a darker one would not.
+  Grounds: Carbon's layering model (light layers alternate with White; dark layers go one step lighter each); Material's [dark theme](https://m2.material.io/design/color/dark-theme.html) (a surface higher in elevation is lighter).
+  When not: a page whose ground is already the lightest it can be (pure white) takes a ground one step darker instead, and records it.
+
 ## Tables
 
 - **A real `<table>`**, words left, numbers right-aligned in tabular numerals and the number size.
