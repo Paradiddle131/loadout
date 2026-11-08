@@ -6,7 +6,7 @@
 //   clip      text cut by a box that clips it, or out of the page's reach
 //   overflow  a box with hidden overflow or an ellipsis that holds more text than it shows
 //   viewbox   SVG text outside its <svg>'s viewBox
-//   overlap   two text boxes on top of each other
+//   overlap   two text boxes on top of each other (each cut to what its clipping and scrolling boxes show)
 //   contrast  text under 4.5:1 against what is behind it (3:1 at 24px, or 18.66px bold)
 //   focus     a focusable element whose focus changes nothing visible
 //   tabs, switch, sort, highlight, bubble   a control that does not do what it claims
@@ -121,9 +121,19 @@ async function inspect() {
       for (const r of it.rects) if (r.left + scrollX < -TX || r.right + scrollX > docW + TX) { found = 'outside the page'; break; }
     }
     if (found) out.push({ kind: 'clip', text: `"${it.text.slice(0, 60)}" ${found}`, where: where(it.el) });
+    // what a reader can see of the text: its boxes cut to every ancestor that clips or scrolls it, so text scrolled
+    // out of sight inside a scroll box is not taken for text drawn over what lies beyond the box
+    let L = -Infinity, T = -Infinity, R = Infinity, B = Infinity;
+    for (const { a, cs, r: b } of cl) {
+      const clipX = cs.overflowX !== 'visible' || cs.clipPath !== 'none', clipY = cs.overflowY !== 'visible' || cs.clipPath !== 'none';
+      if (clipX) { L = Math.max(L, b.left + a.clientLeft); R = Math.min(R, b.left + a.clientLeft + a.clientWidth); }
+      if (clipY) { T = Math.max(T, b.top + a.clientTop); B = Math.min(B, b.top + a.clientTop + a.clientHeight); }
+    }
+    it.seen = it.rects.map(r => ({ left: Math.max(r.left, L), right: Math.min(r.right, R), top: Math.max(r.top, T), bottom: Math.min(r.bottom, B) }))
+      .filter(r => r.right - r.left > 0.5 && r.bottom - r.top > 0.5);
   }
   // text over text
-  const boxes = items.filter(it => !it.sr).flatMap(it => it.rects.map(r => ({ it, r })));
+  const boxes = items.filter(it => !it.sr).flatMap(it => (it.seen || it.rects).map(r => ({ it, r })));
   boxes.sort((p, q) => p.r.top - q.r.top);
   const seen = new Set();
   for (let i = 0; i < boxes.length; i++) {
@@ -379,6 +389,27 @@ async function behaviour(page) {
       }
     }
   }
+  // filters: the panel opens from its button, a box turned off is counted, "Show all" turns them on, Escape closes
+  for (const p of ps.length ? ps : [null]) {
+    await openPanel(page, p);
+    const fs = await page.$$eval('details[data-rk-filter]', ds => ds.map((d, i) => (d.dataset.rkCheckF = i, d.checkVisibility({ visibilityProperty: true }) ? i : -1)).filter(i => i >= 0));
+    for (const i of fs) {
+      const F = `details[data-rk-check-f="${i}"]`;
+      try {
+        await page.click(`${F} > summary`); await settle(page);
+        const box = `${F} .rk-filter-panel input[type=checkbox]`;
+        if (!(await page.$eval(F, d => d.open))) { fail('filter', 'its button does not open the panel'); continue; }
+        await page.click(box); await settle(page);
+        const n = await page.$eval(`${F} .rk-filter-count`, c => c.textContent);
+        if (!/1/.test(n)) fail('filter', `one box off, but the button says "${n}"`);
+        const reset = await page.$(`${F} .rk-filter-reset`);
+        if (reset) { await reset.click(); await settle(page); }
+        if (await page.$$eval(box, bs => bs.some(b => !b.checked))) fail('filter', '"Show all" leaves a box off');
+        await page.keyboard.press('Escape'); await settle(page);
+        if (await page.$eval(F, d => d.open)) fail('filter', 'Escape does not close the panel');
+      } catch (e) { fail('filter', `a filter could not be used: ${String(e.message).split('\n')[0]}`); }
+    }
+  }
   // the bubble: hover, Escape, focus, blur; pin, drag and close when the page allows pinning
   await openPanel(page, ps[0]);
   const tip = await page.evaluate(() => {
@@ -505,7 +536,8 @@ async function selftest(browser, file) {
       <svg viewBox="0 0 100 30" width="100" height="30"><text x="-20" y="20">past the viewBox</text></svg>
       <p><span>one</span><span style="margin-left:-20px">two on top</span></p>
       <button type="button" style="outline:none">no focus ring</button>
-      <div style="width:3000px">wider than the page</div>`;
+      <div style="width:3000px">wider than the page</div>
+      <div style="height:40px;overflow:auto;line-height:20px"><div>in view</div><div>in view too</div><div>scrolled out of sight</div></div><p style="margin-top:0;line-height:20px">just below the box</p>`;
     document.querySelector('main').prepend(s);
   });
   const found = await page.evaluate(inspect);
@@ -522,6 +554,9 @@ async function selftest(browser, file) {
   }
   console.log(`selftest brand mark: ${brand.length ? 'FLAGGED (an <svg>\'s own colours are exempt)' : 'exempt'}`);
   if (brand.length) missed++;
+  const scrolled = found.some(f => f.kind === 'overlap' && /scrolled out of sight|just below the box/.test(f.text));
+  console.log(`selftest text scrolled out of a box: ${scrolled ? 'FLAGGED (what a scroll box hides overlaps nothing)' : 'not an overlap'}`);
+  if (scrolled) missed++;
   await ctx.close();
   return missed;
 }

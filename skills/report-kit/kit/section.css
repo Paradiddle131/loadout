@@ -6,6 +6,8 @@
 .rk-section + .rk-section { margin-top: calc(var(--s7) + var(--s4)) }
 .rk-head { display: flex; flex-wrap: wrap; gap: var(--s3) var(--s5); align-items: flex-end; justify-content: space-between;
   padding-bottom: var(--s3); border-bottom: 2px solid var(--ink); margin-bottom: var(--s5) }
+/* more than one control beside a head (a switch and a filter) sit together, wrapping as one group */
+.rk-head-tools { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3); align-items: center }
 .rk-head h2 { margin: 0; font-family: var(--sans); font-size: var(--t-head); font-weight: var(--w-head); line-height: 1.2 }
 .rk-section h3 { margin: 0 0 6px; font-family: var(--sans); font-size: var(--t-find); font-weight: var(--w-head); line-height: 1.25 }
 /* a list of findings under a head: text left, one small picture right, dropping under it when narrow */
