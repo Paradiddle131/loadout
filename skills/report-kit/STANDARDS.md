@@ -17,7 +17,8 @@ Each says when it does not apply.
 ## Reading
 
 - **No muted text:** every word and number is set in full ink; rank is carried by weight, size and order, never by a paler grey.
-  When not: never on the page's own text; a third-party picture keeps its colours.
+  It holds while the reader points too: pointing at an item lights what it names (a band, a bolder weight, an ink edge) and leaves every other word in full ink, never fading the rest to a grey or an opacity.
+  When not: never on the page's own text; a third-party picture keeps its colours; a chart's or diagram's marks may step back while one is lit (Highlight), its words included only where they belong to those marks.
 - **One family, a fixed scale:** Atkinson Hyperlegible Next at 400, 600, 700 and 800; words at 1rem, numbers at 1.375rem bold, a finding's headline at 1.1875rem, section heads at 1.5rem, the title at 2rem, the bubble at .9375rem, chart text at .875rem; numerals tabular.
   When not: a code or identifier column may use a mono face, as data, never as decoration.
 - **Headings rank by size, weight and space, never by a paler body:** a finding's headline is a size step above its sentence (1.1875rem over 1rem) and two weight steps heavier (700 over 400); a section head is a step above that; a headline sits closer to its own sentence (6px) than to the row above it; on a dark ground headings go one weight further (800) and words get a touch more tracking and leading, since light strokes on dark spread and close the gap between weights.
@@ -71,8 +72,10 @@ Each says when it does not apply.
   Grounds: NN/g, [Common region](https://www.nngroup.com/articles/common-region/) (a boundary is stronger than proximity; boxes added for decoration add clutter); Wathan and Schoger, *Refactoring UI* ("use fewer borders": space or a change of ground instead).
   When not: a dense grid whose cells must read apart (a table) keeps its hairlines.
 - **A side column sits on the raised surface; the stage it drives stays on the ground:** a list to choose from (a picker, a contents, a ladder of options) beside what the choice shows goes in `.rk-aside` within `.rk-split`, with its own head at the stage head's level, and the chosen item is a reversed plate, marked by weight and plate as well as colour.
+  The column's items are rows of it, never boxes inside its box: no border on a link, a chip or a button there, a hover band, the chosen one reversed.
   The surface tells controls from content without a border, and keeps the column one region however long it runs; the stage's parts keep their rules, so the two halves never share a device.
-  On a narrow screen the column comes first: keep it short, folding a long one (a `<details>`, a select) so the stage starts on the first screen.
+  On a narrow screen the column comes first: keep it short, folding a long one behind `.rk-fold` (one button naming the column and its current choice) so the stage starts on the first screen; a pick folds it again.
+  Size the column to its longest item (`--aside`) rather than let ids wrap, and give a column that must leave its stage room the dense padding (`.rk-dense`).
   Grounds: IBM Carbon, [layering model](https://carbondesignsystem.com/elements/color/usage/) (a side panel is a layer: White on a Gray 10 ground, one step lighter on a dark one); Every Layout, [The Sidebar](https://every-layout.dev/layouts/sidebar/) (the column wraps above the content when the content would get too narrow).
   When not: two to four choices of one view are a switch beside the section's head.
 - **Parts side by side each keep their own head and rule:** sibling parts in `.rk-parts` each start with a head over their own 1px ink rule, and the column gap breaks the rule between them; stacked, they keep the same rule and `--gap-part`.
@@ -89,6 +92,7 @@ Each says when it does not apply.
 - **Raised is lighter, in both themes:** the panel is a step lighter than the ground on light and on dark, about 1.1:1 against light ground and 1.2:1 against dark, since a dark step must be larger to be seen; rules are full ink in both, and nothing lifts by a shadow on a dark ground.
   One model (a raised layer is nearer the light) keeps the same region reading as the same thing when the theme flips, and a lighter panel keeps every status and series colour at 4.5:1 where a darker one would not.
   Grounds: Carbon's layering model (light layers alternate with White; dark layers go one step lighter each); Material's [dark theme](https://m2.material.io/design/color/dark-theme.html) (a surface higher in elevation is lighter).
+  A page that keeps its own ground under the kit measures the step against that ground, not the kit's, in both themes, and records the ratios.
   When not: a page whose ground is already the lightest it can be (pure white) takes a ground one step darker instead, and records it.
 
 ## Tables

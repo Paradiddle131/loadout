@@ -80,7 +80,8 @@ A part right under a section head drops its rule (the head's rule is its own).
 ```html
 <div class="rk-split">
   <nav class="rk-aside" aria-labelledby="pick-h"><h3 id="pick-h">Cheapest first</h3>
-    <ul><li><a href="#own-van">Own van</a></li><li><a href="#bike" aria-current="true">Bike courier</a></li> ...</ul></nav>
+    <button type="button" class="rk-fold" aria-controls="picks" hidden>All options<span class="rk-fold-cur">Bike courier</span></button>
+    <ul id="picks"><li><a href="#own-van" data-rk-fold-pick>Own van</a></li><li><a href="#bike" data-rk-fold-pick aria-current="true">Bike courier</a></li> ...</ul></nav>
   <div class="rk-stage">
     <h3>Bike courier</h3>
     <p>One sentence on what it is.</p>
@@ -94,8 +95,13 @@ A part right under a section head drops its rule (the head's rule is its own).
 ```
 
 - `.rk-split` lays a side column (`.rk-aside`, on `--panel`) beside a stage (`.rk-stage`, on the ground); the column wraps above the stage once the stage would fall under 60% of the row.
+  `--aside` on the column sets its width (16rem by default: set it to the longest item's); `.rk-dense` halves its padding.
+- The fold (`fold`): a `.rk-fold` button right under the column's head, `aria-controls` naming the part it folds.
+  Once the stage sits under the column, the button shows and the part folds; side by side, the button hides and the part stays open.
+  A click on a `data-rk-fold-pick` element inside the part folds it again and gives the button the focus; `ReportKit.fold.current(el, text)` names the current choice on the button of the column holding `el`.
 - In the column, a list's links are full-width rows; `aria-current="true"` (or `"page"`) makes the chosen one a reversed plate in bold.
   A picker that changes the stage in place uses buttons with `aria-pressed` or radios with `aria-checked`, styled the same way by the page.
+  Items in the column carry no border (the kit takes it off links and buttons there): they are rows of the column, not boxes inside it.
 - `.rk-parts` sets sibling parts side by side (each at least 18rem) and stacks them when narrow; each `.rk-part` keeps its own rule, broken by the column gap.
   A lone `.rk-part` anywhere in a section takes the same rule and `--gap-part`.
 - `.rk-fig` holds a drawing, its key and its caption: the key and the caption sit `--s2` from what precedes them, the caption last, within the reading measure.
@@ -328,6 +334,8 @@ A report and a diagram from `loadout:draw-architecture` share their names where 
 | none | `--muted`, `--mono` | a report has no muted text and no mono face |
 
 Embed a diagram as the light and dark PNGs its checker exports, in a `<picture>`, or inline the sheet; either keeps the diagram's own paper.
+
+A drawing whose script lays text out by measuring it (wrapped labels, boxes sized to their words) sets `letter-spacing: 0` on that text: the kit adds tracking on a dark ground (`--track-word`), which the measurement does not see, so labels would run past their boxes in the dark theme only.
 
 ## The checker
 
