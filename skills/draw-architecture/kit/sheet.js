@@ -16,6 +16,12 @@ function Sheet(svg, opt = {}) {
   const HOP = 4; // a bridge's radius
   const HEAD = [24, 32]; // the headline's baseline start; the drawing starts at TOP or below
   const TOP = 64;
+  const steps = []; // numbered step badges, raised above every edge by done()
+  // The style: 'sheet' (ink on paper, the default) or 'board' (soft panels, accent bars, filled step
+  // badges). Only the stylesheet changes: every call, coordinate and check is the same in both.
+  const style = opt.style ?? 'sheet';
+  if (!['sheet', 'board'].includes(style)) throw new Error(`draw-architecture: no style "${style}" (sheet or board)`);
+  document.documentElement.dataset.style = style;
 
   const isModal = v => v !== null && typeof v === 'object' && !Array.isArray(v) && ids.some(i => i in v);
   const pick = v => (isModal(v) ? v[mode] : v);
@@ -62,7 +68,7 @@ function Sheet(svg, opt = {}) {
   };
 
   const defs = el('defs');
-  for (const [id, color] of [['ink', 'ink'], ['cobalt', 'cobalt'], ['vermilion', 'vermilion'], ['rule', 'rule']]) {
+  for (const [id, color] of [['ink', 'wire'], ['cobalt', 'cobalt'], ['vermilion', 'vermilion'], ['rule', 'rule']]) {
     const m = el('marker', { id: `arrow-${id}`, viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' }, defs);
     el('path', { d: 'M1,1.5 L9,5 L1,8.5 z' }, m).style.fill = `var(--${color})`;
   }
@@ -100,9 +106,14 @@ function Sheet(svg, opt = {}) {
 
   // A card: an optional overline (the package a grey card is), a title, then lines: a string is sans,
   // {mono: '...'} is mono; any text may be {<mode>: '...'}. The logo sits in the top-right slot.
-  const card = ({ x, y, w, h, title = '', lines = [], pkg, hatch: hatched, cls = '', tcls = 'title', logo: id }) => {
+  // accent: 'teal' | 'violet' | 'amber' marks the card's role with a bar on its left edge in the board
+  // style (the legend says which role each hue is); the sheet style, two pencils only, draws no bar.
+  const ACCENTS = ['teal', 'violet', 'amber'];
+  const card = ({ x, y, w, h, title = '', lines = [], pkg, hatch: hatched, cls = '', tcls = 'title', logo: id, accent }) => {
+    if (accent && !ACCENTS.includes(accent)) throw new Error(`draw-architecture: no accent "${accent}" (${ACCENTS.join(', ')})`);
     const g = el('g');
     const r = el('rect', { x, y, width: w, height: h, rx: 2, class: `card ${pkg ? 'pkg' : ''} ${cls}` }, g);
+    if (accent) el('rect', { x: x + 1, y: y + 10, width: 3, height: h - 20, rx: 1.5, class: `accent ${accent}` }, g);
     if (cls.includes('phantom')) phantoms.push(r);
     if (hatched) el('rect', { x: x + 0.5, y: y + 0.5, width: w - 1, height: h - 1, fill: 'url(#hatch)' }, g);
     const halo = hatched ? ' halo' : '';
@@ -170,6 +181,15 @@ function Sheet(svg, opt = {}) {
     el('circle', { cx: x, cy: y, r: 6.5, class: 'mark' }, parent);
     text(parent, x, y + 4, '=', 'mono', { 'text-anchor': 'middle' });
   };
+  // A numbered step on the sheet's main path, set on an edge: the numbers carry the order, so the edges
+  // need no words. Drawn above every edge (done() raises it).
+  const step = (x, y, n, parent = svg) => {
+    const g = el('g', { class: 'step' }, parent);
+    el('circle', { cx: x, cy: y, r: 9, class: 'step-dot' }, g);
+    text(g, x, y + 4, String(n), 'step-n', { 'text-anchor': 'middle' });
+    if (parent === svg) steps.push(g);
+    return g;
+  };
 
   // A legend that lays itself out from (x, y), left to right, or top to bottom with {column: true} (in a
   // margin beside the sheet); each item is [kind, label].
@@ -187,6 +207,11 @@ function Sheet(svg, opt = {}) {
       vermilion: cx => el('rect', { x: cx, y: y - 8, width: 30, height: 16, rx: 2, class: 'region vermilion' }, g),
       tick: cx => tick(cx + 15, y, g),
       equal: cx => equal(cx + 15, y, g),
+      step: cx => step(cx + 15, y, 1, g),
+      ...Object.fromEntries(ACCENTS.map(a => [a, cx => {
+        el('rect', { x: cx, y: y - 8, width: 30, height: 16, rx: 2, class: 'card' }, g);
+        el('rect', { x: cx + 3, y: y - 5, width: 3, height: 10, rx: 1.5, class: `accent ${a}` }, g);
+      }])),
     };
     let cx = x;
     for (const [kind, label] of items) {
@@ -212,12 +237,16 @@ function Sheet(svg, opt = {}) {
   const band = () => {
     for (const f of frames) f.depth = frames.filter(o => inside(f, o)).length;
     for (const f of frames) f.rect.classList.add(f.depth === 0 ? 'band-open' : f.depth % 2 ? 'band-tint' : 'band-paper');
+    // each knock-out half is painted like the band it sits on: outside every frame, an outermost frame,
+    // an odd level (screened) or an even one; the style decides the fill of each
     const first = svg.querySelector('defs')?.nextSibling ?? svg.firstChild;
     for (const f of [...frames].sort((a, b) => a.depth - b.depth)) svg.insertBefore(f.rect, first);
     for (const r of knocks) {
       const c = { x: +r.getAttribute('x') + 1, y: +r.getAttribute('y') + 4, w: 0, h: 0 };
       const home = frames.filter(f => inside(c, f) || (c.x >= f.x && c.x <= f.x + f.w && c.y > f.y && c.y < f.y + f.h)).sort((a, b) => b.depth - a.depth)[0];
       r.classList.toggle('tint', !!home && home.depth % 2 === 1);
+      r.classList.toggle('k-open', !!home && home.depth === 0);
+      r.classList.toggle('k-even', !!home && home.depth > 0 && home.depth % 2 === 0);
     }
   };
 
@@ -277,6 +306,7 @@ function Sheet(svg, opt = {}) {
   const done = ({ unmarked = {} } = {}) => {
     band();
     bridge();
+    for (const g of steps) svg.appendChild(g);
     const params = new URLSearchParams(location.search);
     if (opt.bar && modes.length > 1) {
       if (params.has('static')) opt.bar.hidden = true;
@@ -297,11 +327,12 @@ function Sheet(svg, opt = {}) {
     window.__sheet = { modes: ids, setMode, mode: () => mode, unmarked };
   };
 
-  return { el, text, frame, card, phantom, region, edge, tick, equal, legend, done, setMode, LOGO, TOP };
+  return { el, text, frame, card, phantom, region, edge, tick, equal, step, legend, done, setMode, LOGO, TOP, style };
 }
 
 // Resolves once the sheet's three faces are loaded. document.fonts.ready alone is not enough: a face
 // loads lazily, on first use, so text drawn before any mono text exists is measured in a fallback font.
 Sheet.ready = () => Promise.all([
   '700 13px "Atkinson Hyperlegible Next"', '400 11px "Atkinson Hyperlegible Next"', '400 11px "Atkinson Hyperlegible Mono"',
+  '700 11px "Atkinson Hyperlegible Next"',
 ].map(f => document.fonts.load(f))).then(() => document.fonts.ready);

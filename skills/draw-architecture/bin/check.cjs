@@ -17,9 +17,15 @@ const COVERAGE = [0.25, 0.4]; // the band add-logo.cjs normalises every mark int
 // A headline is read in one glance: 60 characters, a title tag's or a commit subject's length, spans about
 // half the sheet at its size and stays legible where a README scales the sheet down.
 const HEADLINE_MAX = 60;
+// A card says what a thing is, not how it is configured: its title and lines hold at most this many words
+// (a package's overline aside); a config list or a sentence belongs in the doc beside the sheet.
+const CARD_WORDS = 12;
+// A package card's grey must read apart from a plain card in every theme and style: about the light
+// sheet's step from white to its grey.
+const PKG_STEP = 1.15;
 
 // Runs in the page, after the sheet is drawn and set to one mode.
-function inspect({ maxLogos, coverage, aliases, headlineMax }) {
+function inspect({ maxLogos, coverage, aliases, headlineMax, cardWords, pkgStep }) {
   const svg = document.querySelector('svg.sheet');
   const visible = n => { for (let e = n; e && e !== svg; e = e.parentNode) { const s = getComputedStyle(e); if (s.display === 'none' || s.opacity === '0') return false; } return true; };
   const box = n => { const b = n.getBBox(); return { x: b.x, y: b.y, w: b.width, h: b.height }; };
@@ -35,7 +41,11 @@ function inspect({ maxLogos, coverage, aliases, headlineMax }) {
   const cards = all('rect.card:not(.behind)').map(n => ({ n, ...box(n) }));
   const knocks = all('rect.knock').map(n => ({ n, ...box(n) }));
   const outlines = all('rect.frame, rect.region, rect.outline').map(n => ({ n, ...box(n) }));
-  const bands = all('rect.frame.band-tint, rect.frame.band-paper').map(n => ({ n, ...box(n) }));
+  const bands = all('rect.frame.band-open, rect.frame.band-tint, rect.frame.band-paper').map(n => ({ n, ...box(n) }));
+  const dots = all('circle.step-dot').map(n => ({ n, ...box(n) }));
+  const rgb = c => (c.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+  const lum = ([r, g, b]) => { const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+  const ratioOf = (p, q) => { const [l1, l2] = [lum(p), lum(q)].sort((m, n) => n - m); return (l1 + 0.05) / (l2 + 0.05); };
   const edges = all('path.edge');
   const logos = all('svg.logo').filter(n => n.getAttribute('data-logo'));
   const out = [];
@@ -48,7 +58,7 @@ function inspect({ maxLogos, coverage, aliases, headlineMax }) {
       if (a.x < holder.x + 4 || a.x + a.w > holder.x + holder.w - 4 || a.y < holder.y + 1 || a.y + a.h > holder.y + holder.h - 1) out.push(`text past its card: "${a.s}"`);
     } else for (const r of cards) if (overlap(a, r)) out.push(`text over a card it is not in: "${a.s}"`);
     const core = { x: a.x + 1, y: a.y + 2, w: a.w - 2, h: a.h - 4 };
-    for (const e of edges) {
+    for (const e of a.t.closest('.step') ? [] : edges) { // a step badge sits on its edge by design
       const L = e.getTotalLength();
       for (let d = 0; d <= L; d += 1.5) if (inside(e.getPointAtLength(d), core)) { out.push(`edge through text: "${a.s}"`); break; }
     }
@@ -63,20 +73,31 @@ function inspect({ maxLogos, coverage, aliases, headlineMax }) {
         }
       }
     }
-    // contrast against what is behind it: its card's fill, or the paper
-    const rgb = c => (c.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
-    const lum = ([r, g, b]) => { const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+    // contrast against what is behind it: a step badge's dot, its card's fill, its band, or the paper
     const fg = rgb(getComputedStyle(a.t).fill);
+    const dot = a.t.closest('.step') ? dots.find(d => inside(anchor, d, 2)) : null;
     // the band it sits on: the innermost frame with a fill (depth banding), or the paper
     const band = bands.filter(f => inside(anchor, f)).sort((p, q) => p.w * p.h - q.w * q.h)[0];
     // a screened band is paper under fine dots: measure against the paper
     const bandFill = band ? getComputedStyle(band.n).fill : '';
-    const bg = rgb(holder ? getComputedStyle(holder.n).fill : band && !bandFill.startsWith('url') ? bandFill : getComputedStyle(document.body).backgroundColor);
+    const bg = rgb(dot ? getComputedStyle(dot.n).fill : holder ? getComputedStyle(holder.n).fill : band && /^(rgb|#)/.test(bandFill) ? bandFill : getComputedStyle(document.body).backgroundColor);
     if (fg.length === 3 && bg.length === 3) {
-      const [l1, l2] = [lum(fg), lum(bg)].sort((p, q) => q - p);
-      const ratio = (l1 + 0.05) / (l2 + 0.05);
+      const ratio = ratioOf(fg, bg);
       if (ratio < 4.5) out.push(`contrast ${ratio.toFixed(2)}:1 under 4.5:1: "${a.s}"`);
     }
+  }
+  // words per card: the title and lines of each card, its package overline aside
+  for (const r of cards) {
+    if (r.n.closest('.legend')) continue;
+    const own = texts.filter(a => !a.t.classList.contains('over') && inside({ x: a.x + 1, y: a.y + a.h / 2 }, r) && cards.filter(c => inside({ x: a.x + 1, y: a.y + a.h / 2 }, c)).sort((p, q) => p.w * p.h - q.w * q.h)[0] === r);
+    const words = own.flatMap(a => a.s.trim().split(/\s+/)).filter(Boolean);
+    if (words.length > cardWords) out.push(`card "${own[0]?.s ?? '?'}" holds ${words.length} words, over ${cardWords}: say what it is, move the configuration to the doc`);
+  }
+  // a package card reads apart from a plain one
+  {
+    const probe = cls => { const n = document.createElementNS('http://www.w3.org/2000/svg', 'rect'); n.setAttribute('class', cls); svg.appendChild(n); const f = rgb(getComputedStyle(n).fill); n.remove(); return f; };
+    const plain = probe('card'), pkg = probe('card pkg');
+    if (plain.length === 3 && pkg.length === 3 && ratioOf(plain, pkg) < pkgStep) out.push(`a package card's fill is ${ratioOf(plain, pkg).toFixed(2)}:1 against a plain card's, under ${pkgStep}:1: the two read alike`);
   }
   for (let i = 0; i < texts.length; i++) for (let j = i + 1; j < texts.length; j++) {
     const a = texts[i], b = texts[j];
@@ -212,7 +233,7 @@ async function proof(file) {
       const modes = (await page.evaluate(() => window.__sheet?.modes ?? [null])).filter(m => m !== undefined);
       for (const m of modes.length ? modes : [null]) {
         if (m) await page.evaluate(id => window.__sheet.setMode(id), m);
-        const r = await page.evaluate(inspect, { maxLogos, coverage: COVERAGE, aliases, headlineMax: HEADLINE_MAX });
+        const r = await page.evaluate(inspect, { maxLogos, coverage: COVERAGE, aliases, headlineMax: HEADLINE_MAX, cardWords: CARD_WORDS, pkgStep: PKG_STEP });
         const where = `${path.basename(file)} ${theme}${m ? ` ${m}` : ''}`;
         console.log(`${where}: ${r.problems.length} problems; ${r.crossings} crossings, bridged; logos: ${r.logos.join(', ') || 'none'}`);
         r.problems.forEach(p => console.log('   ', p));

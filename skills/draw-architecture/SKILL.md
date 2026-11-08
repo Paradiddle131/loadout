@@ -6,6 +6,7 @@ description: "Use when drawing an architecture or system diagram (components, bo
 A diagram is a **sheet**: black ink on paper, drawn the way a draughtsman would, where every mark means one thing and the legend says what.
 This is the house style for architecture and system diagrams: reach for it first, and for another style only when the repo's own `DESIGN.md` asks.
 It ships as a kit: one standalone HTML file per diagram, built from [`kit/`](kit/), checked by [`bin/check.cjs`](bin/check.cjs), exported to the light and dark PNGs a README embeds.
+The kit draws in two styles, the **sheet** (the default, below) and the **board** ([Two styles](#two-styles)); the drawing, its words and every check are the same in both.
 
 ## Steps
 
@@ -34,6 +35,17 @@ The sheet is done when the checker is clean in every theme and mode and every ma
 - **Spare.** No icons as decoration, no badges, pills, gradients or shadows, no `·`-joined lists or arrows inside text: a list is commas, an alternative is `/`.
 - **Modes, when the picture has two worlds.** A switch above the sheet relabels each stand-in with its counterpart (`{lab: '…', gcp: '…'}` on any text or logo); chain lines go solid in the mode where the thing is real.
 
+## Two styles
+
+Pick the style by the reader; `Sheet(svg, {style: 'board'})` switches a drawing, nothing else changes.
+
+- **Sheet** (default): black ink on paper, for a README, a PR or an issue, read by the people who work on the system.
+- **Board**: soft white panels on a cool canvas, rounded cards with a hairline and a faint lift, for a pitch, a deck or a reader outside the work, where a modern look earns attention.
+  - A card's **accent** (`accent: 'teal' | 'violet' | 'amber'`) is a bar on its left edge naming its role (this repo's code, the cloud's services, the org's platform), one meaning per hue, stated in the legend; the sheet draws no bar, so its two pencils stay.
+  - **Steps** (`S.step(x, y, n)`) number the main path in order on its edges, so the edges need no words; the legend says what the numbers follow. The sheet draws them as ink rings.
+  - Frames, the chain line, hatching, cobalt and vermilion keep their meanings; the headline is set bold, one size up.
+- Both hold the same word budget: a card says what a thing is in at most 12 words (its package overline aside); a configuration list, a plugin list or a sentence goes in the doc beside the sheet, never on a card.
+
 ## Logos
 
 A logo names a **technology the sheet shows** at a glance: the platform, the orchestrator, the transformation tool, the agent framework, the warehouse, the services around them.
@@ -48,6 +60,6 @@ The mechanics keep logos coherent, so place them only through the API:
 
 ## What the checker proves
 
-For every theme and mode: exactly one headline, not empty, at most 60 characters (read in one glance, about half the sheet's width), with no full stop at its end, no second sentence, not the `<title>` again, and nothing drawn beside or above it; no text under 11 px; text inside its card, off other cards, off edges, off frame lines except where knocked out, and clear of other text; every box at least 8 units inside the box around it, and no two boxes half overlapping; no edge through a card it does not start or end at, along a card's border, or through a logo; every edge crossing bridged (the count is reported); text contrast at least 4.5:1 against what is behind it (its card, its band, or the paper); the logo rules above; the web fonts loaded (widths measured in a fallback font are wrong); no console error.
+For every theme and mode, in either style: exactly one headline, not empty, at most 60 characters (read in one glance, about half the sheet's width), with no full stop at its end, no second sentence, not the `<title>` again, and nothing drawn beside or above it; no text under 11 px; text inside its card, off other cards, off edges, off frame lines except where knocked out, and clear of other text; every box at least 8 units inside the box around it, and no two boxes half overlapping; no edge through a card it does not start or end at, along a card's border, or through a logo; every edge crossing bridged (the count is reported); text contrast at least 4.5:1 against what is behind it (a step badge, its card, its band, or the paper); at most 12 words on a card; a package card's fill at least 1.15:1 apart from a plain card's; the logo rules above; the web fonts loaded (widths measured in a fallback font are wrong); no console error.
 
 Requirements: Node and Playwright with Chromium (`require('playwright')` must resolve; `npx playwright install chromium` where it does not), and network access to Google Fonts.
