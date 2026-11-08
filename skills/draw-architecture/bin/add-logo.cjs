@@ -16,7 +16,8 @@
 //     outline does not fade to a hairline at 14 px: a single-colour mark in its colour, a multi-colour
 //     mark each shape in its own fill;
 //  5. contrast: on each theme's card, the share of its ink pixels at VISIBLE:1 or more against the card
-//     is measured; under half, that theme draws the one-ink copy instead. The bar is visibility, not
+//     is measured; under a third (READS), that theme draws the one-ink copy instead, so a mark whose
+//     pale tints sit beside darker parts keeps its colours and only a mark that vanishes goes one ink. The bar is visibility, not
 //     WCAG's 3:1 for graphics: a sheet always prints the technology's name beside its logo, so the
 //     logo carries no information of its own, and 3:1 would turn dbt's orange or BigQuery's blue grey.
 // Usage: node bin/add-logo.cjs <id> <file.svg> --title "Name" --source <where> --license <licence>
@@ -29,6 +30,7 @@ const TARGET = 0.36;
 const MIN_SCALE = 0.7;
 const MAX_WEIGHT = 1.2;
 const VISIBLE = 2;
+const READS = 1 / 3;
 const CARDS = { light: '#ffffff', dark: '#1c1d20' }; // kit/sheet.css --card per theme
 const regPath = path.join(__dirname, '..', 'logos', 'registry.json');
 
@@ -44,7 +46,7 @@ if (!id || !file || !flag('title') || !flag('source') || !flag('license')) {
   const browser = await chromium.launch();
   const page = await browser.newPage();
   await page.setContent('<!doctype html><body></body>');
-  const out = await page.evaluate(async ({ svgText, id, hex, TARGET, MIN_SCALE, MAX_WEIGHT, CARDS, VISIBLE }) => {
+  const out = await page.evaluate(async ({ svgText, id, hex, TARGET, MIN_SCALE, MAX_WEIGHT, CARDS, VISIBLE, READS }) => {
     const NS = 'http://www.w3.org/2000/svg';
     const parse = () => new DOMParser().parseFromString(svgText, 'image/svg+xml').documentElement;
     const strip = root => {
@@ -167,10 +169,10 @@ if (!id || !file || !flag('title') || !flag('source') || !flag('license')) {
         const L = lum(d[i], d[i + 1], d[i + 2]);
         if ((Math.max(L, Lb) + 0.05) / (Math.min(L, Lb) + 0.05) >= VISIBLE) ok++;
       }
-      themes[theme] = { share: ok / n, use: ok / n >= 0.5 ? 'colour' : 'mono' };
+      themes[theme] = { share: ok / n, use: ok / n >= READS ? 'colour' : 'mono' };
     }
     return { body: colourBody(scale, weight), mono: monoBody(scale, weight), full, scale, weight, coverage: await coverage(colourBody(scale, weight)), themes, multi };
-  }, { svgText: fs.readFileSync(file, 'utf8'), id, hex: flag('hex'), TARGET, MIN_SCALE, MAX_WEIGHT, CARDS, VISIBLE });
+  }, { svgText: fs.readFileSync(file, 'utf8'), id, hex: flag('hex'), TARGET, MIN_SCALE, MAX_WEIGHT, CARDS, VISIBLE, READS });
   await browser.close();
 
   const reg = fs.existsSync(regPath) ? JSON.parse(fs.readFileSync(regPath, 'utf8')) : { logos: {} };

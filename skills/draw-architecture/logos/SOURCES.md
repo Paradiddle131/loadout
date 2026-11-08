@@ -9,14 +9,18 @@ The licence covers the drawing; the names and marks stay their owners' trademark
 | `apacheairflow` | Apache Airflow | `@iconify-json/logos` on npm (`airflow-icon`, from gilbarbara/logos) | CC0-1.0 | |
 | `dbt` | dbt | `@iconify-json/logos` (`dbt-icon`) | CC0-1.0 | |
 | `github` | GitHub | `@iconify-json/logos` (`github-icon`) | CC0-1.0 | dark |
-| `googlebigquery` | BigQuery | `simple-icons` on npm, in its brand colour | CC0-1.0 | |
-| `googlecloudcomposer` | Cloud Composer | `simple-icons`, in its brand colour | CC0-1.0 | |
+| `googlebigquery` | BigQuery | cloud.google.com/icons, core products zip (`BigQuery-512-color`) | Google Cloud icons, offered for architecture diagrams and docs | |
+| `googlecloudcomposer` | Cloud Composer | cloud.google.com/icons, legacy icons zip (`cloud_composer`) | Google Cloud icons, offered for architecture diagrams and docs | |
+| `googlecloudfirestore` | Firestore | cloud.google.com/icons, legacy icons zip (`firestore`) | Google Cloud icons, offered for architecture diagrams and docs | |
 | `googlecloudlogging` | Cloud Logging | cloud.google.com/icons, legacy icons zip (`cloud_logging`) | Google Cloud icons, offered for architecture diagrams and docs | |
-| `googlecloudrun` | Cloud Run | `@iconify-json/logos` (`google-cloud-run`) | CC0-1.0 | |
+| `googlecloudmonitoring` | Cloud Monitoring | cloud.google.com/icons, legacy icons zip (`cloud_monitoring`) | Google Cloud icons, offered for architecture diagrams and docs | |
+| `googlecloudrun` | Cloud Run | cloud.google.com/icons, core products zip (`CloudRun-512-color-rgb`) | Google Cloud icons, offered for architecture diagrams and docs | |
+| `googlecloudscheduler` | Cloud Scheduler | cloud.google.com/icons, legacy icons zip (`cloud_scheduler`) | Google Cloud icons, offered for architecture diagrams and docs | |
 | `googlecloudsql` | Cloud SQL | cloud.google.com/icons, core products zip (`CloudSQL-512-color`) | Google Cloud icons, offered for architecture diagrams and docs | |
-| `googlecloudstorage` | Cloud Storage | `simple-icons`, in its brand colour | CC0-1.0 | light |
+| `googlecloudstorage` | Cloud Storage | cloud.google.com/icons, core products zip (`Cloud_Storage-512-color`) | Google Cloud icons, offered for architecture diagrams and docs | |
+| `googlecloudworkflows` | Workflows | cloud.google.com/icons, legacy icons zip (`workflows`) | Google Cloud icons, offered for architecture diagrams and docs | |
 | `googlegemini` | Gemini Enterprise | `@iconify-json/logos` (`google-gemini-icon`) | CC0-1.0 | |
-| `googlepubsub` | Pub/Sub | `simple-icons`, in its brand colour | CC0-1.0 | light |
+| `googlepubsub` | Pub/Sub | cloud.google.com/icons, legacy icons zip (`pubsub`) | Google Cloud icons, offered for architecture diagrams and docs | |
 | `grafana` | Grafana | `@iconify-json/logos` (`grafana`) | CC0-1.0 | |
 | `helm` | Helm | `@iconify-json/logos` (`helm`) | CC0-1.0 | dark |
 | `iap` | Identity-Aware Proxy | cloud.google.com/icons, legacy icons zip (`identity-aware_proxy`) | Google Cloud icons, offered for architecture diagrams and docs | |
@@ -24,7 +28,7 @@ The licence covers the drawing; the names and marks stay their owners' trademark
 | `mcp` | Model Context Protocol | `@iconify-json/logos` (`model-context-protocol-icon`), in black | CC0-1.0 | dark |
 | `postgresql` | PostgreSQL | `@iconify-json/logos` (`postgresql`) | CC0-1.0 | |
 | `prometheus` | Prometheus | `@iconify-json/logos` (`prometheus`) | CC0-1.0 | |
-| `vertexai` | Vertex AI | cloud.google.com/icons, core products zip (`VertexAI-512-color`) | Google Cloud icons, offered for architecture diagrams and docs | light |
+| `vertexai` | Vertex AI | cloud.google.com/icons, core products zip (`VertexAI-512-color`) | Google Cloud icons, offered for architecture diagrams and docs | |
 
 ## Left out, and why
 
