@@ -141,11 +141,16 @@ p { text-wrap: pretty }
    the stage (what the choice shows) on the page's ground. The column wraps above the stage once the stage would
    fall under 60% of the row. Its chosen item is a reversed plate, so the choice shows without colour alone. */
 .rk-split { display: flex; flex-wrap: wrap; gap: var(--gap-part) var(--s6); align-items: flex-start }
-.rk-aside { flex: 1 1 16rem; padding: var(--s4); border-radius: 4px; background: var(--panel) }
+/* --aside sets the column's width (16rem unless the longest item needs more); .rk-dense halves its padding for a
+   column that must leave its stage the room */
+.rk-aside { flex: 1 1 var(--aside, 16rem); padding: var(--s4); border-radius: 4px; background: var(--panel) }
+.rk-aside.rk-dense { padding: var(--s3) var(--s2) }
 .rk-stage { flex: 999 1 0; min-inline-size: 60% }
 .rk-aside > :is(ul, ol) { list-style: none; margin: 0; padding: 0 }
 .rk-aside li > a { display: block; padding: var(--s1) var(--s2); margin: 0 calc(-1 * var(--s2)); border-radius: 4px; text-decoration: none }
 .rk-aside li > a:hover { background: var(--row) }
+/* items in the column are rows of it, never boxes inside its box: no border, a hover band, the chosen one reversed */
+.rk-aside :is(button, a):not(.rk-fold) { border: 0 }
 .rk-aside :is([aria-current="true"], [aria-current="page"]) { background: var(--ink); color: var(--paper); font-weight: 700 }
 .rk-aside :is([aria-current="true"], [aria-current="page"]):hover { background: var(--ink) }
 /* a figure with its key and caption in one <figure>: the key against the drawing, a reading note last, both a
@@ -301,6 +306,22 @@ p { text-wrap: pretty }
   border-radius: 6px; cursor: pointer; text-decoration: underline 1.5px var(--line); text-underline-offset: 4px }
 .rk-filter-reset:disabled { cursor: default; text-decoration: none }
 @media (prefers-reduced-motion: reduce) { .rk-filter > summary { transition: none } }
+/* report-kit fold: a long side column (.rk-aside) folds behind one full-width button once it stacks above its stage,
+   so the stage starts on the first screen; side by side, the button hides and the column stays open. The button
+   names the column and its current choice, with a chevron that turns when open; the folded part is gone, not
+   hidden behind a scroll. */
+.rk-fold { appearance: none; display: flex; width: 100%; align-items: center; gap: var(--s3); min-height: 44px; padding: var(--s2) var(--s3);
+  border: 0; border-radius: 6px; background: var(--paper); color: var(--ink); font: 700 var(--t-word)/1.3 var(--sans); text-align: left; cursor: pointer }
+.rk-fold[hidden] { display: none }
+.rk-fold:hover { background: var(--row) }
+.rk-fold:focus-visible { outline: 2.5px solid var(--line); outline-offset: 2px }
+.rk-fold-cur { margin-left: auto; font-weight: 600; overflow-wrap: anywhere; text-align: right }
+.rk-fold::after { content: ""; flex: none; width: 7px; height: 7px; margin: 0 4px 4px; border: solid currentColor; border-width: 0 2px 2px 0;
+  transform: rotate(45deg); transition: transform var(--t-fast) ease-out }
+.rk-fold[aria-expanded="true"]::after { transform: translateY(4px) rotate(-135deg) }
+.rk-fold:not([hidden]) + * { margin-top: var(--s3) }
+.rk-folded { display: none !important }
+@media (prefers-reduced-motion: reduce) { .rk-fold::after { transition: none } }
 /* report-kit table: a real <table>; words left, numbers right in the number size; every sortable header is one
    button across the whole cell, its words flowing inline so a wrapped label keeps its column's mark on its first
    word and the direction mark on its last. A table marked rk-stack turns each row into a block when its wrap is
@@ -417,7 +438,8 @@ button[data-tip], a[data-tip] { cursor: pointer }
       <div class="rk-head"><h2 id="one-h">One option at a time</h2></div>
       <div class="rk-split">
         <nav class="rk-aside" aria-labelledby="one-pick-h"><h3 id="one-pick-h">Cheapest first</h3>
-          <ul><li><a href="#one-at-a-time">Own van</a></li><li><a href="#one-at-a-time" aria-current="true">Bike courier</a></li><li><a href="#one-at-a-time">Partner app</a></li><li><a href="#one-at-a-time">Shared van</a></li><li><a href="#one-at-a-time">Collect in shop</a></li></ul></nav>
+          <button type="button" class="rk-fold" aria-controls="one-picks" hidden>All options<span class="rk-fold-cur">Bike courier</span></button>
+          <ul id="one-picks"><li><a href="#one-at-a-time" data-rk-fold-pick>Own van</a></li><li><a href="#one-at-a-time" data-rk-fold-pick aria-current="true">Bike courier</a></li><li><a href="#one-at-a-time" data-rk-fold-pick>Partner app</a></li><li><a href="#one-at-a-time" data-rk-fold-pick>Shared van</a></li><li><a href="#one-at-a-time" data-rk-fold-pick>Collect in shop</a></li></ul></nav>
         <div class="rk-stage">
           <h3>Bike courier</h3>
           <p>A local courier on a cargo bike, booked by the hour.</p>
@@ -664,6 +686,46 @@ button[data-tip], a[data-tip] { cursor: pointer }
     }
   }
   RK.filter = { count };
+  (RK.inits = RK.inits || []).push(init);
+})();
+/* report-kit fold. Markup: inside a .rk-split, <div class="rk-aside"> holding the column's head, then
+   <button type="button" class="rk-fold" aria-controls="ID" hidden>Its name<span class="rk-fold-cur"></span></button>,
+   then the part it folds (id="ID"); the stage is the split's .rk-stage. Once the stage sits under the column, the
+   button shows and the part folds; side by side, the button hides and the part stays open. A click on an element
+   marked data-rk-fold-pick inside the part (a choice) folds it again and gives the button the focus.
+   ReportKit.fold.current(el, text) names the current choice on the button of the column holding el. */
+(() => {
+  const RK = (window.ReportKit = window.ReportKit || {});
+  function init(root) {
+    for (const btn of root.querySelectorAll(".rk-aside > .rk-fold")) {
+      if (btn.dataset.rkFoldOn) continue;
+      btn.dataset.rkFoldOn = "";
+      const aside = btn.parentElement, part = document.getElementById(btn.getAttribute("aria-controls"));
+      const stage = aside.parentElement.querySelector(":scope > .rk-stage");
+      if (!part || !stage) continue;
+      let stacked = null;
+      const set = (open) => { part.classList.toggle("rk-folded", !open); btn.setAttribute("aria-expanded", String(open)); };
+      const sync = () => {
+        const s = stage.getBoundingClientRect().top >= aside.getBoundingClientRect().bottom - 1;
+        if (s === stacked) return;
+        stacked = s; btn.hidden = !s; set(!s);
+      };
+      btn.addEventListener("click", () => set(part.classList.contains("rk-folded")));
+      part.addEventListener("click", (e) => {
+        if (stacked && e.target.closest && e.target.closest("[data-rk-fold-pick]")) { set(false); setTimeout(() => btn.focus(), 0); } // after a link's own navigation
+      });
+      if (window.ResizeObserver) new ResizeObserver(sync).observe(aside.parentElement); else window.addEventListener("resize", sync);
+      sync();
+    }
+  }
+  RK.fold = {
+    init,
+    current(el, text) {
+      const a = el && el.closest && el.closest(".rk-aside");
+      const c = a && a.querySelector(":scope > .rk-fold .rk-fold-cur");
+      if (c) c.textContent = text || "";
+    },
+  };
   (RK.inits = RK.inits || []).push(init);
 })();
 /* report-kit sortable table. Markup: <table class="rk-table" data-rk-sort> whose header cells carry

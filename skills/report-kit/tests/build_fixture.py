@@ -246,7 +246,8 @@ def one_at_a_time():
     the chosen one."""
     chosen, before = "Bike courier", "Own van"
     picks = "".join(
-        f'<li><a href="#one-at-a-time"{" aria-current=\"true\"" if n == chosen else ""}>{esc(n)}</a></li>' for n, *_ in OPTIONS
+        f'<li><a href="#one-at-a-time" data-rk-fold-pick{" aria-current=\"true\"" if n == chosen else ""}>{esc(n)}</a></li>'
+        for n, *_ in OPTIONS
     )
     wd = dict((n, w) for n, _, w, _ in OPTIONS)[chosen]
     bars = "".join(
@@ -261,7 +262,8 @@ def one_at_a_time():
       <div class="rk-head"><h2 id="one-h">One option at a time</h2></div>
       <div class="rk-split">
         <nav class="rk-aside" aria-labelledby="one-pick-h"><h3 id="one-pick-h">Cheapest first</h3>
-          <ul>{picks}</ul></nav>
+          <button type="button" class="rk-fold" aria-controls="one-picks" hidden>All options<span class="rk-fold-cur">{esc(chosen)}</span></button>
+          <ul id="one-picks">{picks}</ul></nav>
         <div class="rk-stage">
           <h3>{esc(chosen)}</h3>
           <p>A local courier on a cargo bike, booked by the hour.</p>
