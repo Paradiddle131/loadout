@@ -51,6 +51,8 @@ Each says when it does not apply.
   When not: never; a section that needs to stand out says so in its heading's words.
 - **A control sits beside the heading of the section it changes**, never in a page-wide bar.
   When not: a control that truly changes the whole page (the theme) may sit by the title.
+- **One control for one job across the page:** a part that narrows a list does it with the control the page already uses for narrowing (the kit's filter beside the section's head, say), in the same look; a second way to do the same thing, styled apart, makes the reader learn the page twice.
+  When not: two to four views of the same data are a switch, wherever they are.
 - **A segmented switch has two to four segments**, for views of the same data.
   When not: more views, or views of different things, are tabs or a select.
 - **Parts as tabs** when a page has more than one job; each part has its own URL, and an empty part drops out.
@@ -78,6 +80,7 @@ Each says when it does not apply.
   When not: a dense grid whose cells must read apart (a table) keeps its hairlines.
 - **A side column sits on the raised surface; the stage it drives stays on the ground:** a list to choose from (a picker, a contents, a ladder of options) beside what the choice shows goes in `.rk-aside` within `.rk-split`, with its own head at the stage head's level, and the chosen item is a reversed plate, marked by weight and plate as well as colour.
   The column's items are rows of it, never boxes inside its box: no border on a link, a chip or a button there, a hover band, the chosen one reversed.
+  That is for the items the column lists; a control that changes what the list shows (a filter, a search, a type) keeps a control's look, and is the page's own filter where the page has one.
   The surface tells controls from content without a border, and keeps the column one region however long it runs; the stage's parts keep their rules, so the two halves never share a device.
   On a narrow screen the column comes first: keep it short, folding a long one behind `.rk-fold` (one button naming the column and its current choice) so the stage starts on the first screen; a pick folds it again.
   Size the column to its longest item (`--aside`) rather than let ids wrap, and give a column that must leave its stage room the dense padding (`.rk-dense`).
@@ -101,6 +104,12 @@ Each says when it does not apply.
   Where a compact view opens the browser on demand (a "See all" under one example), it may be the kit's dialog, holding the same split, full screen on a phone.
   Grounds: NN/g, [Modal and nonmodal dialogs](https://www.nngroup.com/articles/modal-nonmodal-dialog/) (modals for short, direct exchanges; not for decisions that need information outside them); WCAG 2.2, [Status Messages](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html) (its example: the count of search results announced without moving the focus); NN/g, [Placeholders in form fields are harmful](https://www.nngroup.com/articles/form-design-placeholders/) (a label that vanishes as the reader types, in text too faint to read).
   When not: a list of a screen or less needs no find box.
+- **Weigh the shape against what it holds:** a list beside a stage that shows one item at a time (`.rk-split`) pays when each item is long and the reader moves between items; when each item is a few lines, the list runs far longer than any item it shows and the shape is upside down: keep the items together.
+  A reference aside (a glossary, a list of notes) is not a data tool: one list, the find box and the page's filter, and nothing a reader must learn to use.
+  When not: items read side by side as values are a table.
+- **Keep a lookup list short on the page:** a list the reader dips into rather than reads through (a glossary, an index of dozens of entries) stays within about a screen, in a box of its own (named, reachable by keyboard, its scrollbar in sight) under its find box and filter, or folded behind them; laying every entry out on the page, closed or open, makes the part many screens long for a reader who wanted one entry.
+  The box is a lookup's, not a reading surface's: the checker's caution about a scroll box inside the page is for lists read through, and a sticky group name inside the box keeps the reader's place.
+  When not: a list of a screen or less shows whole; a list the reader reads through in order runs in the page.
 - **One statement per fact:** each fact has one home, by role: a name names; a tag line places it (a group, a rung) in words that repeat neither the name nor each other; a lead says once what it is; the figure shows; a list of changes lists without restating the lead; a caption adds what the figure cannot show, or is left out.
   A fact said three times in three styles (a tag line, a description, a caption) takes three reads to find it is one fact, and makes neighbouring blocks look alike.
   Test: hide each sentence in turn; if the reader loses nothing, delete it.
