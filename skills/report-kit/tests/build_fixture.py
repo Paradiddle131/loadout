@@ -282,6 +282,59 @@ def one_at_a_time():
     </section>"""
 
 
+# standing orders, each sent three Saturdays by three options: an outcome per Saturday ("" = not sent that week)
+STANDING = [
+    ("Café on the corner", "Forty croissants before seven.", {"Own van": "ok ok warn", "Bike courier": "ok ok ok", "Partner app": "warn no "}),
+    ("Wedding cake", "A three-tier cake, collected by nobody.", {"Own van": "ok  ", "Bike courier": "bad  ", "Partner app": "  "}),
+    ("School fair", "Two hundred buns in four crates.", {"Own van": "ok warn ok", "Bike courier": "warn warn bad", "Partner app": "ok no warn"}),
+    ("Night shift", "Sandwiches for a hospital ward at ten at night.", {"Own van": "warn ok ok", "Bike courier": "ok ok ok", "Partner app": "no no ok"}),
+]
+WORD = {"ok": "on time", "warn": "late", "bad": "damaged", "no": "not delivered", "": "not sent"}
+
+
+def runs(text):
+    """Three Saturdays as a run of marks, said in words."""
+    ks = (text.split(" ") + ["", "", ""])[:3]
+    marks = "".join(f'<i class="rk-mark" data-k="{k}"></i>' if k else '<i class="rk-mark"></i>' for k in ks)
+    return f'<span class="rk-marks" role="img" aria-label="{esc(", ".join(WORD[k] for k in ks))}">{marks}</span>'
+
+
+def order_card(i):
+    name, about, by = STANDING[i]
+    rows = "".join(f'<tr><th scope="row">{esc(o)}</th><td>{runs(r)}</td></tr>' for o, r in by.items())
+    return (f'<h3 id="order-name">{esc(name)}</h3><p>{esc(about)}</p>'
+            f'<table class="rk-table"><caption class="rk-sr">Three Saturdays by option</caption>'
+            f'<thead><tr><th scope="col">Option</th><th scope="col">Three Saturdays</th></tr></thead><tbody>{rows}</tbody></table>')
+
+
+def order_by_order():
+    """One item of a list at a time: Previous and Next above the item, the position after them, a dialog for the
+    method; each item's outcomes as runs of marks. The page's own script steps (STEP_JS)."""
+    key = "".join(
+        f'<li><span data-tip="{esc(d)}"><i class="rk-mark" data-k="{k}" aria-hidden="true"></i>{esc(h)}</span></li>' for _, h, k, d in COLUMNS
+    ) + '<li><span data-tip="The option was not tried that Saturday."><i class="rk-mark" aria-hidden="true"></i>Not sent</span></li>'
+    prev = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M7.5 2.5 4 6l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    nxt = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 8 6 4.5 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    cross = '<svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true"><path d="M2 2 12 12M12 2 2 12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>'
+    return f"""<section class="rk-section" aria-labelledby="orders-h" id="orders">
+      <div class="rk-head"><h2 id="orders-h">Standing orders</h2></div>
+      <ul class="rk-key">{key}</ul>
+      <div class="rk-step" id="order-step">
+        <span class="rk-step-pair"><button type="button" data-step="-1" aria-label="Previous order" disabled>{prev}Previous</button>
+          <button type="button" data-step="1" aria-label="Next order">Next{nxt}</button></span>
+        <span class="rk-step-pos" aria-live="polite">Order 1 of {len(STANDING)}</span>
+        <button type="button" class="rk-step-end" data-rk-open="how-scored">How a Saturday is scored</button></div>
+      <article id="order-card" aria-labelledby="order-name">{order_card(0)}</article>
+      <dialog class="rk-dialog" id="how-scored" aria-labelledby="how-h">
+        <div class="rk-dialog-top"><h2 id="how-h">How a Saturday is scored</h2>
+          <button type="button" class="rk-dialog-close" aria-label="Close">{cross}</button></div>
+        <p>Each Saturday counts once, by what the customer found at the door.</p>
+        <h3>On time</h3><p>The order arrived within <span class="rk-term" data-tip="The hour the customer chose when ordering.">the hour</span>.</p>
+        <h3>Not sent</h3><p>The option was not tried that Saturday, so it has no outcome.</p>
+      </dialog>
+    </section>"""
+
+
 def weekly():
     """Twelve invented weeks of on-time orders in 100 for three options."""
     base = {"Own van": 74, "Bike courier": 80, "Partner app": 63}
@@ -351,6 +404,7 @@ def page():
       <ul class="rk-rows">{takeaways()}</ul>
     </section>
     {one_at_a_time()}
+    {order_by_order()}
   </div>
   <div id="trends" role="tabpanel" aria-labelledby="tab-trends" hidden>
     <section class="rk-section" aria-labelledby="trends-h">
@@ -376,6 +430,21 @@ def page():
 /* report-kit:js all */
 </script>
 <script>
+const ORDERS = {json.dumps([order_card(i) for i in range(len(STANDING))])};
+(() => {{ // the page's own stepping: Previous and Next keep their places; the item takes its own height
+  const step = document.getElementById("order-step"), card = document.getElementById("order-card");
+  const [back, fwd] = step.querySelectorAll("[data-step]"), pos = step.querySelector(".rk-step-pos");
+  let at = 0;
+  const go = d => {{
+    at = Math.max(0, Math.min(ORDERS.length - 1, at + d));
+    card.innerHTML = ORDERS[at];
+    pos.textContent = "Order " + (at + 1) + " of " + ORDERS.length;
+    back.disabled = at === 0; fwd.disabled = at === ORDERS.length - 1;
+    const f = document.activeElement; // the pressed button went to an end and lost the focus: give it to the other
+    if (!f || f === document.body || f.disabled) (d < 0 ? fwd : back).focus();
+  }};
+  back.addEventListener("click", () => go(-1)); fwd.addEventListener("click", () => go(1));
+}})();
 const WEEKS = {json.dumps(data, separators=(",", ":"))};
 const NAMES = {json.dumps(names)};
 ReportKit.plot(document.getElementById("trend"), (t, width) => ({{

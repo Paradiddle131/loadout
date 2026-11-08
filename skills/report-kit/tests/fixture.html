@@ -31,6 +31,8 @@
   --hair: color-mix(in srgb, var(--ink) 16%, transparent);
   --row: color-mix(in srgb, var(--line) 6%, transparent);
   --tip: var(--ink); --tip-ink: var(--paper);
+  /* the scrim behind a modal dialog: the page dimmed toward the dark ground in both themes */
+  --scrim: color-mix(in srgb, var(--navy) 45%, transparent);
   --shadow: 0 6px 18px color-mix(in srgb, var(--navy) 22%, transparent); /* none on dark grounds, where a shadow reads as a glow */
   /* status: each is also a mark shape (marks.css), never a colour alone */
   --ok: var(--green); --warn: var(--amber); --bad: var(--scarlet); --info: var(--petrol);
@@ -67,7 +69,7 @@
     --ok: var(--green-lt); --warn: var(--amber-lt); --bad: var(--scarlet-lt); --info: var(--petrol-lt);
     --viz-2: var(--vermilion-lt); --viz-3: var(--teal-lt); --viz-4: var(--plum-lt);
     --grade-hi: var(--cobalt-md); --grade-mid: var(--slate-dk); --grade-lo: var(--vermilion-md);
-    --shadow: none;
+    --shadow: none; --scrim: color-mix(in srgb, black 60%, transparent);
     --w-head: 800; --lh-word: 1.5; --track-word: .01em;
     color-scheme: dark;
   }
@@ -77,7 +79,7 @@
   --ok: var(--green-lt); --warn: var(--amber-lt); --bad: var(--scarlet-lt); --info: var(--petrol-lt);
   --viz-2: var(--vermilion-lt); --viz-3: var(--teal-lt); --viz-4: var(--plum-lt);
   --grade-hi: var(--cobalt-md); --grade-mid: var(--slate-dk); --grade-lo: var(--vermilion-md);
-  --shadow: none;
+  --shadow: none; --scrim: color-mix(in srgb, black 60%, transparent);
   --w-head: 800; --lh-word: 1.5; --track-word: .01em;
   color-scheme: dark;
 }
@@ -168,6 +170,12 @@ p { text-wrap: pretty }
 [data-k="warn"]:is(.rk-mark, .rk-dots i, .rk-pt) { background: var(--warn); border-radius: 1px; transform: scale(.86) }
 [data-k="bad"]:is(.rk-mark, .rk-dots i, .rk-pt) { background: var(--bad); border-radius: 1px; transform: rotate(45deg) scale(.8) }
 [data-k="info"]:is(.rk-mark, .rk-dots i, .rk-pt) { background: var(--info); clip-path: polygon(50% 4%, 100% 96%, 0 96%) }
+/* a run: a few outcomes of one thing in a row (three tries, four weeks), each in its own slot so runs line up from row
+   to row; a slot with no outcome (not run, no data) is a small ink dot, not a sixth status. The run says itself in
+   words: role="img" and an aria-label on .rk-marks. */
+.rk-marks { display: inline-flex; gap: 6px; align-items: center; vertical-align: -1px; white-space: nowrap }
+.rk-marks > .rk-mark { width: 10px; height: 10px }
+.rk-mark:not([data-k]) { background: var(--ink); border-radius: 50%; transform: scale(.36) }
 /* a key: marks with their names, each name defined in the bubble */
 .rk-key { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s5); margin: var(--s4) 0 0; padding: 0; list-style: none }
 .rk-key > *, .rk-key > * > [data-tip] { display: inline-flex; gap: var(--s2); align-items: center; min-height: 28px; font-weight: 600 }
@@ -322,6 +330,39 @@ p { text-wrap: pretty }
 .rk-fold:not([hidden]) + * { margin-top: var(--s3) }
 .rk-folded { display: none !important }
 @media (prefers-reduced-motion: reduce) { .rk-fold::after { transition: none } }
+/* report-kit step: one item of a list at a time. Previous and Next sit side by side above the item, so neither moves
+   while the reader keeps pressing it, whatever height the item takes; the position ("Order 3 of 12") follows them,
+   and any further control in the row (a "See all 12") wears the same look. At an end the button is disabled and
+   keeps its place, an empty slot, so the other never shifts. */
+.rk-step { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); margin: 0 0 var(--s4) }
+.rk-step-pair { display: inline-flex; gap: var(--s2) }
+.rk-step :is(button, a.rk-step-btn) { font: 600 var(--t-word)/1.1 var(--sans); color: var(--ink); background: transparent;
+  border: 1px solid var(--hair); border-radius: 10px; min-height: 44px; padding: 0 var(--s4); display: inline-flex; gap: var(--s2);
+  align-items: center; cursor: pointer; text-decoration: none; transition: background-color var(--t-fast) ease-out }
+.rk-step :is(button, a.rk-step-btn):hover { background: var(--row) }
+.rk-step :is(button, a.rk-step-btn) svg { width: 12px; height: 12px; flex: none }
+.rk-step button:disabled { visibility: hidden }
+.rk-step-pos { font-weight: 600 }
+.rk-step-end { margin-left: auto }
+@media (prefers-reduced-motion: reduce) { .rk-step :is(button, a.rk-step-btn) { transition: none } }
+/* report-kit dialog: a modal <dialog> for a short, direct exchange (a method note, a definition too long for the
+   bubble), opened by showModal so the page behind is inert. Its head is the section head's (an h2 over the 2px ink
+   rule) with a close button beside it; its own headings go on from that h2 without skipping a level. It sits on the
+   page's ground over a scrim, with a full-ink edge in both themes, since a shadow does not lift on a dark ground. */
+.rk-dialog { width: min(40rem, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: var(--s5); border: 1px solid var(--ink);
+  border-radius: 10px; background: var(--paper); color: var(--ink); font: inherit; letter-spacing: inherit; box-shadow: var(--shadow);
+  overscroll-behavior: contain }
+.rk-dialog::backdrop { background: var(--scrim) }
+.rk-dialog-top { display: flex; gap: var(--s3); align-items: flex-start; justify-content: space-between; padding-bottom: var(--s3);
+  border-bottom: 2px solid var(--ink); margin-bottom: var(--s4) }
+.rk-dialog-top h2 { margin: 0; font-size: var(--t-head); font-weight: var(--w-head); line-height: 1.2 }
+.rk-dialog-top h2:focus { outline: none }
+.rk-dialog h3 { margin: var(--gap-item) 0 6px; font-size: var(--t-find); font-weight: var(--w-head); line-height: 1.25 }
+.rk-dialog :is(h2, h3) + p { margin-top: 0 }
+.rk-dialog p { max-width: var(--measure) }
+.rk-dialog-close { flex: none; width: 44px; height: 44px; display: grid; place-items: center; margin: -6px -6px 0 0; padding: 0; border: 0;
+  border-radius: 8px; background: transparent; color: var(--ink); cursor: pointer }
+.rk-dialog-close:hover { background: var(--row) }
 /* report-kit table: a real <table>; words left, numbers right in the number size; every sortable header is one
    button across the whole cell, its words flowing inline so a wrapped label keeps its column's mark on its first
    word and the direction mark on its last. A table marked rk-stack turns each row into a block when its wrap is
@@ -455,6 +496,23 @@ button[data-tip], a[data-tip] { cursor: pointer }
           </div>
         </div>
       </div>
+    </section>
+    <section class="rk-section" aria-labelledby="orders-h" id="orders">
+      <div class="rk-head"><h2 id="orders-h">Standing orders</h2></div>
+      <ul class="rk-key"><li><span data-tip="Arrived within the hour the customer chose."><i class="rk-mark" data-k="ok" aria-hidden="true"></i>On time</span></li><li><span data-tip="Arrived, but after the hour the customer chose."><i class="rk-mark" data-k="warn" aria-hidden="true"></i>Late</span></li><li><span data-tip="Arrived with something squashed, cold or missing."><i class="rk-mark" data-k="bad" aria-hidden="true"></i>Damaged</span></li><li><span data-tip="Never arrived; the bakery refunded the order."><i class="rk-mark" data-k="no" aria-hidden="true"></i>Not delivered</span></li><li><span data-tip="The option was not tried that Saturday."><i class="rk-mark" aria-hidden="true"></i>Not sent</span></li></ul>
+      <div class="rk-step" id="order-step">
+        <span class="rk-step-pair"><button type="button" data-step="-1" aria-label="Previous order" disabled><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M7.5 2.5 4 6l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Previous</button>
+          <button type="button" data-step="1" aria-label="Next order">Next<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 8 6 4.5 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button></span>
+        <span class="rk-step-pos" aria-live="polite">Order 1 of 4</span>
+        <button type="button" class="rk-step-end" data-rk-open="how-scored">How a Saturday is scored</button></div>
+      <article id="order-card" aria-labelledby="order-name"><h3 id="order-name">Café on the corner</h3><p>Forty croissants before seven.</p><table class="rk-table"><caption class="rk-sr">Three Saturdays by option</caption><thead><tr><th scope="col">Option</th><th scope="col">Three Saturdays</th></tr></thead><tbody><tr><th scope="row">Own van</th><td><span class="rk-marks" role="img" aria-label="on time, on time, late"><i class="rk-mark" data-k="ok"></i><i class="rk-mark" data-k="ok"></i><i class="rk-mark" data-k="warn"></i></span></td></tr><tr><th scope="row">Bike courier</th><td><span class="rk-marks" role="img" aria-label="on time, on time, on time"><i class="rk-mark" data-k="ok"></i><i class="rk-mark" data-k="ok"></i><i class="rk-mark" data-k="ok"></i></span></td></tr><tr><th scope="row">Partner app</th><td><span class="rk-marks" role="img" aria-label="late, not delivered, not sent"><i class="rk-mark" data-k="warn"></i><i class="rk-mark" data-k="no"></i><i class="rk-mark"></i></span></td></tr></tbody></table></article>
+      <dialog class="rk-dialog" id="how-scored" aria-labelledby="how-h">
+        <div class="rk-dialog-top"><h2 id="how-h">How a Saturday is scored</h2>
+          <button type="button" class="rk-dialog-close" aria-label="Close"><svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true"><path d="M2 2 12 12M12 2 2 12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button></div>
+        <p>Each Saturday counts once, by what the customer found at the door.</p>
+        <h3>On time</h3><p>The order arrived within <span class="rk-term" data-tip="The hour the customer chose when ordering.">the hour</span>.</p>
+        <h3>Not sent</h3><p>The option was not tried that Saturday, so it has no outcome.</p>
+      </dialog>
     </section>
   </div>
   <div id="trends" role="tabpanel" aria-labelledby="tab-trends" hidden>
@@ -728,6 +786,40 @@ button[data-tip], a[data-tip] { cursor: pointer }
   };
   (RK.inits = RK.inits || []).push(init);
 })();
+/* report-kit dialog. Markup: <button type="button" data-rk-open="ID">...</button> opens
+   <dialog class="rk-dialog" id="ID" aria-labelledby="H"> with <div class="rk-dialog-top"><h2 id="H">...</h2>
+   <button type="button" class="rk-dialog-close" aria-label="Close">(a cross)</button></div> and its content.
+   It opens modal (showModal: the page behind is inert, Tab stays in the dialog and the browser), puts the focus on
+   its heading so the reader starts at the top of a long content, and on close (the button, Escape, a click on the
+   scrim) gives the focus back to what opened it. API: ReportKit.dialog.open(id), .close(id). */
+(() => {
+  const RK = (window.ReportKit = window.ReportKit || {});
+  const openers = new WeakMap();
+  function open(id, from) {
+    const d = document.getElementById(id);
+    if (!d || d.open) return;
+    openers.set(d, from || document.activeElement);
+    d.showModal();
+    const h = d.querySelector(".rk-dialog-top h2");
+    if (h) { if (!h.hasAttribute("tabindex")) h.tabIndex = -1; h.focus({ preventScroll: true }); }
+  }
+  function close(id) { const d = document.getElementById(id); if (d && d.open) d.close(); }
+  function init(root) {
+    for (const b of root.querySelectorAll("[data-rk-open]")) b.addEventListener("click", () => open(b.dataset.rkOpen, b));
+    for (const d of root.querySelectorAll("dialog.rk-dialog")) {
+      if (d.dataset.rkDialogOn) continue;
+      d.dataset.rkDialogOn = "";
+      d.addEventListener("click", e => {
+        if (e.target.closest(".rk-dialog-close")) return d.close();
+        // a click on the scrim (outside the dialog's box) closes it
+        if (e.target === d) { const r = d.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) d.close(); }
+      });
+      d.addEventListener("close", () => { const o = openers.get(d); if (o && document.contains(o)) o.focus({ preventScroll: true }); });
+    }
+  }
+  RK.dialog = { open, close };
+  (RK.inits = RK.inits || []).push(init);
+})();
 /* report-kit sortable table. Markup: <table class="rk-table" data-rk-sort> whose header cells carry
    data-sort="default" (the column that restores the page's own order), "number" or "text", each holding one
    <button type="button">; a cell's sort value is its data-v, else its text. Numbers sort highest first on the
@@ -873,7 +965,10 @@ button[data-tip], a[data-tip] { cursor: pointer }
    handle (or moved with the arrow keys) and closed; data-tip-more="#id" on the element adds a link to a fuller
    entry, labelled by data-tip-more-label. A bubble on an element the keyboard rests on stays through a scroll and
    follows it; the pointer's bubble closes on a scroll. With the kit scoped to part of a page, each root has its
-   own bubble, inside the root (so it wears the root's tokens). API: ReportKit.tip.show(el), .hide(), .unpin(). */
+   own bubble, inside the root (so it wears the root's tokens). Inside an open modal <dialog> the bubble moves into
+   the dialog while it shows (the rest of the page is inert and under the dialog's top layer), goes home when the
+   dialog closes, and the first Escape closes the bubble, not the dialog. API: ReportKit.tip.show(el), .hide(),
+   .unpin(). */
 (() => {
   const RK = (window.ReportKit = window.ReportKit || {});
   const GRIP = '<svg viewBox="0 0 8 12" width="8" height="12" aria-hidden="true" fill="currentColor"><circle cx="2" cy="2" r="1.1"/>' +
@@ -893,6 +988,12 @@ button[data-tip], a[data-tip] { cursor: pointer }
       (whole ? document.body : root).append(box);
     }
     box.setAttribute("aria-hidden", "true");
+    const home = box.parentElement;
+    // an element inside an open modal dialog gets the bubble inside that dialog, so it is drawn above the dialog
+    const lodge = el => {
+      const into = (el.closest && el.closest("dialog[open]")) || home;
+      if (box.parentElement !== into) into.append(box);
+    };
     const canPin = box.hasAttribute("data-pin");
     const texts = document.createElement("div");
     texts.hidden = true;
@@ -925,13 +1026,21 @@ button[data-tip], a[data-tip] { cursor: pointer }
       const vw = document.documentElement.clientWidth, vh = innerHeight, b = box.getBoundingClientRect();
       left = Math.max(8, Math.min(left, vw - 8 - b.width));
       top = Math.max(8, Math.min(top, Math.max(8, vh - 8 - b.height)));
-      box.style.left = Math.round(left + (pinned ? scrollX : 0)) + "px";
-      box.style.top = Math.round(top + (pinned ? scrollY : 0)) + "px";
+      // a pinned bubble is placed against the page, or against its dialog (the dialog is its containing block)
+      let ox = 0, oy = 0;
+      if (pinned) {
+        const d = box.parentElement.closest("dialog");
+        if (d) { const r = d.getBoundingClientRect(); ox = d.scrollLeft - r.left - d.clientLeft; oy = d.scrollTop - r.top - d.clientTop; }
+        else { ox = scrollX; oy = scrollY; }
+      }
+      box.style.left = Math.round(left + ox) + "px";
+      box.style.top = Math.round(top + oy) + "px";
     }
     function show(el) {
       if (pinned) return;
       clearTimeout(timer);
       owner = el;
+      lodge(el);
       box.textContent = el.dataset.tip;
       box.hidden = false;
       place(el);
@@ -946,6 +1055,8 @@ button[data-tip], a[data-tip] { cursor: pointer }
       unpin(false);
       clearTimeout(timer);
       owner = el;
+      if (box.parentElement !== ((el.closest && el.closest("dialog[open]")) || home)) box.hidden = true; // placed afresh in its new home
+      lodge(el);
       const title = (el.dataset.tipTitle || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 48);
       box.innerHTML = `<div class="rk-tip-bar"><span class="rk-tip-handle" role="button" tabindex="0" aria-label="Move this definition: drag it, or use the arrow keys">${GRIP}<span></span></span>` +
         `<button type="button" class="rk-tip-close" aria-label="Close">${CROSS}</button></div><p class="rk-tip-body"></p>`;
@@ -1015,7 +1126,12 @@ button[data-tip], a[data-tip] { cursor: pointer }
     });
     // Tab from a pinned element goes into its bubble, so the keyboard can move and close it
     document.addEventListener("keydown", e => {
-      if (e.key === "Escape") { if (pinned) unpin(true); else hide(true); return; }
+      if (e.key === "Escape") {
+        // inside a modal dialog, one Escape closes the innermost thing: the bubble first, then the dialog
+        if ((pinned || !box.hidden) && box.parentElement.closest("dialog[open]")) e.preventDefault();
+        if (pinned) unpin(true); else hide(true);
+        return;
+      }
       if (e.key === "Tab" && !e.shiftKey && pinned && document.activeElement === owner) {
         e.preventDefault();
         box.querySelector(".rk-tip-handle").focus({ preventScroll: true });
@@ -1023,10 +1139,16 @@ button[data-tip], a[data-tip] { cursor: pointer }
     });
     // a scroll closes the pointer's bubble; the keyboard's stays on its element (the browser scrolls a focused
     // element into view, which would otherwise close the bubble it just opened) and follows it
+    // (captured, so a scroll inside a box, a dialog's list included, counts too)
     addEventListener("scroll", () => {
       if (pinned || !owner) return;
       if (document.activeElement === owner && owner.matches(":focus-visible") && !box.hidden) place(owner); else hide(true);
-    }, { passive: true });
+    }, { passive: true, capture: true });
+    // a closing dialog takes no bubble with it: the bubble closes and goes home
+    document.addEventListener("close", e => {
+      if (!(e.target instanceof HTMLDialogElement) || !e.target.contains(box)) return;
+      unpin(false); hide(true); home.append(box);
+    }, true);
     addEventListener("resize", () => { if (pinned) { const b = box.getBoundingClientRect(); moveTo(b.left, b.top); } });
     document.addEventListener("rk:tab", () => unpin(false));
     RK.tip = { show, hide: () => hide(true), unpin: () => unpin(false), pin };
@@ -1134,6 +1256,21 @@ button[data-tip], a[data-tip] { cursor: pointer }
 /* /report-kit:js */
 </script>
 <script>
+const ORDERS = ["<h3 id=\"order-name\">Caf\u00e9 on the corner</h3><p>Forty croissants before seven.</p><table class=\"rk-table\"><caption class=\"rk-sr\">Three Saturdays by option</caption><thead><tr><th scope=\"col\">Option</th><th scope=\"col\">Three Saturdays</th></tr></thead><tbody><tr><th scope=\"row\">Own van</th><td><span class=\"rk-marks\" role=\"img\" aria-label=\"on time, on time, late\"><i class=\"rk-mark\" data-k=\"ok\"></i><i class=\"rk-mark\" data-k=\"ok\"></i><i class=\"rk-mark\" data-k=\"warn\"></i></span></td></tr><tr><th scope=\"row\">Bike courier</th><td><span class=\"rk-marks\" role=\"img\" aria-label=\"on time, on time, on time\"><i class=\"rk-mark\" data-k=\"ok\"></i><i class=\"rk-mark\" data-k=\"ok\"></i><i class=\"rk-mark\" data-k=\"ok\"></i></span></td></tr><tr><th scope=\"row\">Partner app</th><td><span class=\"rk-marks\" role=\"img\" aria-label=\"late, not delivered, not sent\"><i class=\"rk-mark\" data-k=\"warn\"></i><i class=\"rk-mark\" data-k=\"no\"></i><i class=\"rk-mark\"></i></span></td></tr></tbody></table>", "<h3 id=\"order-name\">Wedding cake</h3><p>A three-tier cake, collected by nobody.</p><table class=\"rk-table\"><caption class=\"rk-sr\">Three Saturdays by option</caption><thead><tr><th scope=\"col\">Option</th><th scope=\"col\">Three Saturdays</th></tr></thead><tbody><tr><th scope=\"row\">Own van</th><td><span class=\"rk-marks\" role=\"img\" aria-label=\"on time, not sent, not sent\"><i class=\"rk-mark\" data-k=\"ok\"></i><i class=\"rk-mark\"></i><i class=\"rk-mark\"></i></span></td></tr><tr><th scope=\"row\">Bike courier</th><td><span class=\"rk-marks\" role=\"img\" aria-label=\"damaged, not sent, not sent\"><i class=\"rk-mark\" data-k=\"bad\"></i><i class=\"rk-mark\"></i><i class=\"rk-mark\"></i></span></td></tr><tr><th scope=\"row\">Partner app</th><td><span class=\"rk-marks\" role=\"img\" aria-label=\"not sent, not sent, not sent\"><i class=\"rk-mark\"></i><i class=\"rk-mark\"></i><i class=\"rk-mark\"></i></span></td></tr></tbody></table>", "<h3 id=\"order-name\">School fair</h3><p>Two hundred buns in four crates.</p><table class=\"rk-table\"><caption class=\"rk-sr\">Three Saturdays by option</caption><thead><tr><th scope=\"col\">Option</th><th scope=\"col\">Three Saturdays</th></tr></thead><tbody><tr><th scope=\"row\">Own van</th><td><span class=\"rk-marks\" role=\"img\" aria-label=\"on time, late, on time\"><i class=\"rk-mark\" data-k=\"ok\"></i><i class=\"rk-mark\" data-k=\"warn\"></i><i class=\"rk-mark\" data-k=\"ok\"></i></span></td></tr><tr><th scope=\"row\">Bike courier</th><td><span class=\"rk-marks\" role=\"img\" aria-label=\"late, late, damaged\"><i class=\"rk-mark\" data-k=\"warn\"></i><i class=\"rk-mark\" data-k=\"warn\"></i><i class=\"rk-mark\" data-k=\"bad\"></i></span></td></tr><tr><th scope=\"row\">Partner app</th><td><span class=\"rk-marks\" role=\"img\" aria-label=\"on time, not delivered, late\"><i class=\"rk-mark\" data-k=\"ok\"></i><i class=\"rk-mark\" data-k=\"no\"></i><i class=\"rk-mark\" data-k=\"warn\"></i></span></td></tr></tbody></table>", "<h3 id=\"order-name\">Night shift</h3><p>Sandwiches for a hospital ward at ten at night.</p><table class=\"rk-table\"><caption class=\"rk-sr\">Three Saturdays by option</caption><thead><tr><th scope=\"col\">Option</th><th scope=\"col\">Three Saturdays</th></tr></thead><tbody><tr><th scope=\"row\">Own van</th><td><span class=\"rk-marks\" role=\"img\" aria-label=\"late, on time, on time\"><i class=\"rk-mark\" data-k=\"warn\"></i><i class=\"rk-mark\" data-k=\"ok\"></i><i class=\"rk-mark\" data-k=\"ok\"></i></span></td></tr><tr><th scope=\"row\">Bike courier</th><td><span class=\"rk-marks\" role=\"img\" aria-label=\"on time, on time, on time\"><i class=\"rk-mark\" data-k=\"ok\"></i><i class=\"rk-mark\" data-k=\"ok\"></i><i class=\"rk-mark\" data-k=\"ok\"></i></span></td></tr><tr><th scope=\"row\">Partner app</th><td><span class=\"rk-marks\" role=\"img\" aria-label=\"not delivered, not delivered, on time\"><i class=\"rk-mark\" data-k=\"no\"></i><i class=\"rk-mark\" data-k=\"no\"></i><i class=\"rk-mark\" data-k=\"ok\"></i></span></td></tr></tbody></table>"];
+(() => { // the page's own stepping: Previous and Next keep their places; the item takes its own height
+  const step = document.getElementById("order-step"), card = document.getElementById("order-card");
+  const [back, fwd] = step.querySelectorAll("[data-step]"), pos = step.querySelector(".rk-step-pos");
+  let at = 0;
+  const go = d => {
+    at = Math.max(0, Math.min(ORDERS.length - 1, at + d));
+    card.innerHTML = ORDERS[at];
+    pos.textContent = "Order " + (at + 1) + " of " + ORDERS.length;
+    back.disabled = at === 0; fwd.disabled = at === ORDERS.length - 1;
+    const f = document.activeElement; // the pressed button went to an end and lost the focus: give it to the other
+    if (!f || f === document.body || f.disabled) (d < 0 ? fwd : back).focus();
+  };
+  back.addEventListener("click", () => go(-1)); fwd.addEventListener("click", () => go(1));
+})();
 const WEEKS = [{"name":"Own van","week":1,"v":74},{"name":"Own van","week":2,"v":76},{"name":"Own van","week":3,"v":73},{"name":"Own van","week":4,"v":77},{"name":"Own van","week":5,"v":76},{"name":"Own van","week":6,"v":73},{"name":"Own van","week":7,"v":77},{"name":"Own van","week":8,"v":79},{"name":"Own van","week":9,"v":77},{"name":"Own van","week":10,"v":79},{"name":"Own van","week":11,"v":81},{"name":"Own van","week":12,"v":80},{"name":"Bike courier","week":1,"v":83},{"name":"Bike courier","week":2,"v":81},{"name":"Bike courier","week":3,"v":78},{"name":"Bike courier","week":4,"v":82},{"name":"Bike courier","week":5,"v":84},{"name":"Bike courier","week":6,"v":81},{"name":"Bike courier","week":7,"v":83},{"name":"Bike courier","week":8,"v":85},{"name":"Bike courier","week":9,"v":84},{"name":"Bike courier","week":10,"v":80},{"name":"Bike courier","week":11,"v":82},{"name":"Bike courier","week":12,"v":79},{"name":"Partner app","week":1,"v":65},{"name":"Partner app","week":2,"v":67},{"name":"Partner app","week":3,"v":64},{"name":"Partner app","week":4,"v":66},{"name":"Partner app","week":5,"v":67},{"name":"Partner app","week":6,"v":66},{"name":"Partner app","week":7,"v":62},{"name":"Partner app","week":8,"v":64},{"name":"Partner app","week":9,"v":60},{"name":"Partner app","week":10,"v":64},{"name":"Partner app","week":11,"v":62},{"name":"Partner app","week":12,"v":59}];
 const NAMES = ["Own van", "Bike courier", "Partner app"];
 ReportKit.plot(document.getElementById("trend"), (t, width) => ({
