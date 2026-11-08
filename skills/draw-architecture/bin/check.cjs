@@ -20,12 +20,33 @@ const HEADLINE_MAX = 60;
 // A card says what a thing is, not how it is configured: its title and lines hold at most this many words
 // (a package's overline aside); a config list or a sentence belongs in the doc beside the sheet.
 const CARD_WORDS = 12;
-// A package card's grey must read apart from a plain card in every theme and style: about the light
-// sheet's step from white to its grey.
-const PKG_STEP = 1.15;
+// A package card must read apart from a plain card in both themes: the CIELAB lightness step between
+// --card and --pkg (light's #fff to #ebeae5 is 7.4; a luminance ratio flattens dark steps, so it is not used).
+const PKG_STEP = 6;
+
+// Runs in the page once per theme: the palette's own pairs, which hold whether or not a sheet uses them.
+function palette({ pkgStep }) {
+  const probe = document.createElement('i');
+  document.body.append(probe);
+  const rgb = v => { probe.style.color = `var(${v})`; return (getComputedStyle(probe).color.match(/[\d.]+/g) || []).slice(0, 3).map(Number); };
+  const lin = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+  const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  const lstar = c => { const y = lum(c); return y > 216 / 24389 ? 116 * Math.cbrt(y) - 16 : (y * 24389) / 27; };
+  const ratio = (a, b) => { const [l1, l2] = [lum(a), lum(b)].sort((p, q) => q - p); return (l1 + 0.05) / (l2 + 0.05); };
+  const out = [];
+  const [card, pkg] = [rgb('--card'), rgb('--pkg')];
+  const step = Math.abs(lstar(card) - lstar(pkg));
+  if (step < pkgStep) out.push(`palette: --pkg is ${step.toFixed(1)} lightness from --card, under ${pkgStep}: a package card reads as a plain one`);
+  for (const t of ['--ink', '--muted']) {
+    const r = ratio(rgb(t), pkg);
+    if (r < 4.5) out.push(`palette: ${t} on --pkg is ${r.toFixed(2)}:1, under 4.5:1`);
+  }
+  probe.remove();
+  return out;
+}
 
 // Runs in the page, after the sheet is drawn and set to one mode.
-function inspect({ maxLogos, coverage, aliases, headlineMax, cardWords, pkgStep }) {
+function inspect({ maxLogos, coverage, aliases, headlineMax, cardWords }) {
   const svg = document.querySelector('svg.sheet');
   const visible = n => { for (let e = n; e && e !== svg; e = e.parentNode) { const s = getComputedStyle(e); if (s.display === 'none' || s.opacity === '0') return false; } return true; };
   const box = n => { const b = n.getBBox(); return { x: b.x, y: b.y, w: b.width, h: b.height }; };
@@ -93,12 +114,6 @@ function inspect({ maxLogos, coverage, aliases, headlineMax, cardWords, pkgStep 
     const own = texts.filter(a => !a.t.classList.contains('over') && inside({ x: a.x + 1, y: a.y + a.h / 2 }, r) && cards.filter(c => inside({ x: a.x + 1, y: a.y + a.h / 2 }, c)).sort((p, q) => p.w * p.h - q.w * q.h)[0] === r);
     const words = own.flatMap(a => a.s.trim().split(/\s+/)).filter(Boolean);
     if (words.length > cardWords) out.push(`card "${own[0]?.s ?? '?'}" holds ${words.length} words, over ${cardWords}: say what it is, move the configuration to the doc`);
-  }
-  // a package card reads apart from a plain one
-  {
-    const probe = cls => { const n = document.createElementNS('http://www.w3.org/2000/svg', 'rect'); n.setAttribute('class', cls); svg.appendChild(n); const f = rgb(getComputedStyle(n).fill); n.remove(); return f; };
-    const plain = probe('card'), pkg = probe('card pkg');
-    if (plain.length === 3 && pkg.length === 3 && ratioOf(plain, pkg) < pkgStep) out.push(`a package card's fill is ${ratioOf(plain, pkg).toFixed(2)}:1 against a plain card's, under ${pkgStep}:1: the two read alike`);
   }
   for (let i = 0; i < texts.length; i++) for (let j = i + 1; j < texts.length; j++) {
     const a = texts[i], b = texts[j];
@@ -231,10 +246,13 @@ async function proof(file) {
       try { await page.waitForFunction(() => window.__sheet, null, { timeout: 15000 }); } catch { errors.push('the sheet never finished drawing (no S.done())'); }
       const fonts = await page.evaluate(() => [...document.fonts].filter(f => f.status === 'loaded').map(f => f.family));
       if (!fonts.some(f => f.includes('Atkinson'))) errors.push('the Atkinson fonts did not load (offline?): widths would be wrong');
+      const pal = await page.evaluate(palette, { pkgStep: PKG_STEP });
+      pal.forEach(p => console.log(`    ${path.basename(file)} ${theme}: ${p}`));
+      if (pal.length) failed = true;
       const modes = (await page.evaluate(() => window.__sheet?.modes ?? [null])).filter(m => m !== undefined);
       for (const m of modes.length ? modes : [null]) {
         if (m) await page.evaluate(id => window.__sheet.setMode(id), m);
-        const r = await page.evaluate(inspect, { maxLogos, coverage: COVERAGE, aliases, headlineMax: HEADLINE_MAX, cardWords: CARD_WORDS, pkgStep: PKG_STEP });
+        const r = await page.evaluate(inspect, { maxLogos, coverage: COVERAGE, aliases, headlineMax: HEADLINE_MAX, cardWords: CARD_WORDS });
         const where = `${path.basename(file)} ${theme}${m ? ` ${m}` : ''}`;
         console.log(`${where}: ${r.problems.length} problems; ${r.crossings} crossings, bridged; logos: ${r.logos.join(', ') || 'none'}`);
         r.problems.forEach(p => console.log('   ', p));
