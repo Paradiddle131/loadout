@@ -21,7 +21,7 @@ Running it again replaces what it wrote, so a page is rebuilt in place after a k
 ```
 
 - `all` names every component; a component brings what it needs (`dots`, `slope` and `highlight` bring `marks`); the CSS list must name `tokens`.
-- `node bin/build.cjs --list` prints the components: `tokens base section marks dots bar range grade tint slope tabs switch filter fold step dialog table-sort tip highlight plot-theme`.
+- `node bin/build.cjs --list` prints the components: `tokens base section marks dots bar range grade tint slope tabs switch filter find fold step dialog table-sort tip highlight plot-theme`.
 - `scope=<selector>` in the css and the js marker runs the kit inside part of a page, as in `/* report-kit:css all scope=#report */`: the CSS nests under the selector (`:root` and `body` rules land on the scoped element, so the tokens, the ground and the type stop there), and the scripts wire only what sits inside each match, each with its own bubble.
   The page's own theme switch (`data-theme` on `<html>`) still reaches the scope; `@keyframes` stay global, under their `rk-` names.
   `ReportKit.init(el)` wires an element added later (each element once).
@@ -35,13 +35,14 @@ Running it again replaces what it wrote, so a page is rebuilt in place after a k
 |---|---|---|
 | `tokens` | css | primitives and semantic tokens, light and dark |
 | `base` | css | page ground, type, themed selection, focus ring, scrollbar and links; `.rk-wrap`, `.rk-title`, `.rk-lede`, `.rk-sr` |
-| `section` | css | section head (heading over a 2px ink rule, a control beside it), finding rows, glossary; parts, a side column beside a stage, a figure with its key and caption |
+| `section` | css | section head (heading over a 2px ink rule, a control beside it), finding rows, glossary, labelled facts; parts, a side column beside a stage, a figure with its key and caption |
 | `marks` | css | the five status shapes on `data-k`, and the `.rk-key` legend |
 | `dots` | css | a share of 100 as 100 marks |
 | `bar`, `range`, `slope` | css | small pictures on the 0-100 scale; `bar` also holds the meter (a number over a thin bar) |
 | `grade` | css, js | opt-in: a bar or span coloured by where its value falls on its scale |
 | `tabs` | css, js | the page's parts, hash-routed; empty parts drop out |
 | `switch` | css, js | a segmented control of two to four views of the same data |
+| `find` | css, js | a long reference list narrowed in place: a labelled find box, type chips that wrap, the count as a status, an empty sentence; a linked entry comes back |
 | `step` | css | one item of a list at a time: Previous and Next above it, its position, one control style |
 | `dialog` | css, js | a modal `<dialog>` for a short exchange, headed like a section; focus in, Escape out, focus back |
 | `table-sort` | css, js | sortable columns, aria-sort, a restorable order, optional row slide, a stacked narrow layout |
@@ -65,6 +66,23 @@ Running it again replaces what it wrote, so a page is rebuilt in place after a k
 Finding rows (text left, one picture right, the picture dropping under the text in a narrow container): `<ul class="rk-rows"><li><div><h3>Headline</h3><p>One sentence.</p></div><div class="rk-pic">...</div></li></ul>`.
 The headline is `--t-find` at `--w-head`, a size step and two weight steps over its sentence; right under a `.rk-head`, the first row adds no space of its own.
 A glossary: `<dl class="rk-glossary"><div id="term-late"><dt>Late</dt><dd>...</dd></div></dl>`; the ids are what a bubble's "more" link points at.
+Grouped by type, each group is a part with its own h3: `<div class="rk-part"><h3>What became of an order</h3><dl class="rk-glossary">...</dl></div>`; an entry's extra lines go under its meaning as `<dd><p>...</p><dl class="rk-facts rk-facts-tight">...</dl></dd>`.
+A long glossary takes the find box and chips (Find, below).
+
+Labelled facts, the label beside its value and above it once the list is under 30rem wide:
+
+```html
+<dl class="rk-facts">
+  <div><dt>Orders</dt><dd>100 weekday and 100 weekend orders per option.</dd></div>
+  <div><dt>Left out</dt><dd>Orders cancelled before they left the shop.</dd></div>
+</dl>
+```
+
+- The label column takes the longest label's width, up to `--facts-label` (14rem by default), and every row shares it, so the values start on one left edge; labels are 1rem bold in full ink, values 1rem.
+  Never set the column to a fixed width in rem: the dark ground's extra tracking would wrap a label that fits in light.
+- Rules: 1px ink over the list (dropped right under a section or part head, whose rule it would double), a hairline under each row.
+- `.rk-facts-tight` sets facts inside an entry (a glossary term's count or example): no rules, a short gap, the same sizes, the label beside its value down to 20rem.
+- A part holding a glossary or a facts list keeps the reading measure, so its rule ends where the entries do.
 
 ### Levels inside a section
 
@@ -257,6 +275,31 @@ Options a reader may never need, folded behind one button beside the section's h
 The count says how many boxes are off ("2 off"); "Show all" ticks every box and fires one change per box it ticked; Escape or a click outside closes the panel, focus back on its button.
 The page filters its own rows on the boxes' `change` events: the component only folds the controls away.
 
+### Find
+
+A long reference list narrowed in place (STANDARDS.md says when), in the page's flow: never give the list a fixed height.
+
+```html
+<div class="rk-find" data-rk-find="glossary-list" data-rk-find-noun="terms">
+  <label class="rk-find-box">Find a term<input type="search" autocomplete="off" spellcheck="false" aria-controls="glossary-list"></label>
+  <div class="rk-chips" role="group" aria-label="Type of term">
+    <button type="button" data-value="" aria-pressed="true">Every type<span class="rk-chip-n"></span></button>
+    <button type="button" data-value="outcome" aria-pressed="false">What became of an order<span class="rk-chip-n"></span></button> ...</div>
+  <p class="rk-find-count" role="status"></p></div>
+<div id="glossary-list">
+  <div class="rk-part" data-rk-find-group="outcome"><h3>What became of an order</h3>
+    <dl class="rk-glossary"><div id="term-late" data-rk-find-item><dt>Late</dt><dd>...</dd></div> ...</dl></div> ...
+  <p class="rk-find-none" hidden>No term matches. <button type="button">Show every term</button></p></div>
+```
+
+- The label is shown over the box, never a placeholder in its place; the box is 1rem in full ink with a 1px ink edge.
+- An item (`data-rk-find-item`) matches when its text (`data-rk-find-text`, else its own) holds every word typed, ignoring case and accents, and its type is the chosen one: its group's `data-rk-find-group`, or its own `data-rk-find-type`.
+  A group with no match hides.
+- Chips are optional: one is pressed at a time, `data-value=""` is every type; each `.rk-chip-n` is filled with the matches in its type for what is typed.
+  The row wraps; never set it to scroll sideways.
+- The count reads "9 terms", or "2 of 9 terms shown" while something narrows the list (`data-rk-find-noun`, default "items"); nothing matching shows `.rk-find-none`, whose button clears the box and the type and puts the focus back in the box.
+- A hash naming an entry the list hides (a bubble's "more" link, a link from another part) clears the search and the type first, then the tabs open its part and scroll to it; `ReportKit.find.reveal(el)` does the same for a page's own links, `ReportKit.find.apply(list)` re-filters after the page changes the list, and each change fires `rk:find` on the list with `{list, shown, total}`.
+
 ### Sortable table
 
 ```html
@@ -387,12 +430,14 @@ A drawing whose script lays text out by measuring it (wrapped labels, boxes size
 - a sort whose presses do not go first direction, reverse, and (two-state) reverse again, or that leaves a table in its sort group sorted another way;
 - a control it cannot reach or press in time (it scrolls each target into view and lets it settle before pointing at it);
 - console and page errors, a web font that did not load, a switch with more than four segments;
+- a box that scrolls up and down inside the page (a dialog, a form control and a box marked `data-rk-scroll` are exempt), and a box that scrolls sideways with its scrollbar hidden;
 - a heading (`h1` to `h6`) paler than the text around it, by its colour or its opacity;
 - a heading that skips a level on the way down (an `h2` straight to an `h4`), with each open modal dialog an outline of its own from its `h2`;
 - in the source (the vendored libraries left out): a raw colour outside a `:root` token block (a drawing's own colours inside an `<svg>`, such as a brand mark, are exempt), gradient text, emoji, a banned first font (Inter, Roboto, Arial, Helvetica), dark tokens missing one of the three blocks.
 
 Visibility is judged with `checkVisibility({visibilityProperty: true})`, so a part hidden by `visibility` is not measured.
 [`tests/dialog.test.cjs`](tests/dialog.test.cjs) checks the fixture's step row and dialog: Next keeps its place, the dialog's focus and Escape order, the bubble inside it.
+[`tests/find.test.cjs`](tests/find.test.cjs) checks the fixture's glossary: typing and a chip narrow it in place, the counts and the empty sentence follow, and a link to a hidden entry brings it back.
 [`tests/scope.test.cjs`](tests/scope.test.cjs) checks a scoped page ([`tests/scoped.html`](tests/scoped.html)): the host keeps its look and the kit works inside its scope.
 `--quick` checks 400 and 1280 only; `--shots <dir>` saves a full-page PNG per width and theme; `--selftest <page.html>` plants one case of each geometry kind in the page and fails unless each is found.
 

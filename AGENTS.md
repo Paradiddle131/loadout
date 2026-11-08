@@ -24,5 +24,6 @@ Tests:
 uvx --from pytest==8.4.2 pytest -q cloud/skills/autopilot/scripts/tests cloud/gcp/tests
 node skills/report-kit/tests/scope.test.cjs
 node skills/report-kit/tests/dialog.test.cjs
+node skills/report-kit/tests/find.test.cjs
 claude plugin validate --strict .
 ```

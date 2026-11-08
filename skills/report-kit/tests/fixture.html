@@ -125,6 +125,29 @@ p { text-wrap: pretty }
 .rk-glossary > div { padding: var(--s3) 0; border-bottom: 1px solid var(--hair); scroll-margin-top: var(--s7) }
 .rk-glossary dt { font-weight: 700 }
 .rk-glossary dd { margin: var(--s1) 0 0 }
+.rk-glossary dd > p { margin: 0 }
+/* a glossary grouped by type: each group a part (an h3 over its 1px ink rule), never a tinted band, a sticky row or a
+   fold; the part keeps the list's measure, so its rule and the entries' hairlines end on one right edge */
+.rk-part:has(> .rk-glossary, > .rk-facts) { max-width: var(--measure) }
+/* labelled facts: a short list of label and value, the label beside its value (bold, at the word size, in full ink)
+   while the list has room, above it once narrow. The label column takes the longest label's width, measured in the
+   theme's own tracking (a fixed width in rem wraps a label on a dark ground only), up to --facts-label; every row
+   shares it (subgrid), so the values start on one left edge.
+   .rk-facts-tight sets the facts inside an entry (a glossary term's extra lines) with no rules between them. */
+.rk-facts { display: grid; grid-template-columns: fit-content(var(--facts-label, 14rem)) minmax(0, 1fr); column-gap: var(--s5);
+  margin: 0; max-width: var(--measure); container-type: inline-size; border-top: 1px solid var(--ink) }
+.rk-facts > div { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; row-gap: var(--s1);
+  padding: var(--s3) 0; border-bottom: 1px solid var(--hair) }
+.rk-facts dt { font-weight: 700 }
+.rk-facts dd { margin: 0 }
+.rk-head + .rk-facts, :is(h3, h4) + .rk-facts { border-top: 0 }
+.rk-head + .rk-facts > div:first-child, :is(h3, h4) + .rk-facts > div:first-child { padding-top: 0 }
+.rk-facts.rk-facts-tight { border-top: 0; margin-top: var(--s2) }
+.rk-facts.rk-facts-tight { column-gap: var(--s4) }
+.rk-facts.rk-facts-tight > div { padding: 0; border-bottom: 0; row-gap: 0 }
+/* the label goes above its value once the list is narrow; an entry's short facts (a count) keep it beside to 20rem */
+@container (max-width: 30rem) { .rk-facts:not(.rk-facts-tight) > div { grid-template-columns: minmax(0, 1fr) } }
+@container (max-width: 20rem) { .rk-facts-tight > div { grid-template-columns: minmax(0, 1fr) } .rk-facts-tight > div + div { margin-top: var(--s1) } }
 /* levels inside a section: section, part, item. A part is a sub-part with its own head (h3 in the section, h4 in a
    stage under the stage's h3) over a 1px ink rule, the 2px section rule's smaller echo, with --gap-part above it;
    an item is a 1rem bold head with --gap-item above it and no rule. Right under a section head the head's own rule
@@ -314,6 +337,30 @@ p { text-wrap: pretty }
   border-radius: 6px; cursor: pointer; text-decoration: underline 1.5px var(--line); text-underline-offset: 4px }
 .rk-filter-reset:disabled { cursor: default; text-decoration: none }
 @media (prefers-reduced-motion: reduce) { .rk-filter > summary { transition: none } }
+/* report-kit find: a long reference list (a glossary, an index) narrowed in place, in the page's own flow. A find box
+   with its label shown over it, an optional row of type chips that wraps (never a sideways strip), the count said as a
+   status, and a sentence with a clear button when nothing matches. The list is never boxed in a scroll area of its
+   own, so the page keeps one scroll and nothing sticks over the entries. Every word is in full ink, at the word size. */
+.rk-find { display: flex; flex-wrap: wrap; gap: var(--s3) var(--s5); align-items: flex-end; margin-bottom: var(--s3) }
+.rk-find-box { display: flex; flex-direction: column; gap: var(--s1); flex: 1 1 18rem; max-width: 28rem; font-weight: 700 }
+.rk-find-box input { font: 400 var(--t-word)/1.3 var(--sans); letter-spacing: var(--track-word); color: var(--ink); background: var(--paper);
+  min-height: 44px; padding: var(--s2) var(--s3); border: 1px solid var(--ink); border-radius: 6px; width: 100% }
+.rk-find-box input:focus-visible { outline-offset: 1px }
+/* type chips: one choice of many, each naming its count; the chosen one a reversed ink plate, as a switch's segment */
+.rk-chips { display: flex; flex-wrap: wrap; gap: var(--s2); flex: 1 1 100%; margin: 0; padding: 0; border: 0 }
+.rk-chips button { font: 600 var(--t-word)/1.2 var(--sans); letter-spacing: var(--track-word); color: var(--ink); background: transparent;
+  min-height: 40px; padding: var(--s1) var(--s3); border: 1px solid var(--hair); border-radius: 8px; cursor: pointer;
+  display: inline-flex; gap: var(--s2); align-items: center; text-align: left; transition: background-color var(--t-fast) ease-out }
+.rk-chips button:hover { background: var(--row) }
+.rk-chips button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper) }
+.rk-chip-n { font-weight: 400; font-variant-numeric: tabular-nums }
+.rk-find-count { flex: 1 1 100%; margin: 0 }
+.rk-find-none { margin: var(--s4) 0 }
+.rk-find-none button { font: 600 var(--t-word)/1.2 var(--sans); color: var(--ink); background: none; border: 0; min-height: 40px;
+  padding: 0 var(--s2); margin-left: var(--s1); border-radius: 6px; cursor: pointer; text-decoration: underline 1.5px var(--line); text-underline-offset: 4px }
+.rk-find-none button:hover { background: var(--row) }
+[data-rk-find-item][hidden], [data-rk-find-group][hidden] { display: none !important }
+@media (prefers-reduced-motion: reduce) { .rk-chips button { transition: none } }
 /* report-kit fold: a long side column (.rk-aside) folds behind one full-width button once it stacks above its stage,
    so the stage starts on the first screen; side by side, the button hides and the column stays open. The button
    names the column and its current choice, with a chevron that turns when open; the folded part is gone, not
@@ -529,9 +576,13 @@ button[data-tip], a[data-tip] { cursor: pointer }
   </div>
   <div id="notes" role="tabpanel" aria-labelledby="tab-notes" hidden></div>
   <div id="glossary" role="tabpanel" aria-labelledby="tab-glossary" hidden>
+    <section class="rk-section" aria-labelledby="method-h">
+      <div class="rk-head"><h2 id="method-h">How the trial ran</h2></div>
+      <dl class="rk-facts"><div><dt>Orders</dt><dd>100 weekday and 100 weekend orders per option, taken in the order they came.</dd></div><div><dt>Weeks</dt><dd>Twelve, from the first week of spring.</dd></div><div><dt>On time</dt><dd>Within the hour the customer chose, by the courier&#x27;s own scan at the door.</dd></div><div><dt>Left out</dt><dd>Orders the customer cancelled before they left the shop.</dd></div></dl>
+    </section>
     <section class="rk-section" aria-labelledby="glossary-h">
       <div class="rk-head"><h2 id="glossary-h">Glossary</h2></div>
-      <dl class="rk-glossary"><div id="term-own-van"><dt>Own van</dt><dd>The bakery&#x27;s own van and driver.</dd></div><div id="term-bike-courier"><dt>Bike courier</dt><dd>A local courier on a cargo bike.</dd></div><div id="term-partner-app"><dt>Partner app</dt><dd>A delivery app that sends whichever driver is free.</dd></div><div id="term-shared-van"><dt>Shared van</dt><dd>A van shared with two other shops on the street.</dd></div><div id="term-collect-in-shop"><dt>Collect in shop</dt><dd>The customer collects the order at the counter.</dd></div><div id="term-ok"><dt>On time</dt><dd>Arrived within the hour the customer chose.</dd></div><div id="term-late"><dt>Late</dt><dd>Arrived, but after the hour the customer chose.</dd></div><div id="term-damaged"><dt>Damaged</dt><dd>Arrived with something squashed, cold or missing.</dd></div><div id="term-lost"><dt>Not delivered</dt><dd>Never arrived; the bakery refunded the order.</dd></div></dl>
+      <div class="rk-find" data-rk-find="glossary-list" data-rk-find-noun="terms"><label class="rk-find-box">Find a term<input type="search" autocomplete="off" spellcheck="false" aria-controls="glossary-list"></label><div class="rk-chips" role="group" aria-label="Type of term"><button type="button" data-value="" aria-pressed="true">Every type<span class="rk-chip-n"></span></button><button type="button" data-value="option" aria-pressed="false">Ways to deliver<span class="rk-chip-n"></span></button><button type="button" data-value="outcome" aria-pressed="false">What became of an order<span class="rk-chip-n"></span></button></div><p class="rk-find-count" role="status"></p></div><div id="glossary-list"><div class="rk-part" data-rk-find-group="option"><h3>Ways to deliver</h3><dl class="rk-glossary"><div id="term-own-van" data-rk-find-item><dt>Own van</dt><dd><p>The bakery&#x27;s own van and driver.</p><dl class="rk-facts rk-facts-tight"><div><dt>On time, weekdays</dt><dd><b>78</b> in 100</dd></div><div><dt>On time, weekends</dt><dd><b>70</b> in 100</dd></div></dl></dd></div><div id="term-bike-courier" data-rk-find-item><dt>Bike courier</dt><dd><p>A local courier on a cargo bike.</p><dl class="rk-facts rk-facts-tight"><div><dt>On time, weekdays</dt><dd><b>84</b> in 100</dd></div><div><dt>On time, weekends</dt><dd><b>75</b> in 100</dd></div></dl></dd></div><div id="term-partner-app" data-rk-find-item><dt>Partner app</dt><dd><p>A delivery app that sends whichever driver is free.</p><dl class="rk-facts rk-facts-tight"><div><dt>On time, weekdays</dt><dd><b>69</b> in 100</dd></div><div><dt>On time, weekends</dt><dd><b>58</b> in 100</dd></div></dl></dd></div><div id="term-shared-van" data-rk-find-item><dt>Shared van</dt><dd><p>A van shared with two other shops on the street.</p><dl class="rk-facts rk-facts-tight"><div><dt>On time, weekdays</dt><dd><b>72</b> in 100</dd></div><div><dt>On time, weekends</dt><dd><b>66</b> in 100</dd></div></dl></dd></div><div id="term-collect-in-shop" data-rk-find-item><dt>Collect in shop</dt><dd><p>The customer collects the order at the counter.</p><dl class="rk-facts rk-facts-tight"><div><dt>On time, weekdays</dt><dd><b>91</b> in 100</dd></div><div><dt>On time, weekends</dt><dd><b>88</b> in 100</dd></div></dl></dd></div></dl></div><div class="rk-part" data-rk-find-group="outcome"><h3>What became of an order</h3><dl class="rk-glossary"><div id="term-ok" data-rk-find-item><dt>On time</dt><dd><p>Arrived within the hour the customer chose.</p></dd></div><div id="term-late" data-rk-find-item><dt>Late</dt><dd><p>Arrived, but after the hour the customer chose.</p></dd></div><div id="term-damaged" data-rk-find-item><dt>Damaged</dt><dd><p>Arrived with something squashed, cold or missing.</p></dd></div><div id="term-lost" data-rk-find-item><dt>Not delivered</dt><dd><p>Never arrived; the bakery refunded the order.</p></dd></div></dl></div><p class="rk-find-none" hidden>No term matches. <button type="button">Show every term</button></p></div>
     </section>
   </div>
 </main>
@@ -581,7 +632,7 @@ button[data-tip], a[data-tip] { cursor: pointer }
 /* report-kit tabs. Markup: a .rk-tabs <nav> holding a [role=tablist] of <a role=tab href="#part" aria-controls="part">,
    and each part a [role=tabpanel] with that id. A part with nothing in it loses its tab; one part left hides
    the strip. The URL's hash names the open part, or an element inside one, which opens its part and comes into
-   view; Back and Forward walk the parts; one strip per page (the first in the kit's root). API: ReportKit.tabs.open(id); event rk:tab {detail: id} on document. */
+   view (a search or filter that hides it is cleared first: ReportKit.find.reveal); Back and Forward walk the parts; one strip per page (the first in the kit's root). API: ReportKit.tabs.open(id); event rk:tab {detail: id} on document. */
 (() => {
   const RK = (window.ReportKit = window.ReportKit || {});
   function init(root) {
@@ -623,6 +674,7 @@ button[data-tip], a[data-tip] { cursor: pointer }
       const [p, el] = resolve();
       show(p);
       if (el) {
+        if (RK.find) RK.find.reveal(el); // an entry a search or a type filter hides comes back first
         el.scrollIntoView({ block: "center" });
         el.classList.remove("rk-flash"); void el.offsetWidth; el.classList.add("rk-flash");
       }
@@ -746,6 +798,76 @@ button[data-tip], a[data-tip] { cursor: pointer }
     }
   }
   RK.filter = { count };
+  (RK.inits = RK.inits || []).push(init);
+})();
+/* report-kit find. Markup: a <div class="rk-find" data-rk-find="<list id>"> holding a <label class="rk-find-box"> (its
+   words, then <input type="search">), an optional <div class="rk-chips" role="group" aria-label="..."> of
+   <button type="button" data-value="<type or empty for all>" aria-pressed> chips, each with a <span class="rk-chip-n">,
+   and a <p class="rk-find-count" role="status">. The list (the element with the list id) holds items marked
+   data-rk-find-item, inside groups marked data-rk-find-group="<type>" (or an item's own data-rk-find-type), and a
+   <p class="rk-find-none" hidden> that says nothing matches, with a <button type="button"> that clears the box.
+   An item matches when its text (data-rk-find-text, else its own text) holds every word typed, ignoring case and
+   accents, and its type is the chosen one; a group with no match hides; each chip counts the matches in its type, so
+   the reader sees where the matches are before choosing. data-rk-find-noun="terms" names what is counted. A hash that
+   names a hidden item clears what hides it before the tabs scroll to it (ReportKit.find.reveal).
+   API: ReportKit.find.reveal(el), .apply(list); event rk:find {detail: {list, shown, total}} on the list. */
+(() => {
+  const RK = (window.ReportKit = window.ReportKit || {});
+  const norm = s => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  const lists = new Map(); // list element -> state
+  const typeOf = it => it.dataset.rkFindType || (it.closest("[data-rk-find-group]") || {}).dataset?.rkFindGroup || "";
+  function apply(list) {
+    const st = lists.get(list);
+    if (!st) return;
+    const words = norm(st.input ? st.input.value : "").split(/\s+/).filter(Boolean);
+    const hit = it => { const h = norm(it.dataset.rkFindText || it.textContent); return words.every(w => h.includes(w)); };
+    const items = [...list.querySelectorAll("[data-rk-find-item]")];
+    const hits = new Set(items.filter(hit));
+    let shown = 0;
+    for (const it of items) { const on = hits.has(it) && (!st.type || typeOf(it) === st.type); it.hidden = !on; if (on) shown++; }
+    for (const g of list.querySelectorAll("[data-rk-find-group]")) g.hidden = ![...g.querySelectorAll("[data-rk-find-item]")].some(it => !it.hidden);
+    for (const b of st.chips) {
+      b.setAttribute("aria-pressed", String((b.dataset.value || "") === st.type));
+      const n = b.querySelector(".rk-chip-n");
+      if (n) n.textContent = [...hits].filter(it => !b.dataset.value || typeOf(it) === b.dataset.value).length;
+    }
+    const noun = st.box.dataset.rkFindNoun || "items", narrowed = words.length || st.type;
+    if (st.count) st.count.textContent = narrowed ? `${shown} of ${items.length} ${noun} shown` : `${items.length} ${noun}`;
+    const none = list.querySelector(".rk-find-none");
+    if (none) none.hidden = shown > 0;
+    list.dispatchEvent(new CustomEvent("rk:find", { bubbles: true, detail: { list, shown, total: items.length } }));
+  }
+  function clear(list) {
+    const st = lists.get(list);
+    if (st.input) st.input.value = "";
+    st.type = "";
+    apply(list);
+  }
+  // an item a link or the hash points at comes back, whatever narrowed the list
+  function reveal(el) {
+    for (const [list, st] of lists) {
+      if (!list.contains(el)) continue;
+      const it = el.closest("[data-rk-find-item]") || el;
+      if (it.hidden || (it.closest("[data-rk-find-group]") || {}).hidden) clear(list);
+      return true;
+    }
+    return false;
+  }
+  function init(root) {
+    for (const box of root.querySelectorAll("[data-rk-find]")) {
+      const list = document.getElementById(box.dataset.rkFind);
+      if (!list || lists.has(list)) continue;
+      const chips = [...box.querySelectorAll(".rk-chips button")];
+      const st = { box, input: box.querySelector('input[type="search"]'), chips, count: box.querySelector(".rk-find-count"),
+        type: (chips.find(b => b.getAttribute("aria-pressed") === "true") || { dataset: {} }).dataset.value || "" };
+      lists.set(list, st);
+      if (st.input) st.input.addEventListener("input", () => apply(list));
+      for (const b of chips) b.addEventListener("click", () => { st.type = b.dataset.value || ""; apply(list); });
+      list.addEventListener("click", e => { if (!e.target.closest(".rk-find-none button")) return; clear(list); if (st.input) st.input.focus(); });
+      apply(list);
+    }
+  }
+  RK.find = { reveal, apply };
   (RK.inits = RK.inits || []).push(init);
 })();
 /* report-kit fold. Markup: inside a .rk-split, <div class="rk-aside"> holding the column's head, then
