@@ -240,6 +240,46 @@ def grid():
     )
 
 
+def one_at_a_time():
+    """A side column to choose from beside a stage that shows the choice: the levels inside a section (a stage head,
+    a figure with its key and caption, two parts side by side), each fact said once. Static: the second option is
+    the chosen one."""
+    chosen, before = "Bike courier", "Own van"
+    picks = "".join(
+        f'<li><a href="#one-at-a-time"{" aria-current=\"true\"" if n == chosen else ""}>{esc(n)}</a></li>' for n, *_ in OPTIONS
+    )
+    wd = dict((n, w) for n, _, w, _ in OPTIONS)[chosen]
+    bars = "".join(
+        f'<li><span class="rk-pl">{esc(h)}</span><span class="rk-bar"><span class="rk-track" aria-hidden="true">'
+        f'<span class="rk-fill" data-k="{k}" style="--v:{v}"></span></span><b>{v}</b><span class="rk-sr"> in 100</span></span></li>'
+        for (_, h, k, _), v in zip(COLUMNS, wd, strict=True)
+    )
+    key = "".join(
+        f'<li><span data-tip="{esc(d)}"><i class="rk-mark" data-k="{k}" aria-hidden="true"></i>{esc(h)}</span></li>' for _, h, k, d in COLUMNS
+    )
+    return f"""<section class="rk-section" aria-labelledby="one-h" id="one-at-a-time">
+      <div class="rk-head"><h2 id="one-h">One option at a time</h2></div>
+      <div class="rk-split">
+        <nav class="rk-aside" aria-labelledby="one-pick-h"><h3 id="one-pick-h">Cheapest first</h3>
+          <ul>{picks}</ul></nav>
+        <div class="rk-stage">
+          <h3>{esc(chosen)}</h3>
+          <p>A local courier on a cargo bike, booked by the hour.</p>
+          <figure class="rk-fig"><div class="rk-pic"><ul>{bars}</ul></div>
+            <ul class="rk-key">{key}</ul>
+            <figcaption>Weekday orders, 100 in all.</figcaption></figure>
+          <div class="rk-parts">
+            <div class="rk-part"><h4>What changes from {esc(before)}</h4>
+              <p>The van gives way to a bike that skips the traffic but carries less.</p>
+              <ul><li>Six more on time</li><li>Two more damaged, mostly cakes</li></ul></div>
+            <div class="rk-part"><h4>On one Saturday order</h4>
+              <ol><li>The shop books the 9 o'clock slot.</li><li>The rider collects at 8:40.</li><li>The order arrives at 8:55.</li></ol></div>
+          </div>
+        </div>
+      </div>
+    </section>"""
+
+
 def weekly():
     """Twelve invented weeks of on-time orders in 100 for three options."""
     base = {"Own van": 74, "Bike courier": 80, "Partner app": 63}
@@ -308,6 +348,7 @@ def page():
       <div class="rk-head"><h2 id="takeaways-h">Takeaways</h2></div>
       <ul class="rk-rows">{takeaways()}</ul>
     </section>
+    {one_at_a_time()}
   </div>
   <div id="trends" role="tabpanel" aria-labelledby="tab-trends" hidden>
     <section class="rk-section" aria-labelledby="trends-h">
