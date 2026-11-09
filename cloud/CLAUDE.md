@@ -26,6 +26,7 @@ Work with them: they are not incidents to report or file issues about.
 - `gh api --paginate` follows `Link` headers to `repositories/<id>/…`, which the proxy refuses (403): page by hand with `&page=N`.
 - `gh auth status` reports a failed login while `gh api` works (the proxy injects the token): trust `gh api /rate_limit`.
 - REST `pulls/<n>/comments` can answer 403: read review threads with the MCP `pull_request_read`.
+- An issue artifact is addressed by its `number` (`issues/<n>/artifacts/<number>`): `PATCH` with its `id` answers 404.
 - Agent writes go out under the owner's account: GitHub notifies nobody, and a bot comment starts with `🤖` so it can be told from the owner's.
 - Write only to repos of the owner's account: never file an issue, comment or PR on a repo outside it (an upstream bug goes into the owner's issue as a draft they may file).
 - Only repos attached to the session are reachable; tag pushes and branch deletions are refused.
