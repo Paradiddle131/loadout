@@ -18,7 +18,7 @@ Ways of working: [ways](https://github.com/<owner>/<collection>/tree/main/ways) 
 ## Minimal file set
 
 - `CLAUDE.md` (or `AGENTS.md` with a one-line `CLAUDE.md`): the invariants, and a short `## Guardrails` section ([`guardrails.md`](guardrails.md)).
-- `PLAN.md`: goal, requirements, the decision register, steps, exit; one per independent track.
+- `PLAN.md`: goal, requirements, the decision register, steps, exit; one per independent track; none in a repo on [`finished.md`](finished.md).
 - `DESIGN.md`: only for a repo with a UI surface.
 - Nothing else is mandatory; any other document earns its place under the placement rule.
 
@@ -27,6 +27,7 @@ Ways of working: [ways](https://github.com/<owner>/<collection>/tree/main/ways) 
 Each line: the file, then when to use it.
 
 - [`decisions.md`](decisions.md): use when a choice with real alternatives is made, a research doc is written or absorbed, or code is about to cite an id.
+- [`finished.md`](finished.md): use when a repo's `CLAUDE.md` opts in to a finished code base: roadmap, progress and decisions on the tracker, no plan file.
 - [`guardrails.md`](guardrails.md): use when writing an owner's standing constraints, or when evidence conflicts with one.
 - [`portable.md`](portable.md): use when writing or editing a reusable document (a skill, a way, a template), or a line in one names a real account, repo, date or issue.
 - [`lessons.md`](lessons.md): use when changing the autopilot skill or a repo's profile; why it carries what it carries and dropped what it dropped.
