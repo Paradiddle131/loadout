@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 # pre-commit of the repos a cloud session works on, set as their core.hooksPath by the session-start hook
-# (only in a repo with no hooks of its own): a commit may not add the repo's owner literally.
-set -euo pipefail
-exec bash "$(cd "$(dirname "$0")" && pwd)/check-portable.sh"
+# (only in a repo with no hooks of its own): a commit may not add the repo's owner literally, nor a process id
+# (an issue, PR, phase or decision reference) to a checked-in file.
+set -uo pipefail
+d=$(cd "$(dirname "$0")" && pwd)
+status=0
+bash "$d/check-portable.sh" || status=1
+if command -v python3 >/dev/null; then
+  python3 "$d/check-process-ids.py" || status=1
+else
+  echo "pre-commit: python3 is not installed, so added lines were NOT checked for process ids" >&2
+fi
+exit $status

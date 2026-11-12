@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fails when a repo's content names its GitHub owner literally. Code, config and docs that act on the repo take
-# <owner>/<repo> from the origin remote, and links to its own tracker are relative (../../issues/N), so a fork
+# <owner>/<repo> from the origin remote, and links to its own tracker are relative (../../issues), so a fork
 # builds, syncs and links against itself (ways/portable.md). The owner comes from `git remote get-url origin`.
 # By default it checks the lines the staged commit adds, so a literal already in the repo never blocks unrelated
 # work; --all checks every tracked file, for an audit. History keeps its facts: ledgers, changelogs and
@@ -35,7 +35,7 @@ fi
 
 if [ -n "$hits" ]; then
   printf '%s\n' "$hits"
-  echo "check-portable: name the owner through the origin remote (git remote get-url origin) or link the tracker relatively (../../issues/N)." >&2
+  echo "check-portable: name the owner through the origin remote (git remote get-url origin) or link the tracker relatively (../../issues)." >&2
   exit 1
 fi
 echo "check-portable: $scope, no literal owner"

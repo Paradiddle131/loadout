@@ -40,8 +40,8 @@ Cloud conditions every repo shares live in [`cloud/CLAUDE.md`](../cloud/CLAUDE.m
 - A digest kept in two places, which drifts; one place per repo.
 - Two label vocabularies, and labels nobody uses.
 - A three-tier charter: "non-negotiable" reads as beyond question instead of "ask before crossing" ([`guardrails.md`](guardrails.md)).
-- An ADR per step: most are steps, not forks, and immutability breeds renumbering ([`decisions.md`](decisions.md)).
-- Issue and PR numbers in code: a reader of the code has no tracker.
+- An ADR per step: most are steps, not forks, and immutability breeds renumbering ([`finished.md`](finished.md#decisions)).
+- Process ids (issue, PR, phase, decision) in checked-in files, and plan, ledger and lessons files: the tree comes to depend on its own history, a reader of the code has no tracker, and every decision needs a sweep of the lines that cite it.
 - Issue handoffs that repeat the train line, and unbounded train bodies: one line per issue, evidence in the issue.
 - Prose for edge cases that never happen: fold them into the scripts.
 - Evidence inside known-condition lines: one line, evidence in the fix issue.

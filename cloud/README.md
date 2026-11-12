@@ -23,5 +23,5 @@ The setup result is cached for days; the session-start hook re-runs the setup wh
 | [`CLAUDE.md`](CLAUDE.md) | the cloud VM's known conditions, imported after [`RULES.md`](../RULES.md) and [`FEEDBACK.md`](../FEEDBACK.md) |
 | [`hooks/`](hooks/hooks.json) | session start (rules, `dockerd`, the target's own SessionStart hooks in multi-repo sessions, commit guards in the other clones), and save-work (unsaved work pushed to `claude/wip/*` when a turn ends on an API error, and every 20 minutes) |
 | [`gcp/`](gcp/README.md) | a guard and a session-start status that keep an attached GCP project at $0.00 |
-| [`githooks/`](githooks/pre-commit) | the pre-commit set in the other clones: a commit may not add the repo owner's login |
+| [`githooks/`](githooks/pre-commit) | the pre-commit set in the other clones: a commit may not add the repo owner's login, nor a process id (an issue, PR, phase or decision reference) to a checked-in file |
 | [`skills/`](skills/) | `autopilot` (one unattended wake of a scheduled run), `autopilot-brief` (what a run of wakes did), `image-cache` (Docker layers shared through ghcr.io) |

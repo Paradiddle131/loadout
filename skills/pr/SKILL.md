@@ -67,7 +67,7 @@ Everything else goes under `<details>`: it stays on record for the next agent wi
   Several `<details>` blocks are fine when the topics differ.
   Leave a blank line after `<summary>…</summary>` or GitHub renders the Markdown as plain text.
 - **Session outputs outlive the session on the issue,** not in the body: a plan, an analysis or a visual the next person needs goes as an artifact on the issue the PR closes (the `issue` skill); the body links to it at most.
-- Skip preambles. Use the repo's domain language (its `GLOSSARY.md` or its plan's terms).
+- Skip preambles. Use the repo's domain language (its `GLOSSARY.md` or its architecture document's terms).
 - Editing an existing body follows the same shape; rewrite a wall of text into it rather than appending.
 
 ## Sections

@@ -9,16 +9,17 @@ Ways of working: [ways](https://github.com/<owner>/<collection>/tree/main/ways) 
 
 ## Placement rule
 
-- **git** holds current state the next person must read before changing code, amended in place: agent instructions, one plan, tests.
+- **git** holds current state the next person must read before changing code, amended in place: agent instructions, the README, one architecture document, tests.
 - **GitHub** holds what is read once or appended to: progress, handoffs, run evidence, decision packets, discussion.
-- A document that would be appended to belongs on GitHub: no ledger, no ADR folder, no changelog of the agent's work.
+- A document that would be appended to belongs on GitHub: no plan, roadmap, ledger, lessons file, ADR folder or changelog of the agent's work ([`finished.md`](finished.md)).
 - The record of a change is its PR body, in the `pr` skill's shape (what and evidence on one screen, the rest under `<details>`); nothing is copied from it into the repo.
 - A session's durable outputs (a plan, an analysis, a visual) are artifacts on its issue, in the `issue` skill's shape; the session's other files are scratch.
 
 ## Minimal file set
 
 - `CLAUDE.md` (or `AGENTS.md` with a one-line `CLAUDE.md`): the invariants, and a short `## Guardrails` section ([`guardrails.md`](guardrails.md)).
-- `PLAN.md`: goal, requirements, the decision register, steps, exit; one per independent track; none in a repo on [`finished.md`](finished.md).
+- `README.md`: what it is, how to run it.
+- One architecture document: the current design and each major choice's reason ([`finished.md`](finished.md)).
 - `DESIGN.md`: only for a repo with a UI surface.
 - Nothing else is mandatory; any other document earns its place under the placement rule.
 
@@ -26,8 +27,7 @@ Ways of working: [ways](https://github.com/<owner>/<collection>/tree/main/ways) 
 
 Each line: the file, then when to use it.
 
-- [`decisions.md`](decisions.md): use when a choice with real alternatives is made, a research doc is written or absorbed, or code is about to cite an id.
-- [`finished.md`](finished.md): use when a repo's `CLAUDE.md` opts in to a finished code base: roadmap, progress and decisions on the tracker, no plan file.
+- [`finished.md`](finished.md): use when planning work, making a choice with real alternatives, writing or pruning a standing document, or a line is about to cite an issue, phase or decision.
 - [`guardrails.md`](guardrails.md): use when writing an owner's standing constraints, or when evidence conflicts with one.
 - [`portable.md`](portable.md): use when writing or editing a reusable document (a skill, a way, a template), or a line in one names a real account, repo, date or issue.
 - [`lessons.md`](lessons.md): use when changing the autopilot skill or a repo's profile; why it carries what it carries and dropped what it dropped.
