@@ -6,6 +6,8 @@ cd "$(git rev-parse --show-toplevel)"
 bin/check-plugins.sh
 # Every link, backticked repo path and plugin skill name must resolve.
 bin/check-refs
+# No process id (an issue, PR, phase or decision reference) added to a checked-in file (RULES.md).
+python3 cloud/githooks/check-process-ids.py
 # No secrets in what is staged.
 if command -v gitleaks >/dev/null || [ -x ~/.local/bin/gitleaks ]; then
   "$(command -v gitleaks || echo ~/.local/bin/gitleaks)" protect --staged --no-banner --redact -v

@@ -1,0 +1,3 @@
+# The check-process-ids exemptions of this repo (cloud/githooks/check-process-ids.py).
+# Test fixtures quote tracker text (PR bodies, issue lists) on purpose.
+path: *tests/*

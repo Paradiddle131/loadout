@@ -10,7 +10,7 @@ The kit draws in two styles, the **sheet** (the default, below) and the **board*
 
 ## Steps
 
-1. **Read the system before drawing it.** Every box and arrow comes from the code, its deployment files or its plan, not from memory; note where each fact came from, for the PR.
+1. **Read the system before drawing it.** Every box and arrow comes from the code, its deployment files or its architecture document, not from memory; note where each fact came from, for the PR.
 2. **Pick the one story** the sheet tells (a question's path, a deployment, a data flow) and lay it out in that order, top to bottom or left to right. A second story is a second sheet, one level up or down.
    The **headline** states that story: one line above the drawing, the question the sheet answers or its takeaway (`How a data agent is built, configured and deployed`), at most 60 characters, never a sentence.
 3. **Start from [`template.html`](template.html)**: copy it beside the repo's other assets, give it a `<title>`, a `headline`, and an `aria-label` that says the whole picture in prose, then `node bin/build.cjs <file>`.

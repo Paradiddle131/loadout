@@ -33,8 +33,8 @@ if [ -n "$target" ] && [ "$(setup_stamp)" != "$(cat ~/.claude/cloud-setup.stamp 
   fi
 fi
 
-# 1d. The other clones commit through cloud/githooks/ (a commit may not add the owner literally,
-#     cloud/githooks/check-portable.sh), unless a repo has hooks of its own; .git/config is untracked, so the repo
+# 1d. The other clones commit through cloud/githooks/ (a commit may not add the owner literally, nor a process id
+#     to a checked-in file: check-portable.sh, check-process-ids.py), unless a repo has hooks of its own; .git/config is untracked, so the repo
 #     carries nothing for it.
 for g in "$(dirname "$ROOT")"/*/.git; do
   r=$(dirname "$g")

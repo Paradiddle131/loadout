@@ -10,9 +10,12 @@ Every rule here acts inside the repo being worked on; the one rule that writes t
 - Prefer a mature, framework-native solution to a bespoke workaround; when the better path is a larger refactor, lay out the options with a recommendation instead of choosing the workaround silently.
 - When a tool is missing, install it in an isolated way (`uv tool`, `uvx`, `npx`) or state the gap; never pass off a weaker check as the real one.
 - Write down every problem you find but do not fix: a GitHub issue in the `issue` skill's shape, with the session's durable plan, analysis or visual as an artifact on it.
+- Name work for what it does, never by a process id: no phase or milestone numbers, issue or PR numbers, or decision ids in anything checked in (code, comments, test names, documentation, file names); commit messages, PR titles and PR bodies cite issues and PRs freely ([`ways/finished.md § References`](ways/finished.md#references)).
+- Order work by dependency and value; never estimate its time or effort.
+- A repo says what it does and how to run it; the owner's purpose for it, their employer and what prompted it stay out of it.
 - Fix the lint errors, test failures and flaky tests you meet, even when they are unrelated.
 - Start a bug fix by reproducing the bug as close to how its user would hit it as the environment allows.
-- A report, page or deck for a reader outside the work shows only what that reader understands at a glance: process metadata (hashes, version lineage, issue and PR numbers, file names, run bookkeeping) stays in the repo, and every term the page shows gets a tooltip or a glossary line.
+- A report, page or deck for a reader outside the work shows only what that reader understands at a glance: process metadata (hashes, version lineage, issue and PR numbers, file names, run bookkeeping) stays in the commits, PRs and issues, and every term the page shows gets a tooltip or a glossary line.
 - In a repo with a UI, follow its `DESIGN.md` (repo root, then `docs/design/`) before any UI change.
 - Draw an architecture or system diagram with the `draw-architecture` skill, unless the repo's `DESIGN.md` asks for another style.
 - Write PR bodies with the `pr` skill; a repo's own template only renames its sections.

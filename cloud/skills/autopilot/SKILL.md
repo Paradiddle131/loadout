@@ -33,7 +33,7 @@ An **agent PR** is one whose head is the train or `claude/<n>-<slug>` and that c
 
 ## A wake
 
-1. **Orient.** On cloud with no `~/.claude/cloud-target` (the environment's setup didn't run), run `bash <clone>/cloud/setup.sh <repo>` first: Docker's mirror, `dockerd` and the plugins. `cd` into the target; read its `CLAUDE.md`, plan and profile. Timestamps from `date -u +%FT%H:%MZ`; a wake id once from `head -c4 /dev/urandom | od -An -tx1 | tr -d ' \n'`. A wake cut off before it pushed left its work on `claude/wip/*` (`git ls-remote origin 'refs/heads/claude/wip/*'`, cloud `save-work.sh`): recover what the train or the issue's branch lacks before claiming anything new.
+1. **Orient.** On cloud with no `~/.claude/cloud-target` (the environment's setup didn't run), run `bash <clone>/cloud/setup.sh <repo>` first: Docker's mirror, `dockerd` and the plugins. `cd` into the target; read its `CLAUDE.md`, architecture document and profile. Timestamps from `date -u +%FT%H:%MZ`; a wake id once from `head -c4 /dev/urandom | od -An -tx1 | tr -d ' \n'`. A wake cut off before it pushed left its work on `claude/wip/*` (`git ls-remote origin 'refs/heads/claude/wip/*'`, cloud `save-work.sh`): recover what the train or the issue's branch lacks before claiming anything new.
    Read the Digest's steering lines (§ Steering): `Mode: paused` ends the wake here.
 2. **Sync.** Train: `$AP/scripts/train_sync.sh` (prints the case; exit 3 is an aborted conflict: comment it on the train PR and do an upkeep-only wake: steps 3 and 9, no new issue). Per-issue: `git fetch origin`.
 3. **Owner first, then open agent PRs.** Before any new issue:
@@ -44,11 +44,11 @@ An **agent PR** is one whose head is the train or `claude/<n>-<slug>` and that c
 4. **Pick one issue** from the profile's queue, in order. **Pickable:** open, `agent:ready` or `agent:research`, no `in-train`, `needs-owner`, `blocked: *` or live claim, no open PR that closes it, every `Blocked by` closed or `in-train` (or an open PR to stack on, per-issue). Not pickable either: an issue in the `Owner lane`'s maps or naming a file under its globs. Prefer one whose named files no live-claimed issue names, then one furthest from the `Owner lane`. A prompt naming `#n` takes it if pickable. Nothing pickable: step 9, then end.
 5. **Claim.** `$AP/scripts/claim.sh <n> --wake <id> [--session <url>]` (exit 2: another wake holds it; take the next). A claim is live 3 h or until a handoff comment.
 6. **Do it.**
-   - Brief yourself (the repo's `brief` skill if it has one, else the issue, its links, the files it names, the plan's rows); post nothing; the PR's `Briefed on:` line names what you read.
-   - An owner comment or plan row newer than the issue body that changes the ask: rewrite the body first, citing it.
+   - Brief yourself (the repo's `brief` skill if it has one, else the issue, its links, the files it names, the architecture document); post nothing; the PR's `Briefed on:` line names what you read.
+   - An owner comment newer than the issue body that changes the ask: rewrite the body first, citing it.
    - Bug: reproduce first. Code: test first where a test can express it (`tdd`).
    - A choice only the owner can make (costly to undo, new scope, against a guardrail): a decision packet (below), `needs-owner`, and stop that part; keep doing the parts it doesn't touch. A cheap, reversible choice is yours: take it and name it in the PR.
-   - A new or changed decision: its register row in final form in the same diff (`ways/decisions.md`).
+   - A new or changed decision: its architecture-document line in final form in the same diff (`ways/finished.md`).
    - Run the profile's `cloud` gates; quote counts, and both counts when a known flake (one that names itself in the output) is rerun alone. Never skip, disable or weaken a test to get green.
    - Never run the `local` gates on cloud: they become the handoff's local checklist, as exact commands with their expected output. With no `local` gates, cloud is the only environment and runs everything (long suites with `run_in_background`, one at a time when they share state).
 7. **Land it.** Green `cloud` gates only, or a red one the profile's known conditions explain and the handoff quotes.
@@ -59,7 +59,7 @@ An **agent PR** is one whose head is the train or `claude/<n>-<slug>` and that c
 9. **Leave the backlog better** (at most three new issues a wake):
    - File each bug or out-of-scope finding: `$AP/scripts/file_issue.sh` (Context, Do, Acceptance, Blocked by), a sub-issue of its epic when it has one; a plan or analysis the wake produced for it goes on as an artifact (the `issue` skill).
    - **Known conditions:** a condition outside the issue that cost time and can recur gets a profile line (or a `cloud/CLAUDE.md` line if every repo has it); a line you hit again gets the date and a fix issue; the PR that fixes it deletes the line.
-   - **Refill:** graduate an epic's fog that the work just made specific into `agent:ready` sub-issues; slice an issue mixing cloud-buildable and local-only work; new scope (a feature the plan doesn't name) is filed `needs-owner`, never built.
+   - **Refill:** graduate an epic's fog that the work just made specific into `agent:ready` sub-issues; slice an issue mixing cloud-buildable and local-only work; new scope (a feature no issue names) is filed `needs-owner`, never built.
    - **Build ahead:** a `needs-owner` packet whose recommendation is reversible and cloud-buildable may get one speculative PR, titled `[speculative: #<n> = <answer>]`, body `Refs #<n>`; never stack one on another.
    - With budget left, go back to step 4.
 
@@ -98,7 +98,7 @@ One `🤖 Handoff` comment per PR, edited in place after every push; outside `<d
 
 **Briefed on:** … **Done:** … **Next:** - [ ] …
 **Verified on cloud:** one box per profile gate, ticked with its evidence, or `n/a (cloud)` / `not run: <why>`.
-**Decisions:** register rows added or changed.
+**Decisions:** choices made, each with the architecture-document line it added or changed.
 **Went wrong:** none, or one item per problem (below).
 </details>
 ```
@@ -118,5 +118,5 @@ When the owner asks a session on another machine to resume cloud work (it runs t
 ## Never
 
 - Merge, approve, or push to the default branch; push any branch but the train or `claude/<n>-<slug>` (the session branch the harness names included).
-- Put an issue or PR number in code, tests or docstrings (`ways/decisions.md § References`).
+- Put an issue, PR, phase or decision id in a checked-in file (`ways/finished.md`; the pre-commit check refuses it).
 - Anything in the profile's `Never`.

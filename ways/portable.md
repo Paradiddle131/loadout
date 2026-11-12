@@ -33,4 +33,4 @@ Illustrative rewrites:
 - [`../bin/check-generic.sh`](../bin/check-generic.sh) is a working guard: owner from the remote, siblings from the parent directory (as a path or `owner/name`), extra words from a deny file.
 - A repo that acts on itself (builds, syncs, links its tracker) takes `<owner>/<repo>` from its origin remote, so a fork works against itself; history (ledgers, changelogs, dated decisions) keeps its facts.
   [`../cloud/githooks/check-portable.sh`](../cloud/githooks/check-portable.sh) guards it from outside the repo: run as the repo's pre-commit hook ([`../cloud/githooks/`](../cloud/githooks/pre-commit)), it fails a commit that adds the owner's login.
-- Code follows the same rule for issue numbers ([`decisions.md § References`](decisions.md#references)).
+- Every repo's checked-in files follow the same rule for process ids ([`finished.md § References`](finished.md#references)).
