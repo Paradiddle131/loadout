@@ -61,7 +61,22 @@ fi
 
 # 2b. A GCP project in the environment ($GCP_PROJECT) is a $0 lab: the byte cap, the guard's
 #     registration, the credential's fences and the month-to-date cost, as a few lines of context.
-[ -n "${GCP_PROJECT:-}" ] && timeout 120 bash "$ROOT/cloud/gcp/status.sh"
+#     A target that must not use the session's project (it has one of its own) says so with the file
+#     docs/agents/no-session-gcp, whose first line is the reason; the status then does not run.
+gcp_repo=${target:-${CLAUDE_PROJECT_DIR:-}}
+if [ -n "${GCP_PROJECT:-}" ] && [ -n "$gcp_repo" ] && [ -f "$gcp_repo/docs/agents/no-session-gcp" ]; then
+  echo "cloud: GCP status skipped: $(basename "$gcp_repo") declines the session's GCP project (docs/agents/no-session-gcp: $(head -n 1 "$gcp_repo/docs/agents/no-session-gcp")); do not use it there."
+elif [ -n "${GCP_PROJECT:-}" ]; then
+  timeout 120 bash "$ROOT/cloud/gcp/status.sh"
+fi
+
+# 2c. save-work.sh skips a clone's push when gitleaks finds a secret in it, often in a background run nobody
+#     sees: repeat the newest such line here until a later save of that clone pushed.
+skipped=$(awk '$2 == "SKIPPED" { last[$3] = $0; at[$3] = NR; next }
+               $4 == "->" { delete last[$2] }
+               END { n = 0; for (k in last) if (at[k] > n) { n = at[k]; line = last[k] } if (n) print line }' \
+  "$HOME/.claude/save-work.log" 2>/dev/null || true)
+[ -z "$skipped" ] || echo "cloud: save-work did not push unsaved work: $skipped"
 
 # 3. Multi-repo sessions start above the clones and skip the target's own hooks: run its
 #    SessionStart commands here, as Claude Code would in a single-repo session.
