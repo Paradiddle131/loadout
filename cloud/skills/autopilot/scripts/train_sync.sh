@@ -14,6 +14,9 @@ git fetch origin "$BASE" >/dev/null 2>&1
 if git fetch origin "$TRAIN" >/dev/null 2>&1; then T="$(git rev-parse "origin/$TRAIN")"; else T=""; fi
 MAIN="$(git rev-parse "origin/$BASE")"
 PR="$(train_pr)"
+# Only an answer that names a state or no PR moves the train: anything else would reset it as `none`.
+jq -e 'type == "null" or (type == "object" and (.state == "open" or .state == "closed"))' <<<"$PR" >/dev/null 2>&1 \
+  || die "unreadable train PR answer; nothing changed"
 state="$(jq -r '.state // "none"' <<<"$PR")"
 merged_at="$(jq -r '.merged_at // empty' <<<"$PR")"
 M="$(jq -r '.head.sha // empty' <<<"$PR")"

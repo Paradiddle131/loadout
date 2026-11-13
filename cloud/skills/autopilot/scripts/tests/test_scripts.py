@@ -28,10 +28,14 @@ UVX = shutil.which("uvx")
 STUB_GH = """#!/usr/bin/env bash
 # `gh api <endpoint> [--jq expr]`: reads answer from $STUB_DIR/<fixture>.json; a write fails loudly,
 # unless STUB_WRITES is set: then it is logged to $STUB_DIR/writes.log and answers write.json.
+# A call whose arguments contain $STUB_FAIL_ON fails the way gh does on a 502 error page.
 set -euo pipefail
 [ -z "${STUB_FAIL:-}" ] || { echo '{"message":"Not Found"}'; exit 1; }
 shift
 all="$*" ep="" jq="" write=""
+if [ -n "${STUB_FAIL_ON:-}" ] && [[ "$all" == *"$STUB_FAIL_ON"* ]]; then
+  echo "invalid character 'b' looking for beginning of value" >&2; exit 1
+fi
 while [ $# -gt 0 ]; do
   case "$1" in
     --jq) jq="$2"; shift ;;
@@ -296,9 +300,8 @@ def _patched_body(stderr: str, marker: str = "-X PATCH") -> str:
             "Autopilot train.\n\n## Finished issues\n- Closes #276: placed\n\n"
             "🤖 Generated with [Claude Code](x)",
         ),
-        ("", "## Finished issues\n- Closes #276: placed"),
     ],
-    ids=["after-the-last-closes", "section-before-the-first-heading", "before-the-footer", "empty"],
+    ids=["after-the-last-closes", "section-before-the-first-heading", "before-the-footer"],
 )
 def test_train_note_places_the_line_in_finished_issues(
     stub: dict[str, str], body: str, expected: str
@@ -322,10 +325,38 @@ def test_a_value_naming_the_flag_is_no_dry_run(stub: dict[str, str]) -> None:
     assert "dry-run: gh api" not in done.stderr
 
 
+@pytest.mark.parametrize(
+    "answer",
+    ["", "bad gateway", json.dumps({"message": "Server Error"}), json.dumps({"number": 70})],
+    ids=["empty-200", "not-json", "not-the-pr", "no-body"],
+)
+def test_train_note_writes_nothing_when_the_re_read_has_no_body(
+    stub: dict[str, str], answer: str
+) -> None:
+    """A re-read that is empty, not JSON, not the PR or bodiless never replaces the body."""
+    fx = Path(stub["STUB_DIR"])
+    fx.joinpath("pr_open.json").write_text(json.dumps([{"number": 70}]))
+    fx.joinpath("pr.json").write_text(answer)
+    done = run("train_note.sh", "276", "placed", env={**stub, "STUB_WRITES": "1"})
+    assert done.returncode != 0, done.stdout
+    assert not fx.joinpath("writes.log").exists(), fx.joinpath("writes.log").read_text()
+
+
+def test_train_note_writes_nothing_when_the_open_pr_cannot_be_listed(
+    stub: dict[str, str],
+) -> None:
+    """A failed list of open PRs never opens a second train PR."""
+    env = {**stub, "STUB_FAIL_ON": "state=open"}
+    done = run("train_note.sh", "276", "x", "--dry-run", env=env)
+    assert done.returncode != 0
+    assert "dry-run: gh api" not in done.stderr
+
+
 def test_train_note_opens_the_train_pr_when_none_is_open(stub: dict[str, str]) -> None:
     done = run("train_note.sh", "257", "x", "--dry-run", env=stub)
     assert done.returncode == 0, done.stderr
     assert "-X POST repos/example-owner/example-repo/pulls" in done.stderr
+    assert _patched_body(done.stderr, "-X POST") == "## Finished issues", "never an empty body"
     assert "title=Autopilot\\ train" in done.stderr and "-F draft=false" in done.stderr
 
 
@@ -397,6 +428,18 @@ def test_train_sync_builds_the_train_when_none_exists(
     assert _git(clone, "rev-parse", "origin/claude/nightly-roadmap") == _git(
         clone, "rev-parse", "origin/main"
     )
+
+
+@pytest.mark.parametrize("answer", ["", json.dumps([{"number": 9}])], ids=["empty", "no-state"])
+def test_train_sync_moves_nothing_on_an_unreadable_train_pr(
+    stub: dict[str, str], remote: tuple[Path, Path], answer: str
+) -> None:
+    """An answer that is no PR and no `null` never resets the train as if none existed."""
+    clone, bare = remote
+    Path(stub["STUB_DIR"], "pr_latest.json").write_text(answer)
+    done = run("train_sync.sh", env=stub, cwd=clone)
+    assert done.returncode == 1, done.stdout
+    assert _git(bare, "branch", "--list", "claude/nightly-roadmap") == ""
 
 
 def test_train_sync_merges_main_into_an_open_train(
@@ -473,6 +516,55 @@ def test_claim_stops_when_the_comments_cannot_be_read(stub: dict[str, str]) -> N
     done = run("claim.sh", "7", "--wake", "abcd1234", "--dry-run", env={**stub, "STUB_FAIL": "1"})
     assert done.returncode != 0
     assert "dry-run: gh api" not in done.stderr
+
+
+COMMENT_POST = "-X POST repos/example-owner/example-repo/issues/7/comments"
+
+
+def test_claim_takes_back_its_label_when_the_comment_fails(stub: dict[str, str]) -> None:
+    """A comment that cannot be confirmed leaves no label behind and exits 1."""
+    fx = Path(stub["STUB_DIR"])
+    env = {**stub, "STUB_WRITES": "1", "STUB_FAIL_ON": COMMENT_POST}
+    done = run("claim.sh", "7", "--wake", "abcd1234", env=env)
+    assert done.returncode == 1, done.stderr
+    writes = fx.joinpath("writes.log").read_text()
+    assert "issues/7/labels -f labels[]=agent:claimed" in writes
+    assert "-X DELETE repos/example-owner/example-repo/issues/7/labels/agent:claimed" in writes
+
+
+def test_claim_keeps_a_comment_that_landed_although_its_answer_was_lost(
+    stub: dict[str, str],
+) -> None:
+    fx = Path(stub["STUB_DIR"])
+    stamp = subprocess.run(  # noqa: S603 (fixed arguments)
+        [DATE, "-u", "+%FT%H:%MZ"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    fx.joinpath("comments.json").write_text(
+        json.dumps([{"id": 99, "body": f"🤖 claimed {stamp} abcd1234"}])
+    )
+    env = {**stub, "STUB_WRITES": "1", "STUB_FAIL_ON": COMMENT_POST}
+    done = run("claim.sh", "7", "--wake", "abcd1234", env=env)
+    assert done.returncode == 0 and done.stdout.strip() == "abcd1234", done.stderr
+    assert "DELETE" not in fx.joinpath("writes.log").read_text()
+
+
+def test_claim_leaves_no_label_when_labelling_fails(stub: dict[str, str]) -> None:
+    fx = Path(stub["STUB_DIR"])
+    env = {**stub, "STUB_WRITES": "1", "STUB_FAIL_ON": "issues/7/labels -f"}
+    done = run("claim.sh", "7", "--wake", "abcd1234", env=env)
+    assert done.returncode == 1, done.stderr
+    writes = fx.joinpath("writes.log").read_text()
+    assert "comments" not in writes, "no claim comment after a failed label"
+    assert "-X DELETE repos/example-owner/example-repo/issues/7/labels/agent:claimed" in writes
+
+
+def test_file_issue_fails_when_the_create_answers_no_issue(stub: dict[str, str]) -> None:
+    """An empty 200 from the create is no issue number to hand back."""
+    Path(stub["STUB_DIR"], "write.json").write_text("")
+    args = ["--title", "Do x", "--context", "c", "--do", "d", "--acceptance", "a"]
+    done = run("file_issue.sh", *args, env={**stub, "STUB_WRITES": "1"})
+    assert done.returncode == 1, done.stdout
+    assert done.stdout.strip() == ""
 
 
 def test_file_issue_without_an_epic_files_a_plain_issue(stub: dict[str, str]) -> None:

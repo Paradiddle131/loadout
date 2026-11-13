@@ -44,6 +44,9 @@ for l in "${LABELS[@]+"${LABELS[@]}"}"; do args+=(-f "labels[]=$l"); done
 created="$(gh_write -X POST "repos/$REPO/issues" "${args[@]}")"
 number="$(jq -r '.number // "<new>"' <<<"$created")"
 id="$(jq -r '.id // "<new-id>"' <<<"$created")"
+# A create whose answer names no issue is a failure (`gh api` takes an empty 200 as success).
+[ "$DRY_RUN" = 1 ] || { [[ "$number" =~ ^[0-9]+$ ]] && [[ "$id" =~ ^[0-9]+$ ]]; } \
+  || die "the issue create answered no issue number; check the tracker before filing again"
 [ -n "$EPIC" ] || { echo "$number"; exit 0; }
 gh_write -X POST "repos/$REPO/issues/$EPIC/sub_issues" -F "sub_issue_id=$id" >/dev/null
 if [ -n "$BEFORE" ]; then
