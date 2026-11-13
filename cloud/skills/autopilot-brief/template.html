@@ -123,6 +123,7 @@ a.chip:hover { color: var(--ink); border-color: var(--accent) }
 .field { display: grid; grid-template-columns: 64px 1fr; gap: 8px; font-size: 14px }
 .field > span:first-child { font: 500 11px/2 var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted) }
 .field > span:last-child { min-width: 0 }
+.field.record { grid-template-columns: 104px 1fr; margin: 4px 0 } .field.record .notes { padding-left: 16px }
 details { border-top: 1px solid var(--line); padding-top: 8px; min-width: 0 }
 summary { cursor: pointer; font-size: 13px; color: var(--muted); font-weight: 500 }
 summary:hover { color: var(--ink) }
@@ -164,7 +165,8 @@ tr.hi td { font-weight: 600 }
   tree nodes: { name, state: new | changed | same | more, note, count, children }.
   wrong[].status: open | still unknown | known | filed | fixed (the page lists them in that order).
   landings[].group: sensitive | parked | held | unreviewed | merged (the page lists them in that order);
-  checked and unchecked come from the review verdict, never from the author's handoff.
+  tier, reviewers, reviewed, stamps, filed and unchecked come from the Gates and Review records; handoff is
+  the author's own numbers, shown as "per the handoff".
 -->
 <script type="application/json" id="brief">
 {
@@ -176,15 +178,15 @@ tr.hi td { font-weight: 600 }
   "stats": [["wakes", "9"], ["PRs merged", "3"], ["issues worked", "6"]],
   "landings": [
     { "pr": 21, "issue": 13, "group": "sensitive", "line": "Customer names are hashed before the export writes them.",
-      "review": "sensitive, 4 reviewers, 2 cycles, 3 fixed, 1 filed",
-      "checked": ["A real day exported and scanned for names: none in clear.", "Every column that joins back to a person."],
-      "unchecked": ["The partner feed: no sample in reach."] },
-    { "pr": 23, "issue": 15, "group": "parked", "line": "The retry wrapper for the upload, sent back three times.",
-      "review": "standard, 2 reviewers, 3 cycles, 4 fixed",
+      "tier": "sensitive", "reviewers": ["correctness", "leak hunting", "guardrails"], "reviewed": "4f2a91c, the head", "stamps": 3, "filed": [24],
+      "unchecked": ["The partner feed: no sample in reach."], "handoff": "2 cycles, 3 findings fixed" },
+    { "pr": 23, "issue": 15, "group": "parked", "line": "The retry wrapper for the upload; review's cycles ran out.",
+      "tier": "standard", "reviewers": ["correctness"], "reviewed": "9b03e7d, the head", "stamps": 4, "handoff": "3 cycles, 4 findings fixed",
       "notes": ["Open: a retry after a partial write duplicates rows; two fixes moved the duplicate, neither removed it."] },
     { "pr": 19, "issue": 11, "group": "merged", "line": "The exporter writes Parquet by default.",
-      "review": "standard, 2 reviewers, 1 cycle, 1 fixed", "checked": ["The round-trip test on a real day."], "unchecked": ["Readers other than pyarrow."] },
-    { "pr": 20, "issue": 12, "group": "merged", "line": "A `--csv` flag keeps the old output.", "review": "routine, no reviewer" }
+      "tier": "standard", "reviewers": ["correctness"], "reviewed": "d1e5c20; head 7a8b3f4 adds a clean merge", "stamps": 2,
+      "unchecked": ["Readers other than pyarrow."], "handoff": "1 cycle, 1 finding fixed" },
+    { "pr": 20, "issue": 12, "group": "merged", "line": "A `--csv` flag keeps the old output.", "tier": "routine", "stamps": 1 }
   ],
   "epics": [
     {
@@ -376,19 +378,28 @@ tr.hi td { font-weight: 600 }
     </section>`;
 
   // Sensitive merges first, then parked items, then held and unreviewed ones, then the other merges.
-  const GROUPS = [["sensitive", "Merged at the sensitive tier"], ["parked", "Parked after three reviews"],
+  const GROUPS = [["sensitive", "Merged at the sensitive tier"], ["parked", "Parked: review's cycles ran out"],
     ["held", "Reviewed, held by the merge policy"], ["unreviewed", "Not reviewed: no reviewer ran"], ["merged", "Merged"]];
   const prUrl = n => `${data.repoUrl}/pull/${n}`;
-  const checks = r => {
-    if (r.group === "parked" || r.group === "unreviewed") return "";
-    const list = (label, l) => `<p class="group-label">${label}</p>` + (l && l.length ? notes(l) : `<p class="empty">not recorded</p>`);
-    return list("Checked", r.checked) + list("Not checked", r.unchecked);
+  const field = (label, value) => `<div class="field record"><span>${label}</span><span>${value}</span></div>`;
+  const landingTag = r => [r.tier ? `${r.tier} tier` : "no review record",
+    r.stamps ? `${r.stamps} gate stamp${r.stamps === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
+  const recordFields = r => {
+    if (r.group === "unreviewed") return "";
+    const lenses = r.tier === "routine" ? "no reviewer: the routine tier needs the gates only"
+      : r.reviewers && r.reviewers.length ? txt(r.reviewers.join(", ")) : "not in the record";
+    return field("Reviewed by", lenses)
+      + (r.reviewed ? field("Commit", txt(r.reviewed)) : "")
+      + (r.tier === "routine" ? "" : field("Not checked", r.unchecked && r.unchecked.length
+          ? `<ul class="notes">${r.unchecked.map(x => `<li>${txt(x)}</li>`).join("")}</ul>` : "not in the record"))
+      + (r.filed && r.filed.length ? field("Filed", r.filed.map(n => `<a href="${esc(issueUrl(n))}">#${esc(n)}</a>`).join(" ")) : "")
+      + (r.handoff ? field("Handoff", `${txt(r.handoff)} <span class="count">(per the handoff)</span>`) : "");
   };
   const landingRow = r => `
     <div class="row${r.group === "sensitive" || r.group === "parked" ? " open" : ""}">
       <div class="row-head"><span class="kind"><a href="${esc(prUrl(r.pr))}">#${esc(r.pr)}</a></span><span>${txt(r.line)}</span>
-        <span class="tag wrap">${esc(r.review || "no review")}</span></div>
-      <details><summary>${r.group === "parked" ? "Open findings" : r.group === "unreviewed" ? "Why" : "What was checked"}</summary>${checks(r)}${notes(r.notes)}
+        <span class="tag wrap">${esc(landingTag(r))}</span></div>
+      <details${r.group === "sensitive" ? " open" : ""}><summary>${r.group === "parked" ? "Open findings and review" : r.group === "unreviewed" ? "Why" : "Review record"}</summary>${recordFields(r)}${notes(r.notes)}
         ${r.issue ? `<p class="links"><a href="${esc(issueUrl(r.issue))}">the issue, #${esc(r.issue)}</a></p>` : ""}</details>
     </div>`;
   const landingList = data.landings || [];

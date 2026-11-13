@@ -54,6 +54,7 @@ fi
 case "$ep" in
   */compare/*) f=compare.json ;;
   *pulls/70/commits*) f=commits.json ;;
+  *pulls/*/reviews*) f=reviews.json ;;
   *pulls/*/commits*) f=other_commits.json ;;
   *pulls\\?*state=open*) f=pulls_open.json ;;
   *pulls/*) f=pr.json ;;
@@ -106,15 +107,17 @@ PR = {
     "state": "open",
     "draft": False,
     "title": "Add the exporter",
-    "base": {"ref": "main"},
+    "base": {"ref": "main", "repo": {"default_branch": "main"}},
     "head": {"sha": HEAD, "ref": "claude/12-exporter"},
     "labels": [{"name": "agent:claimed"}],
 }
-# The merge guard's `--check`: logs its argument; refuses with a reason when STUB_GUARD_REFUSE is set.
-STUB_GUARD = """import os, sys
+# The merge guard's `--check`: logs its argument; refuses with a reason when STUB_GUARD_REFUSE is set,
+# else prints the head it checked (STUB_GUARD_HEAD, by default the PR's).
+STUB_GUARD = f"""import os, sys
 open(os.path.join(os.environ["STUB_DIR"], "guard.log"), "a").write(" ".join(sys.argv[1:]) + "\\n")
 if os.environ.get("STUB_GUARD_REFUSE"):
-    sys.exit(print(os.environ["STUB_GUARD_REFUSE"], file=sys.stderr) or 2)
+    sys.exit(print(os.environ["STUB_GUARD_REFUSE"], file=sys.stderr) or 1)
+print(os.environ.get("STUB_GUARD_HEAD", "{HEAD}"))
 """
 
 
@@ -137,6 +140,9 @@ def stub(tmp_path: Path) -> dict[str, str]:
     )
     guard = tmp_path / "merge-guard.py"
     guard.write_text(STUB_GUARD)
+    (fx / "reviews.json").write_text(
+        json.dumps([{"author_association": "OWNER", "state": "COMMENTED"}])
+    )
     (fx / "compare.json").write_text(json.dumps({"behind_by": 0, "ahead_by": 2}))
     (fx / "issue.json").write_text(json.dumps({"id": 123, "number": 5}))
     (fx / "write.json").write_text(json.dumps({"id": 99}))
@@ -149,7 +155,12 @@ def stub(tmp_path: Path) -> dict[str, str]:
         "AUTOPILOT_MERGE_GUARD": str(guard),
     }
     env.pop("DRY_RUN", None)
-    for key in ("AUTOPILOT_HOLD_LABELS", "AUTOPILOT_MERGE_POLICY", "STUB_GUARD_REFUSE"):
+    for key in (
+        "AUTOPILOT_HOLD_LABELS",
+        "AUTOPILOT_MERGE_POLICY",
+        "STUB_GUARD_REFUSE",
+        "STUB_GUARD_HEAD",
+    ):
         env.pop(key, None)
     return env
 
@@ -421,7 +432,7 @@ def _merge_with(stub: dict[str, str], **changes: object) -> subprocess.Completed
     ("changes", "case"),
     [
         ({"draft": True}, "draft"),
-        ({"base": {"ref": "claude/11-reader"}}, "stacked"),
+        ({"base": {"ref": "claude/11-reader", "repo": {"default_branch": "main"}}}, "stacked"),
         ({"labels": [{"name": "needs-local-verify"}]}, "held"),
         ({"labels": [{"name": "blocked: upstream"}, {"name": "needs-owner"}]}, "held"),
         ({"labels": [{"name": "needs-review"}]}, "held"),
@@ -529,4 +540,74 @@ def test_a_value_naming_the_flag_is_no_dry_run(stub: dict[str, str]) -> None:
     args = ["--title", "Add --dry-run to the purge", "--context", "c", "--do", "d"]
     done = run("file_issue.sh", *args, "--acceptance", "a", env=stub)
     assert "stub gh: write refused: -X POST" in done.stderr, done.stderr
+    assert "dry-run: gh api" not in done.stderr
+
+
+def test_merge_writes_nothing_for_a_closed_pr(stub: dict[str, str]) -> None:
+    Path(stub["STUB_DIR"], "pr.json").write_text(json.dumps({**PR, "state": "closed"}))
+    done = run("merge.sh", "70", env={**stub, "STUB_WRITES": "1"})
+    assert done.returncode == 1 and "not open" in done.stderr, done.stderr
+    assert not Path(stub["STUB_DIR"], "writes.log").exists()
+
+
+def test_merge_takes_the_default_branch_from_the_pr(stub: dict[str, str]) -> None:
+    """A repo whose default branch is not `main`: its PRs merge, and one aimed at `main` is stacked."""
+    fx = Path(stub["STUB_DIR"])
+    trunk = {"ref": "trunk", "repo": {"default_branch": "trunk"}}
+    fx.joinpath("pr.json").write_text(json.dumps({**PR, "base": trunk}))
+    done = run("merge.sh", "70", "--dry-run", env=stub)
+    assert done.returncode == 0 and done.stdout.strip() == "merged", done.stderr
+    fx.joinpath("pr.json").write_text(
+        json.dumps({**PR, "base": {"ref": "main", "repo": {"default_branch": "trunk"}}})
+    )
+    aimed = run("merge.sh", "70", "--dry-run", env=stub)
+    assert aimed.returncode == 3 and aimed.stdout.strip() == "stacked", aimed.stderr
+
+
+def test_merge_stops_when_the_guard_checked_another_head(stub: dict[str, str]) -> None:
+    done = run("merge.sh", "70", "--dry-run", env={**stub, "STUB_GUARD_HEAD": "e" * 40})
+    assert done.returncode == 3 and done.stdout.strip() == "moved", done.stderr
+    assert "dry-run: gh api" not in done.stderr
+
+
+@pytest.mark.parametrize(
+    "reviews",
+    [
+        [{"author_association": "OWNER", "state": "CHANGES_REQUESTED"}],
+        [
+            {"author_association": "OWNER", "state": "APPROVED"},
+            {"author_association": "COLLABORATOR", "state": "COMMENTED"},
+            {"author_association": "MEMBER", "state": "CHANGES_REQUESTED"},
+        ],
+    ],
+    ids=["owner", "latest-member"],
+)
+def test_merge_holds_when_the_owner_requests_changes(
+    stub: dict[str, str], reviews: list[dict[str, str]]
+) -> None:
+    Path(stub["STUB_DIR"], "reviews.json").write_text(json.dumps(reviews))
+    done = run("merge.sh", "70", "--dry-run", env=stub)
+    assert done.returncode == 3 and done.stdout.strip() == "held", done.stderr
+    assert "requests changes" in done.stderr
+    assert "dry-run: gh api" not in done.stderr
+
+
+def test_merge_ignores_an_answered_request_and_one_from_outside(stub: dict[str, str]) -> None:
+    Path(stub["STUB_DIR"], "reviews.json").write_text(
+        json.dumps(
+            [
+                {"author_association": "OWNER", "state": "CHANGES_REQUESTED"},
+                {"author_association": "OWNER", "state": "APPROVED"},
+                {"author_association": "NONE", "state": "CHANGES_REQUESTED"},
+            ]
+        )
+    )
+    done = run("merge.sh", "70", "--dry-run", env=stub)
+    assert done.returncode == 0 and done.stdout.strip() == "merged", done.stderr
+
+
+def test_merge_holds_when_the_reviews_cannot_be_read(stub: dict[str, str]) -> None:
+    done = run("merge.sh", "70", "--dry-run", env={**stub, "STUB_FAIL_ON": "/reviews"})
+    assert done.returncode == 3 and done.stdout.strip() == "held", done.stderr
+    assert "could not be read" in done.stderr
     assert "dry-run: gh api" not in done.stderr

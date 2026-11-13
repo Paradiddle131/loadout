@@ -7,7 +7,7 @@ Cloud conditions every repo shares live in [`cloud/CLAUDE.md`](../cloud/CLAUDE.m
 
 - One item at a time, each its own branch and PR, sized for one reviewer's pass (Context, Do, Acceptance as a command, Blocked by); long work lands in slices: a PR read in one sitting keeps review real.
 - Review between green gates and the merge, by fresh subagents at a tier computed from the paths, findings verified, and never by the author: gates pass work that leaks, and an unattended landing without review once leaked personal data that fresh reviewers found afterwards.
-- Three review-and-fix cycles, then park the item with its findings: a finding that survives three fixes is the owner's question, and the wake's time goes further elsewhere.
+- The review skill's cycle count, one rethink included, then park the item with its findings as the packet: a finding that survives that is the owner's question, and the wake's time goes further elsewhere.
 - The wake merges, through a script the merge guard backs, at the head that was checked: "never merge" in prose left PRs piling up unread, and a rule a hook enforces needs no memory.
 - A head behind the default branch takes it in and is stamped again before it merges: two branches can each pass and still collide once both land (the same next tag), and git merges that without a conflict.
 - Steering lines sit in a pinned issue only the owner edits, and the open questions are the `needs-owner` label: steering needs no PR, and a list no wake writes cannot drift or race.

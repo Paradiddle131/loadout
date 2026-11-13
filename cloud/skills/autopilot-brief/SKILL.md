@@ -24,7 +24,8 @@ Each section opens with one plain line; details stay folded.
 From the target's root, with `R=<owner>/<repo>` from `git remote get-url origin`:
 - Commits: run `git fetch origin`, then `git log origin/<default> --since=<start> --reverse --format='%h %cI %s'`.
 - Files: `git diff --name-status <last commit before start> origin/<default>` and `git diff --shortstat` over the same range, for the tree.
-- Agent PRs (head `claude/<n>-<slug>`): `gh api "repos/$R/pulls?state=all&sort=updated&direction=desc&per_page=100"` (page by hand with `&page=N`), keeping those merged or updated in the window; for each, its `🤖 Gates` record and its `🤖 Review` record (tier, reviewers, cycles, findings fixed and filed, what was checked and what was not; a `routine` one has no reviewer), its `🤖 Handoff` headline and its labels (`needs-owner` after review is a parked item, `needs-review` an unreviewed one, the merge policy's label a held one).
+- Agent PRs (head `claude/<n>-<slug>`): `gh api "repos/$R/pulls?state=all&sort=updated&direction=desc&per_page=100"` (page by hand with `&page=N`), keeping those merged or updated in the window; for each, its comments and labels (`needs-owner` after review is a parked item, `needs-review` an unreviewed one, the merge policy's label a held one).
+  Only `🤖 Gates` and `🤖 Review` comments by an `OWNER`, `MEMBER` or `COLLABORATOR` are records. From the newest `🤖 Review`: tier, reviewers, reviewed commit and head, and its raw output's `Not checked` section; from the `🤖 Gates` records: how many stamps ran; issues filed: those the PR's comments link. Anything else (cycles, findings fixed) comes from the `🤖 Handoff` and is labelled `per the handoff`.
 - Each issue of the profile's queue (its Map's sub-issues, or the `agent:*` issues): `gh api repos/$R/issues/<n>` and `.../comments`. Keep the `🤖 claimed <time> <wake id>` lines (one wake id is one wake) and the `🤖 Handoff` comments.
 - Every open `needs-owner` issue's last packet (its `**Asks:**` line is the one-line question).
 - The profile's `Known conditions` lines added in the window (`git log -p --since=<start> -- <profile>`).
@@ -36,11 +37,12 @@ A run with many issues fits in one subagent's read: hand it the window and the i
 
 One `landings` row per agent PR of the window, at most one per item; `group` is one of these, and the page lists them in this order:
 - `sensitive`: merged at the `sensitive` tier; first, since only reviewers read it before it merged.
-- `parked`: sent back by review three times; its open findings go in `notes`.
+- `parked`: review's cycles ran out; its open findings go in `notes`.
 - `held` (waits on the merge policy) and `unreviewed` (no reviewer ran).
 - `merged`: the `standard` and `routine` merges, one line each (a `routine` merge had no reviewer: say so).
-Each row: `pr`, `issue`, `group`, `line` (what it does, one plain sentence), `review` ("standard, 2 reviewers, 1 cycle, 3 fixed, 1 filed"), and folded `checked` and `unchecked`, from the `🤖 Review` verdict: what the reviewers ran or read, and what nobody checked (a live system, the owner's machine, a file no reviewer opened).
-A verdict without both lists shows `unchecked: not recorded`; never fill them from the author's handoff.
+Each row: `pr`, `issue`, `group`, `line` (what it does, one plain sentence), and from the records: `tier`, `reviewers` (the lenses that ran; none for `routine`), `reviewed` ("abc1234, the head" or "abc1234; head def5678 adds a clean merge"), `stamps`, `filed` (issue numbers), `unchecked` (the verifier's `Not checked` lines, as written); then `handoff`, the author's own numbers, shown as `per the handoff`.
+A record without a `Not checked` section shows `not in the record`; never fill a record field from the handoff.
+A sensitive row opens with `unchecked` in view.
 
 ## 4. Group (the map)
 
