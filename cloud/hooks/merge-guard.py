@@ -1,55 +1,45 @@
 #!/usr/bin/env python3
 """PreToolUse hook: refuse a PR merge whose head commit carries no recorded gates and review.
 
-A change may be merged only when its PR carries two records for its current head commit, each the newest
-of its kind: a gates record (skills/review/scripts/gate_stamp.sh, the gate command's result) and a review
-record (skills/review/scripts/verdict.sh, a verdict posted with the reviewers' output). A record is a PR
-comment whose first line is `🤖 Gates: <state>` or `🤖 Review: <result> (<tier> tier)` and whose second line
-is the marker `<!-- loadout:<gates|review> sha=<head> state=success|failure [tier=..] [reviewed=..] -->`.
-Only comments by the repo's owner, a member or a collaborator count (`author_association`); of those, the
-newest marker of each kind must be unedited, well formed, agree with its first line, name the PR's
-current head and say `state=success`. A record for an older head does not count. In a local clone holding
-the head and the repo's default branch as GitHub names it, skills/review/scripts/tier.sh runs with
-`--base origin/<default branch>`, and a review below the tier the paths give refuses, as does a tier.sh that
-fails or runs out of time; with no such clone the tier check is skipped. The merge must also name the head
-the guard checked (`expectedHeadSha`, `--match-head-commit`, `-f sha=`), so GitHub itself refuses it if a
-push lands between this check and the merge.
+A guard against an agent forgetting the review path, not against a determined or dishonest one: it covers
+the forms below exactly and no others. A PR may be merged only when its newest gates record
+(skills/review/scripts/gate_stamp.sh) and newest review record (skills/review/scripts/verdict.sh), PR comments
+by the owner, a member or a collaborator whose first line is `🤖 Gates: <state>` or `🤖 Review: <result>
+(<tier> tier)` and second the marker `<!-- loadout:<gates|review> sha=<head> state=success|failure [tier=..]
+[reviewed=..] -->`, are unedited, well formed, agree with their first line and name the PR's current head as
+a success. In a local clone holding the head and the default branch GitHub names, tier.sh runs with `--base
+origin/<that branch>` and a review below the paths' tier refuses, as does a tier.sh that fails or runs out of
+time; with no such clone the tier check is skipped. The merge must name the head checked (`expectedHeadSha`,
+`--match-head-commit`, `-f sha=`), so GitHub refuses it if a push lands in between.
 
-Covered (the guard is a guard against an agent forgetting the review path, not against a determined or
-dishonest one, so it covers these forms exactly and no others):
-- checked against the records: the MCP `merge_pull_request` tool of any server; `gh pr merge` (a number,
-  `#n`, URL or branch; the repo from `-R`/`--repo`, the URL, `GH_REPO` or the origin); `gh api` writes to
+Covered:
+- checked against the records: any MCP server's `merge_pull_request`; `gh pr merge` (a number, `#n`, URL or
+  branch; the repo from `-R`/`--repo`, the URL, `GH_REPO` or the origin); `gh api` writes to
   `repos/<o>/<r>/pulls/<n>/merge` (any write method, every flag spelling, a full URL, an encoded, dotted or
-  upper-case path, `{owner}`/`{repo}` placeholders);
-- refused outright: auto-merge (`gh pr merge --auto`, the MCP `enable_pr_auto_merge`); a GraphQL call that
-  names a merge mutation or whose query comes from a file (`gh api graphql`, or an HTTP client); a write to a
-  merge endpoint with `curl`, `wget`, `http`/`https` (httpie) or `xh`; `git commit` or `git push` with hooks
-  bypassed (`--no-verify` or an abbreviation git takes, `commit -n`, core.hooksPath set with `-c`,
-  `--config-env` or `GIT_CONFIG_*`): fix what the hook reports instead;
-- each of these as the command itself, after `&&`, `||`, `;`, `|`, `&` or a newline, inside `( … )`,
-  `{ …; }`, `$( … )` or backticks, after the shell keywords in KEYWORDS, variable assignments, `export` and
-  `cd`, behind the wrappers in WRAPPERS with their options (`env`, `command`, `sudo`, `timeout`, `nice`,
-  `time`, `exec`, `nohup`), and in the command string of `bash`/`sh`/`zsh`/`dash -c '<string>'`, `eval` or
-  `env -S`, or a here-string or heredoc a shell reads its commands from, up to MAX_DEPTH levels deep.
-
+  upper-case path, `{owner}`/`{repo}`);
+- refused outright: auto-merge (`gh pr merge --auto`, MCP `enable_pr_auto_merge`); a GraphQL call naming a
+  merge mutation or reading its query from a file (`gh api graphql` or an HTTP client); a write to a merge
+  endpoint with `curl`, `wget`, `http`/`https` (httpie) or `xh`; `git commit`/`git push` with hooks bypassed
+  (`--no-verify` or an abbreviation of it, `commit -n`, core.hooksPath set by `-c`, `--config-env` or
+  `GIT_CONFIG_*`);
+- each as the command itself, after `&&`, `||`, `;`, `|`, `&` or a newline, in `( … )`, `{ …; }`, `$( … )` or
+  backticks, after KEYWORDS, assignments, `export` and `cd`, behind WRAPPERS with their options (`env`,
+  `command`, `sudo`, `timeout`, `nice`, `time`, `exec`, `nohup`), and in the command string of
+  `bash`/`sh`/`zsh`/`dash -c`, `eval` or `env -S`, or a here-string or heredoc a shell reads as its commands.
 Not covered (passed unchecked): any other program that runs a command for you (`find -exec`, `xargs`,
-`parallel`, `strace`, `setsid`, `su -c`, `ssh`, `chrt`, `builtin`, …); a command piped into a shell
-(`… | bash`); a command assembled at run time (`x=merge; gh pr $x`); aliases, functions and scripts; code
-calling the API; a merge commit pushed to the default branch; the web UI. Hooks see only the agent's tool
-calls, never commands a hook runs, so the save-work hook's own `git push --no-verify` is unaffected.
+`parallel`, `strace`, `setsid`, `su -c`, `ssh`, `chrt`, `builtin`, …), a command piped into a shell, one
+assembled at run time (`x=merge; gh pr $x`), aliases, functions, scripts, code calling the API, a merge commit
+pushed to the default branch, the web UI. Hooks never see commands a hook runs (save-work's own push).
 
-Bounds: all the work of one decision shares a 30 s budget, under the hook's 45 s timeout (a timed-out hook
-does not block); parsing gets the first PARSE_BUDGET seconds of it, MAX_DEPTH levels and MAX_SEGMENTS
-commands. A command it cannot parse within those bounds, or at all (unbalanced quotes), is refused when its
-text holds a merge hint (MERGE_HINT), with a reason asking for the merge as a command of its own, and passed
-otherwise. It fails closed on a merge: when it cannot read the PR or its comments, or it fails on a call that
-looks like a merge, it refuses and says why. Any other command passes and costs no network call.
+Bounds: one 30 s budget per decision, under the hook's 45 s timeout (a timed-out hook does not block);
+parsing gets PARSE_BUDGET seconds of it, MAX_DEPTH levels, MAX_SEGMENTS commands and MAX_CHARS. A command
+it cannot parse within them, or at all, is refused when its text holds a MERGE_HINT (asking for the merge as
+a command of its own) and passed otherwise. A merge it cannot check (GitHub unreadable, a guard failure) is
+refused; any other command passes without a network call.
 
-Hook mode (no arguments): reads the hook's JSON on stdin; prints a deny decision on stdout or nothing;
-always exits 0. Check mode, for scripts that merge: `merge-guard.py --check <owner>/<repo>#<n>` (or `<n>`,
-the repo from the current directory's origin) runs the same record checks; it prints the head sha it
-checked and exits 0 when a merge naming that head would be allowed, else prints the reason on stderr and
-exits 1 (2 for a usage error).
+Hook mode (no arguments): the hook's JSON on stdin, a deny decision or nothing on stdout, exit 0. Check
+mode, for scripts: `merge-guard.py --check <owner>/<repo>#<n>` (or `<n>`, the repo from the origin) runs the
+record checks and prints the head it checked (exit 0) or the reason on stderr (exit 1; 2 for usage).
 """
 
 from __future__ import annotations
@@ -95,17 +85,14 @@ GH_SHORT_VALUE = {"X": "method", "f": "raw-field", "F": "field", "H": "header", 
                   "p": "preview", "R": "repo", "b": "body", "A": "author-email"}
 GH_LONG_VALUE = {"method", "raw-field", "field", "header", "jq", "template", "input", "preview", "hostname",
                  "cache", "repo", "body", "body-file", "subject", "author-email", "match-head-commit"}
-CURL_SHORT_VALUE = {"X": "request", "d": "data", "F": "form", "T": "upload-file", "H": "header", "u": "user",
-                    "o": "output", "O": "output-document", "A": "user-agent", "e": "referer", "b": "cookie",
-                    "x": "proxy", "m": "max-time", "w": "write-out", "K": "config", "E": "cert", "r": "range",
-                    "c": "cookie-jar", "D": "dump-header", "Y": "speed-limit", "y": "speed-time",
-                    "z": "time-cond", "C": "continue-at", "P": "ftp-port", "Q": "quote", "U": "proxy-user"}
-CURL_LONG_VALUE = {"request", "data", "data-raw", "data-binary", "data-ascii", "data-urlencode", "json", "form",
-                   "form-string", "upload-file", "header", "user", "output", "url", "user-agent", "referer", "cookie",
-                   "proxy", "max-time", "connect-timeout", "write-out", "config", "retry", "cacert", "cert",
-                   "method", "body-data", "body-file", "post-data", "post-file", "output-document", "header-file"}
-BODY_FLAGS = {"data", "data-raw", "data-binary", "data-ascii", "data-urlencode", "json", "form", "form-string",
-              "upload-file", "body-data", "body-file", "post-data", "post-file"}
+CURL_SHORT_VALUE = {"X": "request", "d": "data", "F": "form", "T": "upload-file",
+                    **{c: c for c in "HuoOAebxmwKErcDYyzCPQU"}}  # the rest only take a value
+CURL_LONG_VALUE = set("request data data-raw data-binary data-ascii data-urlencode json form form-string upload-file "
+                      "header user output url user-agent referer cookie proxy max-time connect-timeout write-out "
+                      "config retry cacert cert method body-data body-file post-data post-file output-document "
+                      "header-file".split())
+BODY_FLAGS = set("data data-raw data-binary data-ascii data-urlencode json form form-string upload-file body-data "
+                 "body-file post-data post-file".split())
 HTTP_TOOLS = {"curl", "wget", "http", "https", "xh", "xhs"}
 WRITE_METHOD = re.compile(r"(?i)put|post|patch|delete")
 SHELLS = {"bash", "sh", "zsh", "dash"}
@@ -592,20 +579,16 @@ class Parse:
 
     def command(self, seg: list[str], cwd: str, env: dict[str, str], depth: int) -> str:
         """Read one simple command; return the directory the next one runs in."""
-        words, here = [], []
-        i = 0
-        while i < len(seg):
-            t = seg[i]
+        words, here, i = [], [], 0
+        while i < len(seg):  # redirections out; here-strings kept as a shell's possible commands
+            t, i = seg[i], i + 1
             if t.startswith("<<<"):
-                here.append(t[3:] or (seg[i + 1] if i + 1 < len(seg) else ""))
-                i += 1 if t[3:] else 2
-            elif REDIRECT.fullmatch(t):
-                i += 2
+                here.append(t[3:] or (seg[i] if i < len(seg) else ""))
+                i += 0 if t[3:] else 1
             elif REDIRECT.match(t):
-                i += 1
+                i += 1 if REDIRECT.fullmatch(t) else 0
             else:
                 words.append(t)
-                i += 1
         here = [self.bodies[int(m.group(1))] if (m := PLACEHOLDER.fullmatch(h)) else h for h in here]
         name, args, own = command_of(words)
         if not name:
@@ -640,15 +623,11 @@ def prepare(text: str) -> tuple[str, list[str]]:
             out.append("" if text[i + 1:i + 2] == "\n" else text[i:i + 2])
             i += 2
             continue
-        if c == "`" and quote != "'":
-            end = closing(text, i + 1, "`")
-            subs.append(text[i + 1:end])
-            out.append(" ")
-            i = end + 1
-            continue
-        if quote == '"' and text.startswith("$(", i):
-            end = closing(text, i + 2, ")")
-            subs.append(text[i + 2:end])
+        opens = 1 if c == "`" and quote != "'" else 2 if quote == '"' and text.startswith("$(", i) else 0
+        if opens:
+            end = closing(text, i + opens, "`" if opens == 1 else ")")
+            subs.append(text[i + opens:end])
+            out.append(" " if opens == 1 else "")
             i = end + 1
             continue
         if quote:
@@ -671,18 +650,15 @@ def closing(text: str, i: int, close: str) -> int:
     while i < len(text):
         c = text[i]
         if c == "\\" and quote != "'":
-            i += 2
-            continue
-        if quote:
+            i += 1
+        elif quote:
             quote = "" if c == quote else quote
-        elif c == close and close == "`":
+        elif c == close == "`" or (c == ")" == close and depth == 1):
             return i
-        elif c in "'\"" and close == ")":
+        elif close == ")" and c in "'\"":
             quote = c
         elif close == ")" and c in "()":
             depth += 1 if c == "(" else -1
-            if not depth:
-                return i
         i += 1
     return len(text)
 
