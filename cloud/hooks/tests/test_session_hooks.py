@@ -172,3 +172,18 @@ def test_session_start_honours_the_targets_opt_out(tree: dict[str, Path]) -> Non
     assert "target declines the session's GCP project" in line
     assert "this repo uses a project of its own" in line
     assert "GCP status skipped" not in start(tree)  # no project, nothing to say
+
+
+def test_session_start_repeats_an_unresolved_save_work_skip(tree: dict[str, Path]) -> None:
+    log = tree["home"] / ".claude/save-work.log"
+    log.write_text(
+        "2000-01-01T00:00Z /home/user/a (main) -> claude/wip/main-s1 1234abcd\n"
+        "2000-01-01T00:01Z SKIPPED /home/user/a (main): gitleaks found a secret in the work to push\n"
+        "2000-01-01T00:02Z SKIPPED /home/user/b (dev): gitleaks found a secret in the work to push\n"
+        "2000-01-01T00:03Z /home/user/b (dev) -> claude/wip/dev-s1 5678abcd\n"
+    )
+    [line] = [x for x in start(tree).splitlines() if "save-work did not push" in x]
+    assert "SKIPPED /home/user/a (main)" in line
+    with log.open("a") as f:
+        f.write("2000-01-01T00:04Z /home/user/a (main) -> claude/wip/main-s1 9abcdef0\n")
+    assert "save-work did not push" not in start(tree)
