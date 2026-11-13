@@ -512,3 +512,162 @@ def test_a_malformed_merge_tool_input_is_refused(fx: Fx, clone: Path) -> None:
     assert run(fx, {"tool_name": "mcp__github__merge_pull_request", "tool_input": "12"}, clone)
     assert run(fx, {"tool_name": "mcp__github__merge_pull_request",
                     "tool_input": {"owner": ["x"], "repo": 3, "pullNumber": True}}, clone)
+
+
+# The token-to-decision points, each probed with unusual spellings: a shell's options, wrappers and their
+# values, runners, substitution and quoting, gh's flag forms, methods, endpoints, PR selectors and repos.
+
+CHECKED_MERGES = [
+    # shell options that take a value, `+` options, options after -c, here-strings, stdin, other shells
+    "bash -o pipefail -c 'gh pr merge 12'",
+    "sh -O extglob -c 'gh pr merge 12'",
+    "bash +x -c 'gh pr merge 12'",
+    "bash -c -e 'gh pr merge 12'",
+    "bash --rcfile /dev/null -c 'gh pr merge 12'",
+    "bash --norc --noprofile -c 'gh pr merge 12'",
+    "bash -co pipefail 'gh pr merge 12'",
+    "bash -c1 'gh pr merge 12'",
+    "bash <<< 'gh pr merge 12'",
+    "echo 'gh pr merge 12' | bash",
+    "busybox sh -c 'gh pr merge 12'",
+    "zsh -fc 'gh pr merge 12'",
+    "fish -c 'gh pr merge 12'",
+    # wrappers with option values, runners, substitution, quoting
+    "sudo -u root gh pr merge 12",
+    "timeout -s KILL 5 gh pr merge 12",
+    "timeout --kill-after=1 5 gh pr merge 12",
+    "env -i gh pr merge 12",
+    "env -S 'gh pr merge 12'",
+    "nice -n 5 gh pr merge 12",
+    "command gh pr merge 12",
+    "setsid gh pr merge 12",
+    "find . -maxdepth 0 -exec gh pr merge 12 \\;",
+    "su -c 'gh pr merge 12' someone",
+    "echo `gh pr merge 12`",
+    "x=$(gh pr merge 12)",
+    "gh pr $'merge' 12",
+    "g\\h pr merge 12",
+    "/usr/local/bin/gh pr merge 12",
+    # gh's flag forms, methods, endpoints
+    f"gh -R={REPO} pr merge 12",
+    f"gh pr merge 12 --repo {REPO}",
+    f"gh api -X GET -X PUT repos/{REPO}/pulls/12/merge",
+    f"gh api -X PUT -X GET repos/{REPO}/pulls/12/merge",
+    f"gh api -X=PUT repos/{REPO}/pulls/12/merge",
+    f"gh api -iXPUT repos/{REPO}/pulls/12/merge",
+    f"gh api -X put repos/{REPO}/pulls/12/merge",
+    f"gh api -f merge_method=squash repos/{REPO}/pulls/12/merge",
+    f"gh api -X PUT REPOS/{REPO}/PULLS/12/MERGE",
+    f"gh api -X PUT repos/{REPO}/pulls/12/../12/merge",
+    f"gh api -X PUT repos%2F{REPO.replace('/', '%2F')}%2Fpulls%2F12%2Fmerge",
+    f"gh api -X PUT https://api.github.com/repos/{REPO}/pulls/12/merge",
+    f"gh api -X PUT /repos/{REPO}/pulls/12/merge/",
+    # PR selectors
+    "gh pr merge '#12'",
+    "gh pr merge HTTPS://GITHUB.COM/example-owner/example-repo/pull/12/files",
+    "gh pr merge -- 12",
+]
+
+
+@pytest.mark.parametrize("command", CHECKED_MERGES)
+def test_every_spelling_of_a_merge_reaches_the_record_check(fx: Fx, clone: Path, command: str) -> None:
+    fx.comments(comment(record("gates")))
+    reason = bash(fx, command, clone)
+    assert reason and "no review record" in reason, (command, reason)
+
+
+NOT_MERGES = [
+    "bash script.sh 'gh pr merge 12'",  # arguments of a script, not commands
+    "bash -o pipefail -c 'ls -la'",
+    "sudo -u root ls",
+    "timeout -s KILL 5 ls",
+    f"gh api --method=GET repos/{REPO}/pulls/12/merge",
+    f"gh api -XGET repos/{REPO}/pulls/12/merge",
+    f"gh api -X HEAD repos/{REPO}/pulls/12/merge",
+    "gh api graphql -F n=@count.txt -f query='{viewer{login}}'",
+    "gh api graphql -fquery='{viewer{login}}'",
+    "curl -u someone@example.com -d '{\"query\":\"{viewer{login}}\"}' https://api.github.com/graphql",
+    "curl -H 'X-Note: a@b' -d '{\"query\":\"{viewer{login}}\"}' https://api.github.com/graphql",
+    f"curl -s https://api.github.com/repos/{REPO}/pulls/12/merge",
+]
+
+
+@pytest.mark.parametrize("command", NOT_MERGES)
+def test_look_alikes_that_merge_nothing_pass(fx: Fx, clone: Path, command: str) -> None:
+    assert bash(fx, command, clone) is None, command
+
+
+GRAPHQL_REFUSED = [
+    "gh api graphql --input=q.json",
+    "gh api graphql --input q.json",
+    "gh api graphql -Fquery=@q.graphql",
+    "gh api graphql -F=query=@q.graphql",
+    "gh api graphql --field=query=@q.graphql",
+    "gh api graphql --field query=@q.graphql",
+    "gh api graphql -iFquery=@q.graphql",
+    "gh api graphql -fquery='mutation{mergePullRequest(input:{}){clientMutationId}}'",
+    "gh api graphql -f=query='mutation{mergePullRequest(input:{}){clientMutationId}}'",
+    "gh api graphql --raw-field=query='mutation{mergePullRequest(input:{}){clientMutationId}}'",
+    "gh api graphql --raw-field 'query=mutation{MERGEPULLREQUEST(input:{}){clientMutationId}}'",
+    "gh api graphql -F query='mutation{enablePullRequestAutoMerge(input:{}){clientMutationId}}'",
+    "gh api /graphql -F query=@q.graphql",
+    "gh api https://api.github.com/graphql --input q.json",
+    "curl -d @q.json https://api.github.com/graphql",
+    "curl --data-binary @q.json https://api.github.com/graphql",
+    "curl -d@q.json https://api.github.com/graphql",
+    "curl -T q.json https://api.github.com/graphql",
+    "curl --json @q.json https://API.GITHUB.COM/graphql",
+    "wget --post-file=q.json https://api.github.com/graphql",
+    "http POST https://api.github.com/graphql @q.json",
+    "curl -d '{\"query\":\"mutation{mergePullRequest(input:{}){clientMutationId}}\"}' https://api.github.com/graphql",
+]
+
+
+@pytest.mark.parametrize("command", GRAPHQL_REFUSED)
+def test_every_spelling_of_an_unreadable_or_merging_graphql_call_is_refused(fx: Fx, clone: Path,
+                                                                           command: str) -> None:
+    reason = bash(fx, command, clone)
+    assert reason and "GraphQL" in reason, (command, reason)
+
+
+HTTP_MERGES = [
+    f"curl -sSXPUT https://api.github.com/repos/{REPO}/pulls/12/merge",
+    f"curl -X PUT -X GET https://api.github.com/repos/{REPO}/pulls/12/merge",
+    f"curl -d '{{}}' https://api.github.com/repos/{REPO}/pulls/12/merge",
+    f"curl --request PUT HTTPS://API.GITHUB.COM/repos/{REPO}/pulls/12/merge",
+    f"curl -X PUT api.github.com//repos/{REPO}/pulls/12/merge",
+    f"wget --method=PUT https://api.github.com/repos/{REPO}/pulls/12/merge",
+    f"http PUT https://api.github.com/repos/{REPO}/pulls/12/merge",
+    f"xh put https://api.github.com/repos/{REPO}/pulls/12/merge merge_method=squash",
+]
+
+
+@pytest.mark.parametrize("command", HTTP_MERGES)
+def test_every_http_client_merge_is_refused(fx: Fx, clone: Path, command: str) -> None:
+    reason = bash(fx, command, clone)
+    assert reason and "HTTP client" in reason, (command, reason)
+
+
+def _slow_git(fx: Fx, seconds: float) -> None:
+    git = fx.d.parent / "bin" / "git"
+    git.parent.mkdir(exist_ok=True)
+    git.write_text(f'#!/bin/sh\ncase " $* " in *" show "*) sleep {seconds} ;; esac\nexec /usr/bin/git "$@"\n')
+    git.chmod(0o755)
+
+
+def test_a_tier_check_that_cannot_finish_refuses(fx: Fx, local: tuple[Path, str]) -> None:
+    r, head = local
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, tier="routine")))
+    _slow_git(fx, 6)
+    reason = run(fx, {"tool_name": "mcp__github__merge_pull_request",
+                      "tool_input": {"owner": "example-owner", "repo": "example-repo", "pullNumber": 12,
+                                     "expectedHeadSha": head}}, r, MERGE_GUARD_BUDGET_S="3")
+    assert reason and "fails closed" in reason and "tier.sh" in reason, reason
+
+
+def test_a_tier_check_that_fails_refuses(fx: Fx, local: tuple[Path, str]) -> None:
+    r, head = local
+    subprocess.run(["git", "update-ref", "-d", "refs/remotes/origin/main"], cwd=r, check=True)
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, tier="sensitive")))
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "tier.sh failed" in reason, reason
