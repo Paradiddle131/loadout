@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -39,6 +38,11 @@ def record(kind: str, sha: str = HEAD, state: str = "success", tier: str = "stan
                           capture_output=True, text=True, check=True).stdout
 
 
+def pr_answer(head: str, default_branch: str = "main") -> dict:
+    return {"number": 12, "head": {"sha": head}, "base": {"ref": default_branch,
+                                                         "repo": {"default_branch": default_branch}}}
+
+
 def comment(body: str, assoc: str = "OWNER", edited: bool = False) -> dict:
     return {"body": body, "author_association": assoc, "edited": edited}
 
@@ -46,7 +50,7 @@ def comment(body: str, assoc: str = "OWNER", edited: bool = False) -> dict:
 class Fx:
     def __init__(self, d: Path) -> None:
         self.d = d
-        (d / "pr.json").write_text(json.dumps({"number": 12, "head": {"sha": HEAD}}))
+        (d / "pr.json").write_text(json.dumps(pr_answer(HEAD)))
         (d / "pulls.json").write_text(json.dumps([{"number": 12}]))
 
     def comments(self, *cs: dict) -> None:
@@ -248,7 +252,7 @@ def local(tmp_path: Path, fx: Fx) -> tuple[Path, str]:
     subprocess.run(["git", "commit", "-qm", "hook"], cwd=r, check=True, env=env)
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=r, capture_output=True, text=True,
                           check=True).stdout.strip()
-    (fx.d / "pr.json").write_text(json.dumps({"number": 12, "head": {"sha": head}}))
+    (fx.d / "pr.json").write_text(json.dumps(pr_answer(head)))
     return r, head
 
 
@@ -351,17 +355,22 @@ def test_no_verify_is_refused(fx: Fx, clone: Path, command: str) -> None:
 
 def test_a_guard_failure_on_a_merge_fails_closed_and_passes_other_calls(fx: Fx, clone: Path,
                                                                        tmp_path: Path) -> None:
-    # A copy of the guard without the GCP guard beside it: the shell parser cannot load.
-    lone = tmp_path / "lone" / "hooks"
-    lone.mkdir(parents=True)
-    shutil.copy(GUARD, lone / "merge-guard.py")
+    # A copy of the guard whose command reading is broken: a bug must neither wave a merge through nor block.
+    broken = tmp_path / "broken" / "merge-guard.py"
+    broken.parent.mkdir()
+    src = GUARD.read_text()
+    assert src.count("def command_of(words: list[str])") == 1
+    broken.write_text(src.replace("def command_of(words: list[str])",
+                                  "def command_of(words: list[str]) -> None:\n    raise RuntimeError('bug')\n\n\n"
+                                  "def unused(words: list[str])"))
     for command, refused in (("gh pr merge 12", True), ("ls -la", False)):
-        done = subprocess.run([sys.executable, str(lone / "merge-guard.py")], capture_output=True, text=True,
+        done = subprocess.run([sys.executable, str(broken)], capture_output=True, text=True, env=guard_env(fx),
                               input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command},
                                                 "cwd": str(clone)}), check=True)
         assert bool(done.stdout.strip()) is refused, command
         if refused:
             assert "fails closed" in done.stdout
+    assert fx.gets() == []
 
 
 def test_bad_input_passes_silently(fx: Fx) -> None:
@@ -518,7 +527,7 @@ def test_a_malformed_merge_tool_input_is_refused(fx: Fx, clone: Path) -> None:
 # values, runners, substitution and quoting, gh's flag forms, methods, endpoints, PR selectors and repos.
 
 CHECKED_MERGES = [
-    # shell options that take a value, `+` options, options after -c, here-strings, stdin, other shells
+    # shell options that take a value, `+` options, options after -c, here-strings
     "bash -o pipefail -c 'gh pr merge 12'",
     "sh -O extglob -c 'gh pr merge 12'",
     "bash +x -c 'gh pr merge 12'",
@@ -526,13 +535,9 @@ CHECKED_MERGES = [
     "bash --rcfile /dev/null -c 'gh pr merge 12'",
     "bash --norc --noprofile -c 'gh pr merge 12'",
     "bash -co pipefail 'gh pr merge 12'",
-    "bash -c1 'gh pr merge 12'",
     "bash <<< 'gh pr merge 12'",
-    "echo 'gh pr merge 12' | bash",
-    "busybox sh -c 'gh pr merge 12'",
     "zsh -fc 'gh pr merge 12'",
-    "fish -c 'gh pr merge 12'",
-    # wrappers with option values, runners, substitution, quoting
+    # wrappers with option values, substitution, quoting
     "sudo -u root gh pr merge 12",
     "timeout -s KILL 5 gh pr merge 12",
     "timeout --kill-after=1 5 gh pr merge 12",
@@ -540,9 +545,6 @@ CHECKED_MERGES = [
     "env -S 'gh pr merge 12'",
     "nice -n 5 gh pr merge 12",
     "command gh pr merge 12",
-    "setsid gh pr merge 12",
-    "find . -maxdepth 0 -exec gh pr merge 12 \\;",
-    "su -c 'gh pr merge 12' someone",
     "echo `gh pr merge 12`",
     "x=$(gh pr merge 12)",
     "gh pr $'merge' 12",
@@ -667,7 +669,68 @@ def test_a_tier_check_that_cannot_finish_refuses(fx: Fx, local: tuple[Path, str]
 
 def test_a_tier_check_that_fails_refuses(fx: Fx, local: tuple[Path, str]) -> None:
     r, head = local
-    subprocess.run(["git", "update-ref", "-d", "refs/remotes/origin/main"], cwd=r, check=True)
+    # The default branch at the head itself: tier.sh finds no changed path and fails.
+    subprocess.run(["git", "update-ref", "refs/remotes/origin/main", head], cwd=r, check=True)
     fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, tier="sensitive")))
     reason = mcp(fx, r, expectedHeadSha=head)
     assert reason and "tier.sh failed" in reason, reason
+
+
+def test_the_tier_check_compares_with_the_default_branch_github_names(fx: Fx, local: tuple[Path, str]) -> None:
+    r, head = local
+    # Neither main nor master, and no origin/HEAD: the base comes from the PR's repo.
+    subprocess.run(["git", "update-ref", "refs/remotes/origin/trunk", "refs/remotes/origin/main"], cwd=r, check=True)
+    subprocess.run(["git", "update-ref", "-d", "refs/remotes/origin/main"], cwd=r, check=True)
+    (fx.d / "pr.json").write_text(json.dumps(pr_answer(head, "trunk")))
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, tier="standard")))
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "make it sensitive" in reason, reason
+
+
+def test_a_clone_without_the_default_branch_skips_the_tier_check(fx: Fx, local: tuple[Path, str]) -> None:
+    r, head = local
+    subprocess.run(["git", "update-ref", "-d", "refs/remotes/origin/main"], cwd=r, check=True)
+    (fx.d / "pr.json").write_text(json.dumps(pr_answer(head, "develop")))
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, tier="routine")))
+    assert mcp(fx, r, expectedHeadSha=head) is None
+
+
+# Forms outside what the guard covers pass unchecked, as its header says; ordinary searches among them.
+
+OUT_OF_SCOPE = [
+    "find docs -name '*.md' -exec grep -l 'gh pr merge' {} +",
+    "strace -f -e trace=execve grep 'gh pr merge' README.md",
+    "parallel echo ::: 'gh pr merge 5'",
+    "setsid gh pr merge 12",
+    "find . -maxdepth 0 -exec gh pr merge 12 \\;",
+    "su -c 'gh pr merge 12' someone",
+    "echo 'gh pr merge 12' | bash",
+    "echo 12 | xargs gh pr merge",
+    "busybox sh -c 'gh pr merge 12'",
+    "x=merge; gh pr $x 12",
+]
+
+
+@pytest.mark.parametrize("command", OUT_OF_SCOPE)
+def test_forms_outside_the_covered_ones_pass_without_reading_github(fx: Fx, clone: Path, command: str) -> None:
+    assert bash(fx, command, clone) is None, command
+    assert fx.gets() == [], command
+
+
+@pytest.mark.parametrize("command", ["time -p gh pr merge 5", "time gh pr merge 5", "time -f %e gh pr merge 5"])
+def test_time_with_its_options_is_a_wrapper(fx: Fx, clone: Path, command: str) -> None:
+    fx.comments(comment(record("gates")))
+    reason = bash(fx, command, clone)
+    assert reason and "PR 5" in reason, reason
+
+
+@pytest.mark.parametrize("command", [
+    f"curl -X PUT https://api.github.com/repos%2F{REPO.replace('/', '%2F')}%2Fpulls%2F12%2Fmerge",
+    f"curl -X PUT https://api.github.com/repos/{REPO}/pulls/12/../12/merge",
+    f"curl -X PUT 'https://api.github.com/repos/{REPO}/pulls/12/merge?x=1'",
+    f"curl -X PUT https://api.github.com/REPOS/{REPO}/PULLS/12/MERGE/",
+    f"curl -X PUT --url https://api.github.com/repos/{REPO}/pulls/12/merge",
+])
+def test_an_http_client_merge_path_is_decoded_as_gh_does(fx: Fx, clone: Path, command: str) -> None:
+    reason = bash(fx, command, clone)
+    assert reason and "HTTP client" in reason, (command, reason)
