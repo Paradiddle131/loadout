@@ -9,7 +9,7 @@
       "name": "loadout",
       "source": "./",
       "strict": false,
-      "description": "Skills for any machine: PR and issue bodies, architecture diagrams, HTML report pages, design grilling, writing for agents.",
+      "description": "Skills and review agents for any machine: PR and issue bodies, architecture diagrams, HTML report pages, design grilling, writing for agents; one read-only reviewer per lens (correctness, claims, guardrails, leaks, controls, handoffs) and a verifier for their findings.",
       "license": "MIT",
       "skills": [
         "./skills/"
