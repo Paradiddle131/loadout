@@ -405,3 +405,98 @@ def test_verdict_dry_run_posts_nothing(w: World) -> None:
     assert done.returncode == 0, done.stderr
     assert w.writes() == []
     assert "dry-run: gh api -X POST repos/example-owner/example-repo/issues/12/comments" in done.stderr
+
+
+def base_has(w: World, files: dict[str, str]) -> None:
+    """Puts `files` on main and rebases the feature branch onto it."""
+    for name, text in files.items():
+        p = w.seed / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    w.git(w.seed, "add", ".")
+    w.git(w.seed, "commit", "-qm", "base")
+    w.git(w.seed, "push", "-q", str(w.remote), "main")
+    w.git(w.repo, "fetch", "-q", "origin")
+    w.git(w.repo, "rebase", "-q", "origin/main")
+
+
+@pytest.mark.parametrize("path", ["skills/x/SKILL.md", "GEMINI.md", "claude.md", "docs/Agents.md", ".mcp.json",
+                                  "pkg/.claude/settings.json", "sub/.githooks/pre-push", ".husky/pre-commit",
+                                  ".github/actions/setup/action.yml", ".github/CODEOWNERS", "CLAUDE.local.md"])
+def test_tier_floor_covers_other_agent_files(w: World, path: str) -> None:
+    w.commit({path: "x\n"})
+    assert tier(w)[1] == ["sensitive", path]
+
+
+def test_tier_follows_imports_from_the_base_instruction_files(w: World) -> None:
+    base_has(w, {"CLAUDE.md": "Rules: @docs/agent-rules.md and `@not/imported.md`\n",
+              "docs/agent-rules.md": "More: @../shared/style.md\n@./deep.md\n",
+              "shared/style.md": "style\n", "docs/deep.md": "deep\n", "not/imported.md": "x\n",
+              "docs/other.md": "plain\n"})
+    for path, importer in (("docs/agent-rules.md", "CLAUDE.md"), ("shared/style.md", "docs/agent-rules.md"),
+                           ("docs/deep.md", "docs/agent-rules.md")):
+        w.git(w.repo, "reset", "-q", "--hard", "origin/main")
+        w.commit({path: "changed\n"})
+        assert tier(w)[1] == ["sensitive", f"{path} (imported by {importer})"], path
+    w.git(w.repo, "reset", "-q", "--hard", "origin/main")
+    w.commit({"not/imported.md": "changed\n", "docs/other.md": "changed\n"})
+    assert tier(w)[1][0] == "routine"
+
+
+def test_tier_reads_imports_from_the_base_not_the_change(w: World) -> None:
+    base_has(w, {"AGENTS.md": "see @policy.md\n", "policy.md": "r\n"})
+    # The change drops the import and edits the imported file: the base still imports it.
+    w.commit({"AGENTS.md": "nothing\n", "policy.md": "weakened\n"})
+    assert "policy.md (imported by AGENTS.md)" in tier(w)[1]
+
+
+def test_verdict_refuses_a_merge_of_a_branch_that_is_not_the_default(w: World, tmp_path: Path) -> None:
+    reviewed = w.commit({"src/app.py": "x = 2\n"})
+    w.git(w.repo, "switch", "-q", "-c", "side", "origin/main")
+    (w.repo / "side.txt").write_text("side\n")
+    w.git(w.repo, "add", ".")
+    w.git(w.repo, "commit", "-qm", "side")
+    w.git(w.repo, "switch", "-q", "feature")
+    w.git(w.repo, "merge", "-q", "--no-edit", "side")
+    w.push()
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
+                 "--reviewed", reviewed, "--file", review_file(tmp_path))
+    assert done.returncode == 2 and "not on main" in done.stderr
+    assert w.comments() == []
+
+
+def test_verdict_refuses_an_octopus_merge(w: World, tmp_path: Path) -> None:
+    reviewed = w.commit({"src/app.py": "x = 2\n"})
+    w.main_moves({"README.md": "main moved\n"})
+    w.git(w.repo, "switch", "-q", "-c", "side", "origin/main~1")
+    (w.repo / "side.txt").write_text("side\n")
+    w.git(w.repo, "add", ".")
+    w.git(w.repo, "commit", "-qm", "side")
+    w.git(w.repo, "switch", "-q", "feature")
+    w.git(w.repo, "merge", "-q", "--no-edit", "origin/main", "side")
+    w.push()
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
+                 "--reviewed", reviewed, "--file", review_file(tmp_path))
+    assert done.returncode == 2 and "nobody reviewed" in done.stderr
+
+
+def test_verdict_refuses_more_than_twenty_merges(w: World, tmp_path: Path) -> None:
+    reviewed = w.commit({"src/app.py": "x = 2\n"})
+    for i in range(21):
+        w.main_moves({"README.md": f"main moved {i}\n"})
+        w.git(w.repo, "merge", "-q", "--no-edit", "origin/main")
+    w.push()
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
+                 "--reviewed", reviewed, "--file", review_file(tmp_path))
+    assert done.returncode == 2 and "nobody reviewed" in done.stderr
+
+
+def test_verdict_accepts_twenty_merges(w: World, tmp_path: Path) -> None:
+    reviewed = w.commit({"src/app.py": "x = 2\n"})
+    for i in range(20):
+        w.main_moves({"README.md": f"main moved {i}\n"})
+        w.git(w.repo, "merge", "-q", "--no-edit", "origin/main")
+    w.push()
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
+                 "--reviewed", reviewed, "--file", review_file(tmp_path))
+    assert done.returncode == 0, done.stderr

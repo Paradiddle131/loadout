@@ -8,9 +8,12 @@
 #   $(git merge-base <base> <head>) <head>`: a rename lists both its old and its new path.
 #
 # Rules, highest tier among the changed paths wins; an empty diff is an error (exit 2):
-# - sensitive: a built-in floor that always applies (CLAUDE.md, AGENTS.md, REVIEW.md and RULES.md at any depth,
-#   .claude/**, .githooks/**, **/hooks/**, **/githooks/**, .github/workflows/**), plus the globs under
-#   `## Sensitive` in REVIEW.md; a line there may end with `; lenses: a, b`.
+# - sensitive: a built-in floor that always applies, plus the globs under `## Sensitive` in REVIEW.md (a line
+#   there may end with `; lenses: a, b`). The floor: agent instruction and rule files at any depth, matched
+#   whatever their case (CLAUDE.md, CLAUDE.local.md, AGENTS.md, GEMINI.md, REVIEW.md, RULES.md, SKILL.md),
+#   .mcp.json and CODEOWNERS at any depth, **/.claude/**, **/.githooks/**, **/.husky/**, **/hooks/**,
+#   **/githooks/**, .github/workflows/**, .github/actions/**, and every file the base's instruction files
+#   import with an `@path` line, followed through their own imports (five levels, as Claude Code does).
 # - routine: the globs under `## Routine` in REVIEW.md; with no such list, **/*.md, **/*.txt and licence files.
 # - standard: everything else.
 # REVIEW.md (repo root) is read from the base, never from the change, so a change cannot lower its own tier.
@@ -19,10 +22,15 @@
 # every path sensitive, with a warning on stderr.
 set -euo pipefail
 exec python3 - "$@" <<'EOF'
-import argparse, re, subprocess, sys
+import argparse, posixpath, re, subprocess, sys
 
-FLOOR = ["CLAUDE.md", "AGENTS.md", "REVIEW.md", "RULES.md", ".claude/**", ".githooks/**", "**/hooks/**",
-         "**/githooks/**", ".github/workflows/**"]
+# File names matched at any depth and in any case; the instruction files among them are read for imports.
+FLOOR_NAMES = ["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "GEMINI.md", "REVIEW.md", "RULES.md", "SKILL.md",
+               ".mcp.json", "CODEOWNERS"]
+INSTRUCTION = {n.lower() for n in FLOOR_NAMES if n.endswith(".md")}
+FLOOR = ["**/.claude/**", "**/.githooks/**", "**/.husky/**", "**/hooks/**", "**/githooks/**",
+         ".github/workflows/**", ".github/actions/**"]
+IMPORT_DEPTH, IMPORT_FILES = 5, 500
 DEFAULT_ROUTINE = ["*.md", "*.txt", "LICENSE*", "LICENCE*", "COPYING*"]
 RANK = {"routine": 0, "standard": 1, "sensitive": 2}
 
@@ -44,7 +52,7 @@ def default_base():
     sys.exit("tier.sh: cannot tell the remote's default branch: pass --base, or run `git remote set-head origin --auto`")
 
 
-def glob_re(g):
+def glob_re(g, icase=False):
     if "/" not in g.rstrip("/"):
         g = "**/" + g
     out, i = "", 0
@@ -59,7 +67,35 @@ def glob_re(g):
             out, i = out + "[^/]", i + 1
         else:
             out, i = out + re.escape(g[i]), i + 1
-    return re.compile(out + "$")
+    return re.compile(out + "$", re.IGNORECASE if icase else 0)
+
+
+IMPORT = re.compile(r"(?:^|(?<=\s))@([^\s`'\"()<>\[\]{}]+)")
+
+
+def imports(base):
+    """{path: importer} for every file the base's instruction files import (`@path`), followed recursively."""
+    tree = set(git("ls-tree", "-r", "--name-only", base).splitlines())
+    todo = [(f, 0) for f in sorted(tree) if f.rsplit("/", 1)[-1].lower() in INSTRUCTION]
+    seen, found = {f for f, _ in todo}, {}
+    while todo and len(seen) < IMPORT_FILES:
+        path, depth = todo.pop()
+        if depth >= IMPORT_DEPTH:
+            continue
+        shown = subprocess.run(["git", "show", f"{base}:{path}"], capture_output=True, text=True)
+        text = re.sub(r"(?ms)^(```|~~~).*?^\1", "", shown.stdout)  # fenced blocks import nothing
+        text = re.sub(r"`[^`\n]*`", "", text)  # nor do code spans
+        for m in IMPORT.finditer(text):
+            ref = m.group(1).rstrip(".,;:!?")
+            if ref.startswith(("/", "~")):
+                continue  # outside the repo
+            target = posixpath.normpath(posixpath.join(posixpath.dirname(path), ref))
+            if target.startswith("../") or target not in tree or target in seen:
+                continue
+            seen.add(target)
+            found[target] = path
+            todo.append((target, depth + 1))
+    return found
 
 
 class Unparsable(Exception):
@@ -130,7 +166,13 @@ def main():
             broken = str(exc)
             print(f"tier.sh: warning: REVIEW.md on {base} cannot be parsed ({broken}): every path counts as sensitive",
                   file=sys.stderr)
-    sensitive = [(glob_re(g), "") for g in FLOOR] + [(glob_re(g), l) for g, l in rules["sensitive"]]
+    try:
+        imported = imports(base)
+    except RuntimeError as exc:
+        sys.exit(f"tier.sh: {exc}")
+    sensitive = ([(glob_re(g, icase=True), "") for g in FLOOR_NAMES] + [(glob_re(g), "") for g in FLOOR]
+                 + [(re.compile(re.escape(f) + "$"), "") for f in imported]
+                 + [(glob_re(g), l) for g, l in rules["sensitive"]])
     routine = [glob_re(g) for g in (rules["routine"] if rules["routine"] is not None else DEFAULT_ROUTINE)]
     tiers = {}
     for path in paths:
@@ -146,7 +188,9 @@ def main():
     print(top)
     for path, (t, lenses) in tiers.items():
         if t == top:
-            print(f"{path} (lenses: {', '.join(lenses)})" if lenses else path)
+            notes = [f"imported by {imported[path]}"] if path in imported else []
+            notes += [f"lenses: {', '.join(lenses)}"] if lenses else []
+            print(f"{path} ({'; '.join(notes)})" if notes else path)
 
 
 main()
