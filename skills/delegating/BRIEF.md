@@ -1,4 +1,4 @@
-# The two briefs
+# The briefs
 
 Fill the angle-bracketed slots; keep the rest of each brief as it stands.
 Each brief is all its agent knows: write it for a peer who never saw this conversation, and cut a slot's line only when it truly has nothing to say.
@@ -41,16 +41,4 @@ Reply with:
 
 ## Reviewer brief
 
-```text
-You are reviewing one change in <repo>, by the review skill, as <the reviewer agent>.
-
-The change: commits <base>..<head> on <branch>. The item it claims to do: <issue link or text>, done when: <done-when, verbatim>.
-Your workspace: a detached worktree at <head>, <path>. Read only: edit nothing, commit nothing, write nothing to GitHub.
-Its tier: <the tier the review skill's rule gives it>.
-Attack hardest: <the central risk, as the lead wrote it in the worker brief>.
-
-Rules the change must keep (restated: you see none of the lead's instructions):
-- <each guardrail that applies, one line each>
-
-Reply in the review skill's report shape.
-```
+The `review` skill holds it ([`../review/templates.md`](../review/templates.md)): the repo, the commit range, the issue and its done-when quoted, the central risk as the lead wrote it, and never the worker's summary.

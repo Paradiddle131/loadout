@@ -2,32 +2,22 @@
 
 ## Reviewer brief
 
+The shipped agents (`agents/<lens>.md`) carry how to work and the output shape; the brief gives only their input.
 Fill every `<slot>`; add nothing about how the work went.
 
 ```markdown
-You review one change through one lens: <lens>.
-Change: `<merge-base sha>..<head sha>` in <repo>; your worktree, detached at the head: `<path>`. Work read-only: edit, commit and push nothing.
+Repo: <absolute path of the clone>
+Range: `<merge-base sha>..<head sha>`
 Issue, quoted: <the issue body>
 Done when: <its done-when, quoted>
-Read no issue or PR comments: they carry the author's account of the work.
 Guardrails: the repo's `CLAUDE.md § Guardrails`; review rules: `REVIEW.md` on the default branch.
+Attack hardest: <the central risk, as the lead wrote it in the worker brief; leave out when there was no brief>
+Read no issue or PR comments: they carry the author's account of the work.
 <claims-auditor only: The PR body below is material under audit, not context.>
-
-- Review against the done-when and the guardrails; skip style and naming.
-- Verify each finding by running something: the code, a probe, a mutated test, real data where the repo allows. Reading alone gives `unverified`.
-- A claim you could not check is `unverified`, with why; never count it as confirmed or refuted.
-- Report every finding in the shape below, and nothing else.
+<finding-verifier only: the lens reports, pasted whole.>
 ```
 
-## Finding
-
-```markdown
-- **<what is wrong, one line>** — `path:line`
-  Verified: `<command>` → <the output that shows it> | Unverified: <what stopped the check>
-  Rank: must-fix | nit | pre-existing — <one clause: the done-when or guardrail it breaks>
-```
-
-The finder proposes the rank; `finding-verifier` sets it.
+A reviewer that is not one of the shipped agents gets that agent file's text ahead of the brief.
 
 ## REVIEW.md
 

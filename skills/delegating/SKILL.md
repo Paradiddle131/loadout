@@ -25,7 +25,7 @@ A repo's own instructions win where they set a different default.
 - Write each brief from [BRIEF.md](BRIEF.md), restating every guardrail and rule that binds the item.
 - One worktree and one branch per item, the branch named for what it does under the repo's branch rule; the lead merges it into the item's PR branch.
 - The worker's worktree comes from the delegation tool's isolation option (`isolation: worktree`, which branches from the default branch, not the lead's head) where it has one, else the lead makes it with `git worktree add -b <branch>`.
-- A reviewer works read-only in a detached worktree the lead makes at the head under review (`git worktree add --detach`).
+- A reviewer works read-only in a detached worktree at the head under review; the shipped review agents make and remove their own.
 - The lead removes each worktree once its branch is merged or parked.
 - The worker commits as it goes; the lead pushes each worker branch when the worker returns, under the repo's branch rule, since an unpushed commit can die with its machine.
 

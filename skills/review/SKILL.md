@@ -7,7 +7,7 @@ description: "Use before any change lands on a default branch, in any repo, atte
 
 From a pushed head to a merged PR and a line in the owner's brief.
 The author of a change fixes it and never reviews it; with no fresh-context subagent available, stop after step 2: the PR stays unmerged and the owner's brief lists it as unreviewed.
-`$R` is this skill's folder; [`templates.md`](templates.md) holds the reviewer brief, the finding shape and a `REVIEW.md` template.
+`$R` is this skill's folder; [`templates.md`](templates.md) holds the reviewer brief and a `REVIEW.md` template; the finding shape is each agent's own `## Output`.
 
 ## 1. Tier the change
 
@@ -29,7 +29,7 @@ The author of a change fixes it and never reviews it; with no fresh-context suba
 ## 3. Find
 
 Start the reviewers as subagents, in parallel and in the foreground, on Opus at high effort set in the call (the collection's default reviewer model, set explicitly because a subagent does not inherit the session's effort; a repo's instructions may name another).
-Give each the brief in [`templates.md`](templates.md): the range `$(git merge-base <default> <head>)..<head>`, the issue body and its done-when quoted, its lens, and its own detached worktree (`git worktree add --detach <scratch>/review-<lens> <head>`).
+Give each the brief in [`templates.md`](templates.md): the repo, the range `$(git merge-base <default> <head>)..<head>`, the issue body and its done-when quoted; each agent makes and removes its own detached worktree.
 Give no summary of the work; the PR body goes only to `claims-auditor`, as material under audit.
 
 | Reviewer | Runs on |
