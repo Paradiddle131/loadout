@@ -54,7 +54,9 @@ fi
 case "$ep" in
   */compare/*) f=compare.json ;;
   *pulls/70/commits*) f=commits.json ;;
-  *pulls/*/reviews*) f=reviews.json ;;
+  *pulls/*/reviews*page=1) f=reviews.json ;;
+  *pulls/*/reviews*page=2) f=reviews2.json ;;
+  *pulls/*/reviews*) f=empty.json ;;
   *pulls/*/commits*) f=other_commits.json ;;
   *pulls\\?*state=open*) f=pulls_open.json ;;
   *pulls/*) f=pr.json ;;
@@ -144,6 +146,8 @@ def stub(tmp_path: Path) -> dict[str, str]:
         json.dumps([{"author_association": "OWNER", "state": "COMMENTED"}])
     )
     (fx / "compare.json").write_text(json.dumps({"behind_by": 0, "ahead_by": 2}))
+    (fx / "reviews2.json").write_text("[]")
+    (fx / "empty.json").write_text("[]")
     (fx / "issue.json").write_text(json.dumps({"id": 123, "number": 5}))
     (fx / "write.json").write_text(json.dumps({"id": 99}))
     env = {
@@ -611,3 +615,45 @@ def test_merge_holds_when_the_reviews_cannot_be_read(stub: dict[str, str]) -> No
     assert done.returncode == 3 and done.stdout.strip() == "held", done.stderr
     assert "could not be read" in done.stderr
     assert "dry-run: gh api" not in done.stderr
+
+
+def _review(login: str, state: str, assoc: str = "OWNER") -> dict[str, object]:
+    return {"user": {"login": login}, "author_association": assoc, "state": state}
+
+
+def test_merge_holds_on_any_reviewers_latest_request_for_changes(stub: dict[str, str]) -> None:
+    Path(stub["STUB_DIR"], "reviews.json").write_text(json.dumps([
+        _review("a", "APPROVED"),
+        _review("b", "CHANGES_REQUESTED", "MEMBER"),
+        _review("a", "APPROVED"),  # a later approval by someone else does not answer b
+    ]))
+    done = run("merge.sh", "70", "--dry-run", env=stub)
+    assert done.returncode == 3 and done.stdout.strip() == "held", done.stderr
+    assert "latest review of b requests changes" in done.stderr
+
+
+def test_merge_passes_once_each_reviewer_has_moved_on(stub: dict[str, str]) -> None:
+    Path(stub["STUB_DIR"], "reviews.json").write_text(json.dumps([
+        _review("b", "CHANGES_REQUESTED", "COLLABORATOR"),
+        _review("a", "APPROVED"),
+        _review("b", "APPROVED", "COLLABORATOR"),
+        _review("c", "CHANGES_REQUESTED", "NONE"),
+        _review("a", "COMMENTED"),
+    ]))
+    done = run("merge.sh", "70", "--dry-run", env=stub)
+    assert done.returncode == 0 and done.stdout.strip() == "merged", done.stderr
+
+
+def test_merge_pages_reviews_by_hand(stub: dict[str, str]) -> None:
+    fx = Path(stub["STUB_DIR"])
+    fx.joinpath("reviews.json").write_text(json.dumps([_review(f"r{i}", "COMMENTED") for i in range(100)]))
+    fx.joinpath("reviews2.json").write_text(json.dumps([_review("late", "CHANGES_REQUESTED", "MEMBER")]))
+    done = run("merge.sh", "70", "--dry-run", env=stub)
+    assert done.returncode == 3 and "latest review of late requests changes" in done.stderr, done.stderr
+
+
+def test_merge_holds_when_a_later_review_page_cannot_be_read(stub: dict[str, str]) -> None:
+    fx = Path(stub["STUB_DIR"])
+    fx.joinpath("reviews.json").write_text(json.dumps([_review(f"r{i}", "COMMENTED") for i in range(100)]))
+    done = run("merge.sh", "70", "--dry-run", env={**stub, "STUB_FAIL_ON": "page=2"})
+    assert done.returncode == 3 and done.stdout.strip() == "held" and "could not be read" in done.stderr

@@ -7,7 +7,8 @@
 # merge guard's `--check` passing (the gates and review records on the head; the guard owns that
 # rule), and the head not behind the base.
 # The merge names the head sha, so a push after the reads makes GitHub refuse it.
-# Also held: the owner's latest review requests changes (or the reviews cannot be read); the default
+# Also held: the latest review of any owner, member or collaborator requests changes (or the reviews cannot
+# be read, paged by hand); the default
 # branch is the one the PR read names. Prints the case on stdout. Exit 0: `merged` (the merge sha on
 # stderr); 3: `held`, `draft`, `stacked`, `carries`, `unreviewed` or `moved` (the head moved between
 # the reads and the guard's check; the reason on stderr; nothing written); 4: `behind` (merge
@@ -57,13 +58,26 @@ for other in $others; do
   fi
 done
 
-# The owner's latest verdict-bearing review: changes requested holds the PR, and so does a failed read.
+# Each owner's, member's or collaborator's latest verdict-bearing review: any one requesting changes holds
+# the PR, and so does a failed read. Reviews are paged by hand (`--paginate` follows links proxies refuse).
+pages="$(mktemp)"
+for page in $(seq 1 30); do
+  if ! got="$(gh_get "repos/$REPO/pulls/$PR/reviews?per_page=100&page=$page")" ||
+    ! jq -e 'type == "array"' <<<"$got" >/dev/null; then
+    rm -f "$pages"; stop held "PR #$PR: its reviews could not be read, so an owner's request for changes cannot be ruled out"
+  fi
+  printf '%s\n' "$got" >>"$pages"
+  [ "$(jq length <<<"$got")" -ge 100 ] || break
+  [ "$page" -lt 30 ] || { rm -f "$pages"; stop held "PR #$PR: it has more than 3000 reviews, so a request for changes cannot be ruled out"; }
+done
 # shellcheck disable=SC2016  # jq program
-owner_review="$(gh_get "repos/$REPO/pulls/$PR/reviews?per_page=100" --jq '
+requesting="$(jq -rs 'add |
   [.[] | select((.author_association | IN("OWNER", "MEMBER", "COLLABORATOR"))
-    and (.state | IN("APPROVED", "CHANGES_REQUESTED", "DISMISSED")))] | last | .state // "none"')" \
-  || stop held "PR #$PR: its reviews could not be read, so an owner's request for changes cannot be ruled out"
-[ "$owner_review" != CHANGES_REQUESTED ] || stop held "PR #$PR: the owner's latest review requests changes"
+    and (.state | IN("APPROVED", "CHANGES_REQUESTED", "DISMISSED")))]
+  | group_by(.user.login // .user.id // "unknown") | map(last)
+  | map(select(.state == "CHANGES_REQUESTED") | (.user.login // "a reviewer")) | join(", ")' "$pages")"
+rm -f "$pages"
+[ -z "$requesting" ] || stop held "PR #$PR: the latest review of $requesting requests changes"
 
 # The records rule is the merge guard's: it prints the head it checked, or refuses with its reason.
 err="$(mktemp)"; trap 'rm -f "$err"' EXIT
