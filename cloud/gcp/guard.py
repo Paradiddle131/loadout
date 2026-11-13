@@ -40,6 +40,9 @@ WRAPPERS = {
     "stdbuf",
     "xargs",
 }
+# Shell reserved words that come before a command (`if cmd; then cmd; fi`, `! cmd`, `{ cmd; }`): skipped, so
+# the command after them is the one checked.
+KEYWORDS = {"if", "then", "elif", "else", "do", "while", "until", "!", "{", "(", "time"}
 TRACKS = {"alpha", "beta", "preview"}
 SHELLS = {"bash", "sh", "zsh", "dash"}
 SEPARATORS = {";", "&&", "||", "|", "&", "(", ")", "\n", "|&"}
@@ -169,7 +172,7 @@ def program(seg: list[str]) -> tuple[str, list[str]] | None:
             i += 1
             continue
         name = os.path.basename(t)
-        if name in WRAPPERS or re.fullmatch(r"\d+[smhd]?", t):
+        if t in KEYWORDS or name in WRAPPERS or re.fullmatch(r"\d+[smhd]?", t):
             i += 1
             continue
         return name, seg[i + 1 :]
