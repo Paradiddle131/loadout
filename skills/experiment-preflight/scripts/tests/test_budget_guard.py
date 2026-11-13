@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -24,8 +25,17 @@ def guard(state: Path, *args: str) -> subprocess.CompletedProcess:
 
 
 def init(state: Path, *limits: str) -> None:
-    r = guard(state, *limits, "init")
+    r = guard(state, *limits, "--go", "owner: go for this pass", "init")
     assert r.returncode == GO, r.stderr
+
+
+VALID = {
+    "schema": 1,
+    "go": "owner: go",
+    "limits": {"max_runs": 5, "max_cost": None, "max_infra_failures": 2},
+    "counts": {"started": 0, "recorded": 0, "ok": 0, "wrong": 0, "infra": 0},
+    "cost": 0,
+}
 
 
 def counts(state: Path) -> dict:
@@ -173,3 +183,93 @@ def test_shell_loop_stops_at_the_limit(state: Path, tmp_path: Path) -> None:
     )
     subprocess.run(["bash", "-c", script], check=True, capture_output=True)
     assert log.read_text().split() == ["1", "2", "3", "4"]
+
+
+def test_valid_fixture_is_accepted(state: Path) -> None:
+    state.write_text(json.dumps(VALID))
+    assert guard(state, "start").returncode == GO
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda d: d["limits"].pop("max_cost"),
+        lambda d: d["limits"].update(max_runs=0),
+        lambda d: d.pop("go"),
+    ],
+    ids=["no-max-cost-key", "max-runs-zero", "no-go"],
+)
+def test_state_missing_a_field_fails_closed(state: Path, change) -> None:
+    data = json.loads(json.dumps(VALID))
+    change(data)
+    state.write_text(json.dumps(data))
+    r = guard(state, "start")
+    assert r.returncode == REFUSED, r.stderr
+    assert "refusing to continue" in r.stderr
+
+
+@pytest.mark.parametrize("cost", ["NaN", "Infinity", "-Infinity"])
+def test_state_with_non_finite_cost_fails_closed(state: Path, cost: str) -> None:
+    state.write_text(json.dumps(VALID).replace('"cost": 0', f'"cost": {cost}'))
+    assert guard(state, "start").returncode == REFUSED
+
+
+@pytest.mark.parametrize("cost", ["-1", "nan", "inf", "-inf", "abc"])
+def test_bad_cost_argument_is_refused(state: Path, cost: str) -> None:
+    init(state, "--max-runs", "5")
+    assert guard(state, "record", "--outcome", "ok", "--cost", cost).returncode == REFUSED
+    assert counts(state)["recorded"] == 0
+
+
+def test_cost_overflow_is_refused_at_the_record_that_causes_it(state: Path) -> None:
+    init(state, "--max-runs", "5")
+    assert guard(state, "record", "--outcome", "ok", "--cost", "1e308").returncode == GO
+    r = guard(state, "record", "--outcome", "ok", "--cost", "1e308")
+    assert r.returncode == REFUSED
+    assert "overflows" in r.stderr
+    assert counts(state)["recorded"] == 1
+
+
+@pytest.mark.parametrize("runs", ["0", "-3"])
+def test_init_refuses_a_run_limit_below_one(state: Path, runs: str) -> None:
+    assert guard(state, "--max-runs", runs, "--go", "owner: go", "init").returncode == REFUSED
+    assert not state.exists()
+
+
+def test_init_needs_the_owners_go(state: Path) -> None:
+    assert guard(state, "--max-runs", "5", "init").returncode == REFUSED
+    assert guard(state, "--max-runs", "5", "--go", "  ", "init").returncode == REFUSED
+    assert not state.exists()
+
+
+def test_more_than_two_infra_failures_need_a_go_that_names_them(state: Path) -> None:
+    lim = ("--max-runs", "50", "--max-infra-failures", "3")
+    assert guard(state, *lim, "--go", "owner: go for 50 runs", "init").returncode == REFUSED
+    assert guard(state, *lim, "--go", "owner: 50 runs, stop at 3 infra", "init").returncode == GO
+
+
+def test_a_link_and_its_target_share_one_budget(tmp_path: Path) -> None:
+    target = tmp_path / "pass.json"
+    link = tmp_path / "link.json"
+    init(target, "--max-runs", "2")
+    link.symlink_to(target)
+    codes = [guard(p, "start").returncode for p in (link, target, link, target, link, target)]
+    assert codes.count(GO) == 2
+    assert link.is_symlink()
+    assert counts(target)["started"] == 2
+
+
+def test_unwritable_state_returns_refused(state: Path, monkeypatch) -> None:
+    spec = importlib.util.spec_from_file_location("budget_guard", GUARD)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    init(state, "--max-runs", "5")
+
+    def fail(*_args) -> None:
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(mod, "save", fail)
+    assert mod.main(["--state", str(state), "record", "--outcome", "ok"]) == REFUSED
+    assert mod.main(["--state", str(state), "start"]) == REFUSED
+    assert counts(state)["recorded"] == 0

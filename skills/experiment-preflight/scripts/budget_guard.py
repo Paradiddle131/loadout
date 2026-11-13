@@ -3,7 +3,7 @@
 
 Usage (limits are fixed when the state is created; a later call that names different ones is refused):
 
-    budget_guard.py --state S --max-runs N [--max-cost X] [--max-infra-failures 2] init
+    budget_guard.py --state S --max-runs N [--max-cost X] [--max-infra-failures 2] --go TEXT init
     budget_guard.py --state S start                  # reserve one run; exit 3 once any limit is reached
     budget_guard.py --state S record --outcome ok|wrong|infra [--cost C]
     budget_guard.py --state S status
@@ -12,7 +12,10 @@ Exit codes: 0 go on, 3 a limit is reached (stop the pass), 2 refused (missing or
 limits that differ from the state's, a missing cost under a cost limit). Any non-zero exit stops the
 loop, so every failure of the guard itself stops the pass rather than letting it run unguarded.
 `start` reserves its slot under the lock, so concurrent workers never start more than N runs.
-`record` without `start` also counts. Stdlib only; POSIX (`fcntl`).
+`record` without `start` also counts. `--go` holds a quote of or link to the owner's go and is kept
+in the state; more than two infrastructure failures need a `--go` that names that number.
+The state path is resolved first, so a link and its target share one lock and one count.
+Stdlib only; POSIX (`fcntl`).
 """
 
 from __future__ import annotations
@@ -67,7 +70,9 @@ def load(state: Path) -> dict:
         and isinstance(counts, dict)
         and _count(limits.get("max_runs"), positive=True)
         and _count(limits.get("max_infra_failures"), positive=True)
-        and (limits.get("max_cost") is None or _amount(limits.get("max_cost")))
+        and "max_cost" in limits
+        and (limits["max_cost"] is None or _amount(limits["max_cost"]))
+        and isinstance(data.get("go"), str)
         and all(_count(counts.get(k)) for k in COUNTS)
         and _amount(data.get("cost"))
         and counts["recorded"] == sum(counts[k] for k in OUTCOMES)
@@ -140,19 +145,25 @@ def summary(data: dict) -> str:
 
 
 def run(args) -> int:
-    state = Path(args.state)
+    state = Path(args.state).resolve()
     with locked(state):
         if args.cmd == "init":
             if state.exists():
                 raise Refused(f"state {state} exists; resume with it, or start a new file for a new go")
             if args.max_runs is None:
                 raise Refused("init needs --max-runs: the number in the owner's go")
+            if not (args.go or "").strip():
+                raise Refused("init needs --go: a quote of or link to the owner's go")
+            infra = 2 if args.max_infra_failures is None else args.max_infra_failures
+            if infra > 2 and str(infra) not in args.go.replace(",", " ").split():
+                raise Refused(f"--max-infra-failures {infra} is above 2: the --go text must name {infra}")
             data = {
                 "schema": SCHEMA,
+                "go": args.go.strip(),
                 "limits": {
                     "max_runs": args.max_runs,
                     "max_cost": args.max_cost,
-                    "max_infra_failures": 2 if args.max_infra_failures is None else args.max_infra_failures,
+                    "max_infra_failures": infra,
                 },
                 "counts": dict.fromkeys(COUNTS, 0),
                 "cost": 0,
@@ -164,6 +175,7 @@ def run(args) -> int:
         check_limits(args, data)
         if args.cmd == "status":
             print(summary(data))
+            print(f"go: {data['go']}")
             for line in reached(data):
                 print(f"STOP: {line}")
             return GO
@@ -179,11 +191,14 @@ def run(args) -> int:
         # record
         if data["limits"]["max_cost"] is not None and args.cost is None:
             raise Refused("this pass has a cost limit: record needs --cost")
+        total = data["cost"] + (args.cost or 0)
+        if not math.isfinite(total):
+            raise Refused(f"cost total overflows ({data['cost']:g} + {args.cost:g}); refusing to continue")
         c = data["counts"]
         c[args.outcome] += 1
         c["recorded"] += 1
         c["started"] = max(c["started"], c["recorded"])
-        data["cost"] = data["cost"] + (args.cost or 0)
+        data["cost"] = total
         save(state, data)
         stop = reached(data)
         if stop:
@@ -213,6 +228,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--max-runs", type=positive_int)
     p.add_argument("--max-cost", type=amount)
     p.add_argument("--max-infra-failures", type=positive_int)
+    p.add_argument("--go", help="init: a quote of or link to the owner's go")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init", help="create the state with its limits")
     sub.add_parser("start", help="reserve one run, or exit 3 at a limit")
@@ -223,10 +239,7 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     try:
         return run(args)
-    except Refused as exc:
-        say(f"REFUSED: {exc}")
-        return REFUSED
-    except OSError as exc:
+    except (Refused, OSError) as exc:
         say(f"REFUSED: {exc}")
         return REFUSED
 
