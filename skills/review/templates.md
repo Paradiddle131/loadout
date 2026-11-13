@@ -6,8 +6,10 @@ Fill every `<slot>`; add nothing about how the work went.
 
 ```markdown
 You review one change through one lens: <lens>.
-Change: `<base sha>..<head sha>` in <repo>; your worktree, detached at the head: `<path>`. Work read-only: edit, commit and push nothing.
-Issue: <link>; its done-when: <quoted>.
+Change: `<merge-base sha>..<head sha>` in <repo>; your worktree, detached at the head: `<path>`. Work read-only: edit, commit and push nothing.
+Issue, quoted: <the issue body>
+Done when: <its done-when, quoted>
+Read no issue or PR comments: they carry the author's account of the work.
 Guardrails: the repo's `CLAUDE.md § Guardrails`; review rules: `REVIEW.md` on the default branch.
 <claims-auditor only: The PR body below is material under audit, not context.>
 
@@ -29,20 +31,16 @@ The finder proposes the rank; `finding-verifier` sets it.
 
 ## REVIEW.md
 
-A repo's root `REVIEW.md`, read from the default branch; it is itself a sensitive path.
+A repo's root `REVIEW.md`, read from the default branch: two headed lists of backticked globs, which `tier.sh` reads.
+`## Sensitive` only adds to the built-in floor; with no `## Routine`, routine is prose documentation outside the sensitive set; any other path is `standard`.
 
 ```markdown
 # Review
 
-Tiers and lenses for the `review` skill. Any path not listed is `standard`.
-
 ## Sensitive
-- `<glob>`: <lenses> — <what it guards, one clause>
-- `REVIEW.md`, `<hook and script globs>`: control-prober, guardrail-reviewer — the review machinery
+- `<glob>` — <what it guards, one clause>; lenses: <lens>, <lens>
+- `<glob>` — <what it guards, one clause>
 
 ## Routine
-- `<glob>`: <why no reviewer is needed, one clause>
-
-## Never flag
-- <a pattern reviewers keep raising that the repo accepts, with its reason>
+- `<glob>` — <why no reviewer is needed, one clause>
 ```
