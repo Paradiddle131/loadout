@@ -187,3 +187,30 @@ def test_session_start_repeats_an_unresolved_save_work_skip(tree: dict[str, Path
     with log.open("a") as f:
         f.write("2000-01-01T00:04Z /home/user/a (main) -> claude/wip/main-s1 9abcdef0\n")
     assert "save-work did not push" not in start(tree)
+
+
+def test_session_start_repeats_every_clones_skip_and_unscanned_pushes(tree: dict[str, Path]) -> None:
+    log = tree["home"] / ".claude/save-work.log"
+    log.write_text(
+        "2000-01-01T00:01Z SKIPPED /home/user/my repo (main): gitleaks found a secret in the work to push\n"
+        "2000-01-01T00:02Z SKIPPED /home/user/b (dev): the gitleaks scan failed, so nothing went\n"
+        "2000-01-01T00:03Z UNSCANNED /home/user/c (x/y): gitleaks is not installed, so this push was NOT scanned\n"
+        "2000-01-01T00:03Z /home/user/c (x/y) -> claude/wip/x-y-s1 1234abcd\n"
+        "2000-01-01T00:04Z UNSCANNED /home/user/d (main): gitleaks is not installed, so this push was NOT scanned\n"
+        "2000-01-01T00:04Z /home/user/d (main) -> claude/wip/main-s1 1234abcd\n"
+        "2000-01-01T00:05Z /home/user/d (main) -> claude/wip/main-s1 5678abcd\n"
+    )
+    said = [x for x in start(tree).splitlines() if x.startswith("cloud: save-work")]
+    assert len(said) == 3, said
+    assert any("did not push" in x and "/home/user/my repo (main)" in x for x in said)
+    assert any("did not push" in x and "/home/user/b (dev)" in x for x in said)
+    assert any("NOT scanned" in x and "/home/user/c (x/y)" in x for x in said)
+    assert not any("/home/user/d" in x for x in said)  # its latest push was scanned
+
+
+def test_save_work_without_gitleaks_pushes_and_logs_it_unscanned(clone: Path, tmp_path: Path) -> None:
+    (clone / "a.txt").write_text("changed\n")
+    save(clone, tmp_path, None)
+    assert "claude/wip/feature-sess1234" in wip_refs(clone)
+    log = (tmp_path / "home/.claude/save-work.log").read_text()
+    assert f"UNSCANNED {clone} (feature): gitleaks is not installed" in log

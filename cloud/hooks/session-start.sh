@@ -70,13 +70,36 @@ elif [ -n "${GCP_PROJECT:-}" ]; then
   timeout 120 bash "$ROOT/cloud/gcp/status.sh"
 fi
 
-# 2c. save-work.sh skips a clone's push when gitleaks finds a secret in it, often in a background run nobody
-#     sees: repeat the newest such line here until a later save of that clone pushed.
-skipped=$(awk '$2 == "SKIPPED" { last[$3] = $0; at[$3] = NR; next }
-               $4 == "->" { delete last[$2] }
-               END { n = 0; for (k in last) if (at[k] > n) { n = at[k]; line = last[k] } if (n) print line }' \
-  "$HOME/.claude/save-work.log" 2>/dev/null || true)
-[ -z "$skipped" ] || echo "cloud: save-work did not push unsaved work: $skipped"
+# 2c. save-work.sh runs in the background where nobody sees it: for each clone whose latest save it skipped
+#     (gitleaks found a secret, or the scan failed), or whose latest push went out unscanned (no gitleaks),
+#     repeat that line here until a later save of that clone pushes after a scan.
+python3 - "$HOME/.claude/save-work.log" <<'EOF' 2>/dev/null || true
+import re, sys
+try:
+    lines = open(sys.argv[1], encoding="utf-8", errors="replace").read().splitlines()
+except OSError:
+    sys.exit()
+state, unscanned = {}, set()  # (worktree, branch) -> the line to repeat
+for line in lines:
+    m = re.match(r"\S+ (SKIPPED|UNSCANNED) (.+) \(([^()]*)\): ", line)
+    if m:
+        key = (m.group(2), m.group(3))
+        if m.group(1) == "SKIPPED":
+            state[key] = "did not push unsaved work: " + line
+        else:
+            unscanned.add(key)
+        continue
+    m = re.match(r"\S+ (.+) \(([^()]*)\) -> \S+ \S+$", line)
+    if m:
+        key = (m.group(1), m.group(2))
+        if key in unscanned:
+            state[key] = "pushed unsaved work NOT scanned for secrets (gitleaks missing): " + line
+        else:
+            state.pop(key, None)
+        unscanned.discard(key)
+for said in list(state.values())[-10:]:
+    print("cloud: save-work " + said)
+EOF
 
 # 3. Multi-repo sessions start above the clones and skip the target's own hooks: run its
 #    SessionStart commands here, as Claude Code would in a single-repo session.
