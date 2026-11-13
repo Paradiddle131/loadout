@@ -9,7 +9,7 @@ A **wake** works a **target repo**'s queue one **item** (an issue) at a time, ea
 The target's `docs/agents/autopilot.md` is the **profile** (start one from `profile-template.md`): it fills the slots below and wins inside them.
 The target's `CLAUDE.md` and the rules `~/.claude/CLAUDE.md` imports (it names the collection's clone) still bind; documents follow the collection's `ways/`.
 Nobody answers during a wake, a usage limit can cut it off at any step, and other wakes may run beside it: claim before working, push early, leave GitHub resumable.
-`$AP` is this skill's folder (`cloud/skills/autopilot` in the clone); its `scripts/` do the mechanical steps from the target's root (`--dry-run` prints every write).
+`$AP` is this skill's folder (`cloud/skills/autopilot` in the clone), `$R` the `review` skill's (`skills/review`); their `scripts/` run from the target's root (`--dry-run` prints every write).
 
 ## Profile slots
 
@@ -32,18 +32,18 @@ An **agent PR** has head `claude/<n>-<slug>` and a `🤖 Handoff` comment; a **h
 
 ## A wake
 
-1. **Orient.** `cd` into the target; read its `CLAUDE.md`, architecture document and profile; `git fetch origin`. A wake id once from `head -c4 /dev/urandom | od -An -tx1 | tr -d ' \n'`. Recover what an item's branch lacks from `claude/wip/*` (`git ls-remote origin 'refs/heads/claude/wip/*'`) first.
+1. **Orient.** `cd` into the target; read its `CLAUDE.md`, architecture document and profile; `git fetch origin`. Recover what an item's branch lacks from `claude/wip/*` (`git ls-remote origin 'refs/heads/claude/wip/*'`) first.
    `Mode: paused` in the Digest (§ Steering) ends the wake here, and so does a profile still naming a train delivery (the owner migrates it: `profile-template.md`).
 2. **Owner first, then open agent PRs**, before any new item:
    - Answers on `needs-owner` issues newer than the packet (owner input: a non-`🤖` comment, or a `🤖` one relaying the owner's answer): act on them: swap `needs-owner` for `agent:ready` (and drop it from the PR) or close.
    - Owner input on agent PRs, open or merged: act on each, one reply per thread; a fix or revert of a merged one is a new item, first.
    - An open agent PR with no live claim or `needs-owner` whose base PR merged, held or not: claim its issue (step 4), retarget it to the default branch, merge that in, push.
-   - An open agent PR this wake has not left already, not held, with no live claim or `needs-owner`, and with work to do (open **Next** items, **local verify failed**, a red gate, a conflict, a missing record, `needs-review` when you have a subagent tool): claim its issue and resume it where step 6 stopped.
+   - An open agent PR this wake has not left already, not held, with no live claim or `needs-owner`, and with work to do (open **Next** items, **local verify failed**, a red gate, a conflict, a missing record, `needs-review` when you have a subagent tool, or both records passing on its head, draft or ready): claim its issue and resume it where step 6 stopped.
 3. **Pick one item** from the profile's queue, in order. **Pickable:** open, `agent:ready` or `agent:research`, no `needs-owner`, `blocked: *` or live claim, no open PR that closes it, every `Blocked by` closed or with a held PR to stack on. Nor an issue in the `Owner lane`'s maps or naming a file under its globs. Prefer one whose files no live claim or open agent PR touches, then one far from the lane. A prompt naming `#n` takes it first if pickable. Nothing pickable or resumable: step 8, then end.
-4. **Claim.** `$AP/scripts/claim.sh <n> --wake <id> [--session <url>]` (exit 2: held by another wake; take the next). A claim is live 3 h or until a handoff comment; rerunning it with the same wake id renews it.
+4. **Claim.** `$AP/scripts/claim.sh <n> [--wake <id>] [--session <url>]` (the first prints the wake id: pass it to every later call; exit 2: held by another wake, take the next). A claim is live 3 h or until a handoff comment; rerunning it with the same wake id renews it.
 5. **Do it.**
    - Brief yourself (the repo's `brief` skill, else the issue, its links and files); the PR's `Briefed on:` line names them.
-   - An owner comment newer than the body that changes the ask: rewrite the body first, citing it.
+   - An owner comment that changes the ask: rewrite the body first, citing it.
    - Too large for one reviewer's pass: split it into slices (sub-issues, `Blocked by`); do the first.
    - Branch `claude/<n>-<slug>` from the fresh `origin/<default>`, or from the held PR it stacks on, whose branch is then its PR's base; push and open a draft PR after the first meaningful commit (`Closes #<n>`, body by the `pr` skill) and its handoff comment (below).
    - Bug: reproduce first. Code: first write the test that expresses the change and see it fail, where a test can.
@@ -51,17 +51,16 @@ An **agent PR** has head `claude/<n>-<slug>` and a `🤖 Handoff` comment; a **h
    - A new or changed decision: its architecture-document line, final, in the same diff (`ways/finished.md`).
    - Run the profile's `cloud` gates; quote counts, both counts when a known flake is rerun alone. Never skip, disable or weaken a test to get green.
    - The `local` gates never run on cloud: they become the handoff's local checklist (exact commands, expected output) and hold the PR on `needs-local-verify`. With none, cloud runs everything (long suites with `run_in_background`, one at a time when they share state).
-6. **Review and land** (`ways/review.md`, the `review` skill).
-   - Gate: `skills/review/scripts/gate_stamp.sh --pr <n> -- <the profile's cloud gates>` posts the `🤖 Gates` record for the pushed head; a red gate blocks the merge, even one a known condition explains.
-   - Tier: `skills/review/scripts/tier.sh` prints it from the changed paths; raise it, never lower it. `routine`: no reviewer; run `verdict.sh --tier routine` yourself.
-   - Review (`standard`, `sensitive`): fresh reviewer subagents for the tier, then `finding-verifier` (it prints `Reviewed: <sha>`). Fix each verified finding, gate and review again; after three review-and-fix cycles, park it (`needs-owner` on issue and PR, its findings as a packet); take the next item.
-   - Verdict: `skills/review/scripts/verdict.sh` (`--reviewed`: the verifier's sha) posts the `🤖 Review` record from the reviewers' result, never from the author's own reading.
-   - No subagent tool: the PR stops ready and unreviewed, `needs-review`, never reviewed by hand; take the next item, stacking nothing on it.
-   - Merge: mark it ready; `$AP/scripts/merge.sh <pr>` squash-merges at the head it read, only when the merge guard passes it and nothing else stops it. Exit 3: leave it. Exit 4 (behind): merge the default branch in, push, then the gate stamp and `verdict.sh` again, not the reviewers (a hand-resolved conflict or a new commit goes back through review); a second exit 4 leaves it for the next wake.
+6. **Review and land** by the `review` skill (`ways/review.md`); renew the claim (step 4) before each cycle and before the merge.
+   - Gate: `$R/scripts/gate_stamp.sh --pr <n> -- <the profile's cloud gates>` posts the `🤖 Gates` record for the pushed head; a red gate blocks the merge, even one a known condition explains.
+   - Tier: `$R/scripts/tier.sh` prints it; raise it, never lower it. `routine` needs no reviewer, so no subagent tool: `$R/scripts/verdict.sh <pr> --tier routine`.
+   - Otherwise: fresh reviewer subagents for the tier, `finding-verifier`, then `$R/scripts/verdict.sh <pr> --tier <tier> --result pass|fail --reviewers "<names>" --reviewed <its Reviewed sha> --file <its output>` posts the `🤖 Review` record; remove `needs-review` once it is posted. Fix and repeat for as many cycles as the `review` skill counts, its one rethink included; then park: `needs-owner` on issue and PR, the open findings as its packet; take the next item.
+   - No subagent tool: a `standard` or `sensitive` PR stops ready and unreviewed, `needs-review`, never reviewed by hand; take the next item.
+   - Merge: mark it ready; `$AP/scripts/merge.sh <pr>` squash-merges at the head the merge guard checked, unless something stops it (exit 3: leave it). Exit 4 (behind): integrate as the `review` skill says (a cycle): merge the default branch in, push, stamp, rerun `verdict.sh` with the same `--reviewed` and output (from the last `🤖 Review` comment if the wake lacks it); a hand-resolved conflict or a new commit goes back to the reviewers.
    - The issue handoff (below) ends the claim: remove `agent:claimed`; the next item starts from a fresh `git fetch origin`.
 7. **Can't finish.** Commit nothing half-done. Waiting on something a wake can't do: swap `agent:*` for `needs-owner` or `blocked: *`, the reason as the last comment. Built but can't land: comment what was built and what conflicted. Split what's left into sub-issues with `Blocked by`; remove `agent:claimed`; `git stash -u`.
 8. **Leave the backlog better.**
-   - File every finding the item did not fix (a verified review finding, a bug, an out-of-scope problem): `$AP/scripts/file_issue.sh`, a sub-issue of its epic when it has one; one issue per root cause, one review's related findings as checkboxes; one an open issue holds is a comment there; a plan or analysis goes on as an artifact (the `issue` skill).
+   - File every finding the item did not fix (a verified review finding, a bug, an out-of-scope problem; a parked item's stay in its packet): `$AP/scripts/file_issue.sh`, a sub-issue of its epic when it has one; one issue per root cause, one review's related findings as checkboxes; one an open issue holds is a comment there; a plan or analysis goes on as an artifact (the `issue` skill).
    - **Known conditions:** one that cost time and can recur gets a profile line (every repo's: `cloud/CLAUDE.md`); a repeat files a fix issue, whose PR deletes the line.
    - **Refill**, in the item's own epic only: graduate fog the work just made specific into `agent:ready` sub-issues; slice an issue mixing cloud-buildable and local-only work; new scope is filed `needs-owner`, never built.
    - **Build ahead:** a packet whose recommendation is reversible and cloud-buildable may get one speculative PR, titled `[speculative: #<n> = <answer>]`, body `Refs #<n>`, gated and reviewed like any, never stacked on; when the owner picks that answer, retitle it and merge it by step 6.
@@ -70,7 +69,7 @@ An **agent PR** has head `claude/<n>-<slug>` and a `🤖 Handoff` comment; a **h
 ## Steering
 
 The owner steers wakes from two lines at the top of the Digest issue's body, edited there (no PR), so the routine stays on:
-- `Mode: paused | offline | full`: `paused` ends a wake at its next read (no new claim, no writes); `offline` keeps it off live external systems, as the profile defines them; `full` is the profile's whole queue.
+- `Mode: paused | offline | full`: `paused` ends a wake at its next read (no new claim, no writes); `offline` keeps it off live external systems (the profile names them); `full` is the profile's whole queue.
   The stricter of this line and the routine prompt wins; a missing line means the profile's default.
 - `Owner lane: <epics or issues> — <path globs>`: the owner's attended work.
   Step 3 keeps out of it; `Owner lane: none`, or no line, clears it.
@@ -80,7 +79,7 @@ The owner steers wakes from two lines at the top of the Digest issue's body, edi
 On the issue, as one comment; label `needs-owner`; never answer your own question.
 First line `**Asks:** <what> — recommended <answer> — unblocks <what>`: the `needs-owner` label is the list of open questions, so no wake keeps one.
 Evidence first (`file:line`, a command and its output, a source link), then at most three questions, most blocking first, each with options **A/B/C**, one line of trade-off each, and **Recommendation:** with a one-line why.
-End with **If you pick the recommendation, the build is:** (the change and how it is verified).
+End with **If you pick the recommendation, the build is:** the change and its check.
 A parked item's packet lists each open finding, its evidence and the fixes tried.
 A guardrail conflict uses the packet in `ways/guardrails.md`.
 
