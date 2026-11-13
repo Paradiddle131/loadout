@@ -5,6 +5,8 @@
 # only our comment; the label stays for the earlier wake.
 # A claim is live while its latest `claimed`/`still on it` comment is under 3 hours old and no
 # handoff comment (a line starting `handoff`, `## Handoff` or `🤖 Handoff`) follows it.
+# The label and the comment land together: when the comment cannot be confirmed, the label this
+# run added is taken back and the exit is 1.
 # Exit 0: claimed (prints the wake id); 2: another wake holds it (prints its id); 1: usage or API error.
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -40,17 +42,31 @@ live_claim() {
 is_live() { [ "$(age_s "$1")" -lt 10800 ]; }
 
 existing="$(live_claim)"   # a failed read stops here: never claim blind
+ours=0   # this wake already holds a live claim, so its label is not this run's to take back
 if [ -n "$existing" ]; then
   read -r ts id _ <<<"$existing"
   if is_live "$ts" && [ "$id" != "$WAKE_ID" ]; then
     echo "held by $id since $ts" >&2; echo "$id"; exit 2
   fi
+  is_live "$ts" && ours=1
 fi
 
-gh_write -X POST "repos/$REPO/issues/$ISSUE/labels" -f 'labels[]=agent:claimed' >/dev/null
+# A label without its comment is a claim nobody can see: take the label back, then stop.
+unclaim() {
+  [ "$ours" = 1 ] || gh_write -X DELETE "repos/$REPO/issues/$ISSUE/labels/agent:claimed" >/dev/null \
+    || echo "error: agent:claimed is left on #$ISSUE without a claim comment; remove it" >&2
+  die "$1"
+}
+gh_write -X POST "repos/$REPO/issues/$ISSUE/labels" -f 'labels[]=agent:claimed' >/dev/null \
+  || unclaim "could not label #$ISSUE"
 stamp="$(now)"
-mine="$(gh_write -X POST "repos/$REPO/issues/$ISSUE/comments" -f "body=🤖 claimed $stamp $WAKE_ID${SESSION:+ $SESSION}$FOOTER" --jq '.id')"
+mine="$(gh_write -X POST "repos/$REPO/issues/$ISSUE/comments" -f "body=🤖 claimed $stamp $WAKE_ID${SESSION:+ $SESSION}$FOOTER" --jq '.id')" || mine=""
 [ "$DRY_RUN" = 1 ] && { echo "$WAKE_ID"; exit 0; }
+if ! [[ "$mine" =~ ^[0-9]+$ ]]; then   # the POST may have landed although its answer was lost
+  mine="$(gh_get "repos/$REPO/issues/$ISSUE/comments?per_page=100" \
+    --jq "[.[] | select(.body | startswith(\"🤖 claimed $stamp $WAKE_ID\")) | .id] | last // empty")" || mine=""
+  [[ "$mine" =~ ^[0-9]+$ ]] || unclaim "the claim comment on #$ISSUE failed; nothing claimed (rerun the claim)"
+fi
 
 # Re-read: the earliest live `claimed` of another wake id wins; same minute, the lower comment id.
 # Only claims after the latest handoff compete: a handoff ended every claim before it.
