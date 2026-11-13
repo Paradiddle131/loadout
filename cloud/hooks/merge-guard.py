@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """PreToolUse hook: refuse a PR merge whose head commit carries no recorded gates and review.
 
-A change may be merged only when its PR's current head commit carries two GitHub commit statuses, both
-`success`: `loadout/gates` (skills/review/scripts/gate_stamp.sh, the gate command's result) and
-`loadout/review` (skills/review/scripts/verdict.sh, a verdict posted on the PR). Statuses on an older head
-do not count: the guard reads the PR's head now. It also asks the merge to name that head
-(`expectedHeadSha`, `--match-head-commit`, `-f sha=`), so GitHub itself refuses the merge if a push lands
-between this check and the merge.
+A change may be merged only when its PR carries two records for its current head commit, each the newest
+of its kind: a gates record (skills/review/scripts/gate_stamp.sh, the gate command's result) and a review
+record (skills/review/scripts/verdict.sh, a verdict posted with the reviewers' output). A record is a PR
+comment whose first line is `🤖 Gates: <state>` or `🤖 Review: <result> (<tier> tier)` and whose second line
+is the marker `<!-- loadout:<gates|review> sha=<head> state=success|failure [tier=..] [reviewed=..] -->`.
+Only comments by the repo's owner, a member or a collaborator count (`author_association`); of those, the
+newest marker of each kind must be unedited, well formed, agree with its first line, name the PR's
+current head and say `state=success`. A record for an older head does not count. When the guard can run
+skills/review/scripts/tier.sh in a local clone holding the head, a review whose tier is below the one the
+paths give refuses too; with no such clone that check is skipped. The merge must also name the head the
+guard checked (`expectedHeadSha`, `--match-head-commit`, `-f sha=`), so GitHub itself refuses it if a push
+lands between this check and the merge.
 
 Caught: the GitHub MCP merge tool (any server's `merge_pull_request`, owner, repo and number from its
 input); `gh pr merge` (a number, URL or branch; `-R`, `GH_REPO`, or the origin of the directory it runs
@@ -23,12 +29,16 @@ UI, code calling the API from a script, or a command built at run time (`x=merge
 only the agent's tool calls, never commands a hook runs, so the save-work hook's own `git push
 --no-verify` is unaffected.
 
-Honest limits: the statuses guard against forgetting, not against a dishonest author; the same account
-posts them. The guard fails closed on a merge: when it cannot read the PR or its statuses, or the guard
-itself fails on a command that looks like a merge, it refuses and says why. Any other command passes
-untouched and costs no network call.
+Honest limits: the records guard against forgetting, not against a dishonest author; the same account
+posts them and could type a marker by hand. The guard fails closed on a merge: when it cannot read the PR
+or its comments, or the guard itself fails on a command that looks like a merge, it refuses and says why.
+Any other command passes untouched and costs no network call.
 
-Reads the hook's JSON on stdin; prints a deny decision on stdout or nothing; always exits 0.
+Hook mode (no arguments): reads the hook's JSON on stdin; prints a deny decision on stdout or nothing;
+always exits 0. Check mode, for scripts that merge: `merge-guard.py --check <owner>/<repo>#<n>` (or `<n>`,
+the repo from the current directory's origin) runs the same record checks; it prints the head sha it
+checked and exits 0 when a merge naming that head would be allowed, else prints the reason on stderr and
+exits 1 (2 for a usage error).
 """
 
 from __future__ import annotations
@@ -50,11 +60,18 @@ except Exception as _exc:  # noqa: BLE001
 else:
     IMPORT_ERROR = None
 
-GATES, REVIEW = "loadout/gates", "loadout/review"
 PRODUCER = {
-    GATES: "skills/review/scripts/gate_stamp.sh -- <the repo's gate command>",
-    REVIEW: "skills/review/scripts/verdict.sh <pr> --tier ... --result pass ...",
+    "gates": "skills/review/scripts/gate_stamp.sh -- <the repo's gate command>",
+    "review": "skills/review/scripts/verdict.sh <pr> --tier ... --result pass --reviewed <head> ...",
 }
+TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
+MARKER = re.compile(r"<!-- loadout:(gates|review)((?: [a-z]+=[^\s=]+)+) -->")
+TITLE = {"gates": re.compile(r"🤖 Gates: (success|failure)"),
+         "review": re.compile(r"🤖 Review: (pass|fail) \((routine|standard|sensitive) tier\)")}
+FIELDS = {"gates": {"sha", "state"}, "review": {"sha", "state", "tier", "reviewed"}}
+RANK = {"routine": 0, "standard": 1, "sensitive": 2}
+TIER_SH = Path(__file__).resolve().parents[2] / "skills/review/scripts/tier.sh"
+MAX_PAGES = 30
 TIMEOUT = 10
 MERGE_ENDPOINT = re.compile(r"(?:^|/)repos/([^/\s]+)/([^/\s]+)/pulls/(\d+)/merge/?(?:\?|$)")
 MERGE_URL = re.compile(r"api\.github\.com/repos/[^/\s]+/[^/\s]+/pulls/\d+/merge\b")
@@ -71,8 +88,8 @@ GH_MERGE_VALUE_FLAGS = {"-b", "--body", "-F", "--body-file", "-t", "--subject", 
 COMMIT_VALUE_SHORT = set("mFcCt")  # short options of `git commit` that take a value
 GIT_GLOBAL_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
 
-AUTO_MERGE = ("auto-merge merges later, at a head nobody checked; merge by hand once both statuses are "
-              "`success` on the PR's head")
+AUTO_MERGE = ("auto-merge merges later, at a head nobody checked; merge by hand once both records are "
+              "on the PR's head")
 NO_VERIFY = ("skipping the repo's commit or push hooks. A hook that fails is reporting something: fix "
              "what it names (or ask the owner about a deliberate exception) instead of bypassing it")
 
@@ -106,19 +123,86 @@ def origin_repo(cwd: str) -> str | None:
     return f"{m.group(1)}/{m.group(2)}" if m else None
 
 
-def check_merge(repo: str | None, ref: str | None, expected: str | None) -> str:
-    """The deny reason for merging PR `ref` (a number or a branch) of `repo`; empty when it may merge."""
+def comments(repo: str, number: str) -> list[dict]:
+    """Every comment on the PR, paged by hand (`--paginate` follows links some proxies refuse)."""
+    out: list[dict] = []
+    for page in range(1, MAX_PAGES + 1):
+        got = gh_json(f"repos/{repo}/issues/{number}/comments?per_page=100&page={page}")
+        if not isinstance(got, list):
+            raise Unreadable(f"the comments of PR {number} came back in an unknown shape")
+        out += [c for c in got if isinstance(c, dict)]
+        if len(got) < 100:
+            return out
+    raise Unreadable(f"PR {number} has more than {MAX_PAGES * 100} comments")
+
+
+def body_lines(c: dict) -> list[str]:
+    return (c.get("body") or "").replace("\r\n", "\n").split("\n")
+
+
+def record_problem(kind: str, c: dict, head: str) -> tuple[str, dict]:
+    """Why `c`, the newest trusted marker comment of `kind`, records no success on `head` ('' when it does)."""
+    lines = body_lines(c)
+    where = f"the newest {kind} record ({c.get('html_url') or 'comment ' + str(c.get('id'))})"
+    if c.get("updated_at") != c.get("created_at"):
+        return f"{where} was edited after it was posted, so it does not count", {}
+    m = MARKER.fullmatch(lines[1].strip()) if len(lines) > 1 else None
+    title = TITLE[kind].fullmatch(lines[0].strip())
+    if not m or m.group(1) != kind or not title:
+        return f"{where} has a malformed first line or marker", {}
+    pairs = [kv.split("=", 1) for kv in m.group(2).split()]
+    fields = dict(pairs)
+    shas = [fields.get("sha", "")] + ([fields["reviewed"]] if "reviewed" in fields else [])
+    if (len(fields) != len(pairs) or not {"sha", "state"} <= set(fields) <= FIELDS[kind]
+            or not all(re.fullmatch(r"[0-9a-f]{40}", s) for s in shas)
+            or (kind == "review" and fields.get("tier") not in RANK)):
+        return f"{where} has a malformed marker", {}
+    state = fields["state"]
+    said = title.group(1) if kind == "gates" else {"pass": "success", "fail": "failure"}[title.group(1)]
+    if state not in ("success", "failure") or said != state or (
+            kind == "review" and title.group(2) != fields.get("tier")):
+        return f"{where} has a marker that disagrees with its first line", {}
+    if fields["sha"] != head:
+        return (f"{where} is for {fields['sha']}, not the head {head}: a record for an older head does not "
+                "count"), {}
+    if state != "success":
+        return f"{where} says {state}", {}
+    return "", fields
+
+
+def paths_tier(repo: str, head: str, cwd: str) -> str | None:
+    """The tier tier.sh gives the head's paths, in a local clone of `repo` holding it; None when it can't."""
+    try:
+        top = subprocess.run(["git", "-C", cwd, "rev-parse", "--show-toplevel"], capture_output=True,
+                             text=True, timeout=TIMEOUT, check=False).stdout.strip()
+        if not top or origin_repo(top) != repo or not TIER_SH.is_file():
+            return None
+        if subprocess.run(["git", "-C", top, "cat-file", "-e", f"{head}^{{commit}}"], capture_output=True,
+                          timeout=TIMEOUT, check=False).returncode:
+            return None
+        done = subprocess.run(["bash", str(TIER_SH), "--head", head], cwd=top, capture_output=True,
+                              text=True, timeout=TIMEOUT, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    tier = done.stdout.split("\n", 1)[0].strip()
+    return tier if done.returncode == 0 and tier in RANK else None
+
+
+def check_merge(repo: str | None, ref: str | None, expected: str | None, cwd: str = ".",
+                require_named: bool = True) -> tuple[str, str]:
+    """(deny reason, head checked) for merging PR `ref` (a number or a branch) of `repo`; no reason: allowed."""
     if not repo:
         return ("refused a PR merge whose repository it cannot tell (no `-R`, `GH_REPO` or origin remote "
-                "here): name it, and the PR number")
+                "here): name it, and the PR number"), ""
     if not ref:
-        return "refused a PR merge that names no PR: pass the PR number"
+        return "refused a PR merge that names no PR: pass the PR number", ""
     number = ref
     if not ref.isdigit():
         owner = repo.split("/")[0]
         found = gh_json(f"repos/{repo}/pulls?head={owner}:{ref}&state=open&per_page=1")
         if not isinstance(found, list) or not found:
-            return f"refused a merge of branch `{ref}`: no open PR in {repo} has it as head; pass the PR number"
+            return (f"refused a merge of branch `{ref}`: no open PR in {repo} has it as head; pass the PR "
+                    "number"), ""
         number = str(found[0]["number"])
     pr = gh_json(f"repos/{repo}/pulls/{number}")
     head = (pr.get("head") or {}).get("sha") if isinstance(pr, dict) else None
@@ -126,22 +210,41 @@ def check_merge(repo: str | None, ref: str | None, expected: str | None) -> str:
         raise Unreadable(f"PR {number} in {repo} shows no head commit")
     if expected and expected != head:
         return (f"refused merging PR {number} of {repo}: the merge names head {expected}, but the PR's head "
-                f"is now {head}. Check the new head's gates and review, then merge naming it")
-    combined = gh_json(f"repos/{repo}/commits/{head}/status?per_page=100")
-    if not isinstance(combined, dict) or not isinstance(combined.get("statuses"), list):
-        raise Unreadable(f"the statuses of {head} came back in an unknown shape")
-    states = {s.get("context"): s.get("state") for s in combined["statuses"] if isinstance(s, dict)}
-    missing = [c for c in (GATES, REVIEW) if states.get(c) != "success"]
-    if missing:
-        told = "; ".join(f"`{c}` is {states.get(c) or 'absent'} (record it with {PRODUCER[c]})"
-                         for c in missing)
-        return (f"refused merging PR {number} of {repo}: its head {head} lacks a recorded success: {told}. "
-                "Statuses on an older head do not count")
-    if not expected:
-        return (f"PR {number} of {repo} has both statuses on head {head}: repeat the merge naming that head "
+                f"is now {head}. Check the new head's gates and review, then merge naming it"), head
+    newest: dict[str, dict] = {}
+    ignored: dict[str, set[str]] = {"gates": set(), "review": set()}
+    for c in sorted(comments(repo, number), key=lambda c: (str(c.get("created_at")), c.get("id") or 0)):
+        lines = body_lines(c)
+        m = re.match(r"\s*<!-- loadout:(gates|review)\b", lines[1]) if len(lines) > 1 else None
+        if not m:
+            continue
+        if c.get("author_association") in TRUSTED:
+            newest[m.group(1)] = c
+        else:
+            ignored[m.group(1)].add(str(c.get("author_association")))
+    problems, review = [], {}
+    for kind in ("gates", "review"):
+        if kind not in newest:
+            extra = f" (markers by {', '.join(sorted(ignored[kind]))} do not count)" if ignored[kind] else ""
+            problems.append(f"no {kind} record{extra}; record it with {PRODUCER[kind]}")
+            continue
+        why, fields = record_problem(kind, newest[kind], head)
+        if why:
+            problems.append(f"{why}; record it again with {PRODUCER[kind]}")
+        elif kind == "review":
+            review = fields
+    if not problems and review:
+        tier = paths_tier(repo, head, cwd)
+        if tier and RANK[review["tier"]] < RANK[tier]:
+            problems.append(f"the review is {review['tier']} tier, but the head's paths make it {tier} "
+                            "(skills/review/scripts/tier.sh); review it at that tier")
+    if problems:
+        return f"refused merging PR {number} of {repo} at head {head}: " + "; ".join(problems), head
+    if require_named and not expected:
+        return (f"PR {number} of {repo} has both records on head {head}: repeat the merge naming that head "
                 f"(MCP `expectedHeadSha: {head}`, `gh pr merge --match-head-commit {head}`, or "
-                f"`gh api ... -f sha={head}`), so GitHub refuses it if the head moves first")
-    return ""
+                f"`gh api ... -f sha={head}`), so GitHub refuses it if the head moves first"), head
+    return "", head
 
 
 def flag_value(args: list[str], names: set[str]) -> str | None:
@@ -186,7 +289,7 @@ def check_gh(args: list[str], env: dict[str, str], cwd: str) -> str:
                 repo, ref = f"{m.group(1)}/{m.group(2)}", m.group(3)
         else:
             ref = current_branch(cwd)
-        return check_merge(repo, ref, flag_value(rest, {"--match-head-commit"}))
+        return check_merge(repo, ref, flag_value(rest, {"--match-head-commit"}), cwd)[0]
     if args[:1] == ["api"]:
         rest = args[1:]
         pos = positionals(rest, GH_API_VALUE_FLAGS)
@@ -209,11 +312,11 @@ def check_gh(args: list[str], env: dict[str, str], cwd: str) -> str:
         if "{" in repo:
             base = gh_repo(env, cwd)
             if not base:
-                return check_merge(None, number, None)
+                return check_merge(None, number, None)[0]
             o, n = base.split("/", 1)
             repo = repo.replace("{owner}", o).replace("{repo}", n)
         sha = next((f.split("=", 1)[1] for f in fields if f.startswith("sha=")), None)
-        return check_merge(repo, number, sha)
+        return check_merge(repo, number, sha, cwd)[0]
     return ""
 
 
@@ -265,7 +368,7 @@ def check_http(args: list[str]) -> str:
     sends = any(a.startswith(("-d", "--data", "--json", "-F", "--form", "--post-")) for a in args)
     if MERGE_URL.search(joined) and (method not in ("", "GET", "HEAD") or sends):
         return ("refused a merge sent with curl or wget, which this guard does not check: use the MCP merge "
-                "tool or `gh`, after both statuses are on the head")
+                "tool or `gh`, after both records are on the head")
     if "api.github.com/graphql" in joined and MERGE_MUTATION.search(joined):
         return ("refused a GraphQL merge mutation: the guard checks merges through REST only; use the MCP merge "
                 "tool or `gh api -X PUT repos/<o>/<r>/pulls/<n>/merge`")
@@ -323,13 +426,35 @@ def decide(event: dict) -> str:
         owner, name, number = data.get("owner"), data.get("repo"), data.get("pullNumber")
         repo = f"{owner}/{name}" if owner and name else None
         ref = str(int(number)) if isinstance(number, (int, float)) or str(number or "").isdigit() else None
-        return check_merge(repo, ref, data.get("expectedHeadSha") or None)
+        return check_merge(repo, ref, data.get("expectedHeadSha") or None, event.get("cwd") or os.getcwd())[0]
     if tool == "Bash":
         return verdict(data.get("command") or "", event.get("cwd") or os.getcwd())
     return ""
 
 
+def check_mode(argv: list[str]) -> int:
+    """`--check <owner>/<repo>#<n>` or `--check <n>`: 0 and the head on stdout when a merge naming it may go."""
+    m = re.fullmatch(r"(?:([^/\s#]+/[^/\s#]+)#)?(\d+)", argv[1]) if len(argv) == 2 else None
+    if not m:
+        print("usage: merge-guard.py --check <owner>/<repo>#<n> | <n>", file=sys.stderr)
+        return 2
+    repo = m.group(1) or origin_repo(os.getcwd())
+    try:
+        reason, head = check_merge(repo, m.group(2), None, os.getcwd(), require_named=False)
+    except Unreadable as exc:
+        reason, head = f"refused: it cannot read the PR's head or comments, so it fails closed ({exc})", ""
+    except Exception as exc:  # noqa: BLE001 -- fail closed
+        reason, head = f"refused: the merge guard failed ({exc!r}), so it fails closed", ""
+    if reason:
+        print(f"merge-guard: {reason}.", file=sys.stderr)
+        return 1
+    print(head)
+    return 0
+
+
 def main() -> int:
+    if sys.argv[1:2] == ["--check"]:
+        return check_mode(sys.argv[1:])
     try:
         event = json.load(sys.stdin)
     except ValueError:
@@ -340,7 +465,7 @@ def main() -> int:
     try:
         reason = decide(event)
     except Unreadable as exc:
-        reason = (f"refused the merge: it cannot read the PR's head or statuses, so it fails closed ({exc}). "
+        reason = (f"refused the merge: it cannot read the PR's head or comments, so it fails closed ({exc}). "
                   "Retry once GitHub answers")
     except Exception as exc:  # noqa: BLE001 -- a guard bug must not wave a merge through, nor block other tools
         looks = tool != "Bash" or MERGE_HINT.search((event.get("tool_input") or {}).get("command") or "")
