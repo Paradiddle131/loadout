@@ -147,6 +147,7 @@ tr.hi td { font-weight: 600 }
 .row.need .kind { color: var(--needs) }
 .tag { font: 12px var(--mono); color: var(--muted); white-space: nowrap }
 .tag.open { color: var(--needs) }
+.tag.wrap { white-space: normal }
 .empty { color: var(--muted); font-size: 14px }
 @media (prefers-reduced-motion: no-preference) { .card:target { transition: box-shadow .2s } }
 </style>
@@ -162,6 +163,8 @@ tr.hi td { font-weight: 600 }
   A card's detail: an optional table, notes and links (no diffs: the code is on the forge; the tree shows where it went).
   tree nodes: { name, state: new | changed | same | more, note, count, children }.
   wrong[].status: open | still unknown | known | filed | fixed (the page lists them in that order).
+  landings[].group: sensitive | parked | held | unreviewed | merged (the page lists them in that order);
+  checked and unchecked come from the review verdict, never from the author's handoff.
 -->
 <script type="application/json" id="brief">
 {
@@ -170,7 +173,19 @@ tr.hi td { font-weight: 600 }
   "title": "Overnight brief",
   "window": "routine on at 22:00Z, brief at 08:00Z",
   "headline": "Example data: the exporter now writes Parquet, and one migration waits on your answer.",
-  "stats": [["wakes", "9"], ["issues worked", "6"], ["commits", "21"]],
+  "stats": [["wakes", "9"], ["PRs merged", "3"], ["issues worked", "6"]],
+  "landings": [
+    { "pr": 21, "issue": 13, "group": "sensitive", "line": "Customer names are hashed before the export writes them.",
+      "review": "sensitive, 4 reviewers, 2 cycles, 3 fixed, 1 filed",
+      "checked": ["A real day exported and scanned for names: none in clear.", "Every column that joins back to a person."],
+      "unchecked": ["The partner feed: no sample in reach."] },
+    { "pr": 23, "issue": 15, "group": "parked", "line": "The retry wrapper for the upload, sent back three times.",
+      "review": "standard, 2 reviewers, 3 cycles, 4 fixed",
+      "notes": ["Open: a retry after a partial write duplicates rows; two fixes moved the duplicate, neither removed it."] },
+    { "pr": 19, "issue": 11, "group": "merged", "line": "The exporter writes Parquet by default.",
+      "review": "standard, 2 reviewers, 1 cycle, 1 fixed", "checked": ["The round-trip test on a real day."], "unchecked": ["Readers other than pyarrow."] },
+    { "pr": 20, "issue": 12, "group": "merged", "line": "A `--csv` flag keeps the old output.", "review": "routine, 1 reviewer, 1 cycle" }
+  ],
   "epics": [
     {
       "n": 10, "title": "Map: move the exporter to Parquet",
@@ -240,7 +255,7 @@ tr.hi td { font-weight: 600 }
   // Backticks become code; nothing else is parsed, so copy stays plain.
   const txt = s => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>");
   const issueUrl = n => `${data.repoUrl}/issues/${n}`;
-  const STATE = { landed: "Landed", running: "In progress", needs: "Needs you", queued: "Not started" };
+  const STATE = { landed: "Merged", running: "In progress", needs: "Needs you", queued: "Not started" };
   const pip = st => `<span class="pip ${esc(st)}" role="img" aria-label="${esc(STATE[st] || st)}"></span>`;
   const chip = ([n, st, label]) =>
     `<a class="chip" href="${esc(issueUrl(n))}" title="${esc(label || "")}">${pip(st)}#${esc(n)}</a>`;
@@ -360,6 +375,34 @@ tr.hi td { font-weight: 600 }
         : `<p class="empty">Nothing waits on you.</p>`}
     </section>`;
 
-  app.innerHTML = header + map + tree + work + wrong + wakes + needs;
+  // Sensitive merges first, then parked items, then held and unreviewed ones, then the other merges.
+  const GROUPS = [["sensitive", "Merged at the sensitive tier"], ["parked", "Parked after three reviews"],
+    ["held", "Reviewed, held by the merge policy"], ["unreviewed", "Not reviewed: no reviewer ran"], ["merged", "Merged"]];
+  const prUrl = n => `${data.repoUrl}/pull/${n}`;
+  const checks = r => {
+    if (r.group === "parked" || r.group === "unreviewed") return "";
+    const list = (label, l) => `<p class="group-label">${label}</p>` + (l && l.length ? notes(l) : `<p class="empty">not recorded</p>`);
+    return list("Checked", r.checked) + list("Not checked", r.unchecked);
+  };
+  const landingRow = r => `
+    <div class="row${r.group === "sensitive" || r.group === "parked" ? " open" : ""}">
+      <div class="row-head"><span class="kind"><a href="${esc(prUrl(r.pr))}">#${esc(r.pr)}</a></span><span>${txt(r.line)}</span>
+        <span class="tag wrap">${esc(r.review || "no review")}</span></div>
+      <details><summary>${r.group === "parked" ? "Open findings" : r.group === "unreviewed" ? "Why" : "What was checked"}</summary>${checks(r)}${notes(r.notes)}
+        ${r.issue ? `<p class="links"><a href="${esc(issueUrl(r.issue))}">the issue, #${esc(r.issue)}</a></p>` : ""}</details>
+    </div>`;
+  const landingList = data.landings || [];
+  const landings = `
+    <section aria-labelledby="h-landed">
+      <h2 id="h-landed">What landed, and how it was reviewed</h2>
+      ${landingList.length ? `<p class="lede">${landingList.filter(r => r.group === "sensitive" || r.group === "merged").length} merged; sensitive merges and parked items first.</p>
+        <div class="rows">${GROUPS.map(([g, label]) => {
+          const rows = landingList.filter(r => r.group === g);
+          return rows.length ? `<p class="group-label">${label}</p>${rows.map(landingRow).join("")}` : "";
+        }).join("")}</div>`
+        : `<p class="empty">No agent PR in this window.</p>`}
+    </section>`;
+
+  app.innerHTML = header + landings + map + tree + work + wrong + wakes + needs;
 })();
 </script>
