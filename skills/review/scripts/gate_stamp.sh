@@ -1,33 +1,36 @@
 #!/usr/bin/env bash
-# Runs a repo's gates on the head commit and records the result there as a GitHub commit status, so a merge
+# Runs a repo's gates on a PR's head commit and records the result on the PR as a marker comment, so a merge
 # can be checked against a recorded result instead of a typed claim (cloud/hooks/merge-guard.py reads it).
 #
-# Usage: gate_stamp.sh [--context loadout/gates] [--dry-run] -- <command...>
+# Usage: gate_stamp.sh [--pr <n>] [--dry-run] -- <command...>
 #   e.g. gate_stamp.sh -- make check
+#   --pr defaults to the open PR whose head is the current branch; with none, open the draft PR first.
 #
-# 1. Refuses a dirty tree (tracked or untracked changes): the result must be of the commit it is recorded on.
-# 2. Refuses a head GitHub does not have (push first): a status can only go on a commit the remote holds.
+# 1. Refuses a dirty tree (tracked or untracked changes): the result must be of the commit it is recorded for.
+# 2. Refuses unless the PR's head on GitHub is this clone's HEAD (push first, or pull).
 # 3. Runs the command, its output shown as it runs.
 # 4. Refuses to record when the command moved HEAD or changed a tracked file: the result would not be the head's.
-# 5. Posts `success` (exit 0) or `failure` under the context on the head, described by the command and the last
-#    line of its output; prints a block a PR body can quote; exits with the command's exit code (2 when this
-#    script refused before running it, 3 when the command passed but its result could not be recorded).
+# 5. Posts `🤖 Gates: success|failure` with the gates marker naming the head (lib.sh has the format), the
+#    command, its exit code and the output's tail; reads the comment back and fails if it differs.
+# 6. Prints a block a PR body can quote; exits with the command's exit code (2 when this script refused before
+#    running it, 3 when the command passed but its record could not be posted).
 #
-# Honest limits: the status guards against forgetting, not against a dishonest author. The same account that
-# runs the gates posts it, and nothing stops that account posting `success` by hand. It says the command ran
-# green on this commit in this session; it says nothing about what the command covers.
+# Honest limits: the record guards against forgetting, not against a dishonest author. The same account that
+# runs the gates posts it, and nothing stops that account typing a marker by hand. It says the command ran on
+# this commit in this session; it says nothing about what the command covers.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-context=loadout/gates
+usage="usage: gate_stamp.sh [--pr <n>] [--dry-run] -- <command...>"
+pr=''
 while [ $# -gt 0 ]; do
   case "$1" in
-    --context) context=${2:?--context needs a value}; shift 2 ;;
+    --pr) pr=${2:-}; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --) shift; break ;;
-    *) echo "usage: gate_stamp.sh [--context loadout/gates] [--dry-run] -- <command...>" >&2; exit 2 ;;
+    *) echo "$usage" >&2; exit 2 ;;
   esac
 done
-[ $# -gt 0 ] || { echo "usage: gate_stamp.sh [--context loadout/gates] [--dry-run] -- <command...>" >&2; exit 2; }
+[ $# -gt 0 ] || { echo "$usage" >&2; exit 2; }
 # shellcheck source=lib.sh
 . "$here/lib.sh"
 
@@ -36,13 +39,17 @@ dirty=$(git status --porcelain --untracked-files=normal)
 [ -z "$dirty" ] || die "the tree has uncommitted changes, so the result would not be the head commit's: commit them, or set them aside with \`git stash push -u -m <tag>\`.
 $dirty"
 head=$(git rev-parse HEAD)
-remote_sha=$(gh_get "repos/$REPO/commits/$head" --jq '.sha' 2>/dev/null || true)
-[ "$remote_sha" = "$head" ] || die "GitHub has no commit $head in $REPO: push the branch first, then run the gates."
+[ -n "$pr" ] || pr=$(pr_for_branch)
+[ -n "$pr" ] || die "no open PR has this branch as its head: push it and open the draft PR first, or pass --pr <n>."
+[[ "$pr" =~ ^[0-9]+$ ]] || die "--pr is a PR number. $usage"
+pr_sha=$(pr_head "$pr")
+[ "$pr_sha" = "$head" ] || die "PR $pr's head on GitHub is $pr_sha, but this clone is at $head: push (or pull) so they match, then run the gates."
 
 printf -v shown ' %q' "$@"
 shown=${shown# }
-out=$(mktemp)
-trap 'rm -f "$out"' EXIT
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+out=$tmp/out
 set +e
 "$@" 2>&1 | tee "$out"
 code=${PIPESTATUS[0]}
@@ -57,21 +64,24 @@ $changed"
 summary=$(sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g; s/[[:space:]]+$//' "$out" | grep -v '^$' | tail -n 1 || true)
 state=failure
 [ "$code" = 0 ] && state=success
-rc=$code
-recorded="recorded as \`$context: $state\`"
-if ! post_status "$head" "$context" "$state" "$shown: ${summary:-no output}"; then
-  echo "gate_stamp: could not record $context on $head (see the error above): the result is NOT recorded." >&2
-  [ "$code" = 0 ] && rc=3
-  recorded="NOT recorded (\`$context: $state\` failed to post)"
-fi
+build_record --kind gates --sha "$head" --state "$state" --title "🤖 Gates: $state" \
+  --line "- Head commit: \`$head\`" --line "- Command: \`$shown\`" --line "- Exit code: $code" \
+  --line "- Last line: ${summary:-no output}" --file "$out" --details "Output (raw)" --tail >"$tmp/body.md"
 
-note=
-[ "$DRY_RUN" = 1 ] && note=' (dry run: not posted)'
+rc=$code
+recorded="recorded on PR $pr"
+if ! url=$(post_record "$pr" "$tmp/body.md"); then
+  echo "gate_stamp: the gates record on PR $pr was NOT posted (see the error above)." >&2
+  [ "$code" = 0 ] && rc=3
+  recorded="NOT recorded"
+fi
+[ "$DRY_RUN" = 1 ] && recorded="not posted (dry run)"
+
 fence='```'
 while grep -qF -- "$fence" "$out"; do fence="$fence\`"; done
 cat <<EOF
 
-Gates on $head, $recorded$note:
+Gates on $head: $state, $recorded${url:+ ($url)}:
 
 ${fence}text
 \$ $shown

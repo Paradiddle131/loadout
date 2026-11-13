@@ -3,12 +3,11 @@
 
 State lives in $STUB_DIR:
 - pr.json: what `repos/<o>/<r>/pulls/<n>` answers; pulls.json: what `pulls?...` answers.
-- known.txt: the commit shas GitHub "has" (one per line), for `repos/<o>/<r>/commits/<sha>`.
-- statuses.json: {sha: {context: state}}; status posts add to it, `commits/<sha>/status` reads it.
-- comment.txt: the last comment body posted; `issues/comments/<id>` reads it back.
+- comments.json: the PR's comments; a post appends one (author_association OWNER), and
+  `issues/<n>/comments?per_page=P&page=N` and `issues/comments/<id>` read them.
 - calls.jsonl: every call as {"method", "endpoint", "fields"}.
 STUB_FAIL=<text>: a call whose endpoint contains it fails the way gh does on an HTTP error.
-STUB_MANGLE=1: the comment read back differs from the one posted.
+STUB_MANGLE=1: a comment read back by id differs from the one posted.
 """
 
 from __future__ import annotations
@@ -41,6 +40,9 @@ while i < len(args):
     elif a in ("--jq", "-q"):
         jq = args[i + 1]
         i += 2
+    elif a == "--paginate":
+        sys.stderr.write("stub gh: --paginate is refused, as the cloud proxy refuses the links it follows\n")
+        sys.exit(1)
     else:
         ep = a
         i += 1
@@ -58,27 +60,23 @@ def load(name: str, default: object) -> object:
     return json.loads(p.read_text()) if p.exists() else default
 
 
-statuses = load("statuses.json", {})
-if method == "POST" and (m := re.search(r"/statuses/([0-9a-f]+)$", ep)):
-    statuses.setdefault(m.group(1), {})[fields["context"]] = fields["state"]
-    (d / "statuses.json").write_text(json.dumps(statuses))
-    out = {"state": fields["state"], "context": fields["context"]}
-elif method == "POST" and re.search(r"/issues/\d+/comments$", ep):
-    (d / "comment.txt").write_text(fields["body"])
+comments = load("comments.json", [])
+if method == "POST" and re.search(r"/issues/\d+/comments$", ep):
     n = ep.split("/")[-2]
-    out = {"id": 7, "html_url": f"https://github.com/example-owner/example-repo/pull/{n}#issuecomment-7"}
-elif method == "GET" and "/issues/comments/" in ep:
-    body = (d / "comment.txt").read_text()
-    out = {"id": 7, "body": body + ("\nedited" if os.environ.get("STUB_MANGLE") else "")}
-elif method == "GET" and (m := re.search(r"/commits/([0-9a-f]+)/status", ep)):
-    got = statuses.get(m.group(1), {})
-    out = {"sha": m.group(1), "statuses": [{"context": c, "state": s} for c, s in got.items()]}
-elif method == "GET" and (m := re.search(r"/commits/([0-9a-f]+)$", ep)):
-    known = (d / "known.txt").read_text().split() if (d / "known.txt").exists() else []
-    if m.group(1) not in known:
-        sys.stderr.write("gh: No commit found for SHA (HTTP 422)\n")
-        sys.exit(1)
-    out = {"sha": m.group(1)}
+    new = {"id": 1000 + len(comments), "body": fields["body"], "author_association": "OWNER",
+           "created_at": f"2000-01-01T00:{len(comments):02d}:00Z",
+           "html_url": f"https://github.com/example-owner/example-repo/pull/{n}#issuecomment-{1000 + len(comments)}"}
+    new["updated_at"] = new["created_at"]
+    comments.append(new)
+    (d / "comments.json").write_text(json.dumps(comments))
+    out: object = new
+elif method == "GET" and (m := re.search(r"/issues/comments/(\d+)$", ep)):
+    [c] = [c for c in comments if c["id"] == int(m.group(1))]
+    out = {**c, "body": c["body"] + ("\nedited" if os.environ.get("STUB_MANGLE") else "")}
+elif method == "GET" and re.search(r"/issues/\d+/comments\?", ep):
+    q = dict(kv.split("=", 1) for kv in ep.split("?", 1)[1].split("&"))
+    per, page = int(q.get("per_page", 30)), int(q.get("page", 1))
+    out = comments[(page - 1) * per: page * per]
 elif method == "GET" and "/pulls?" in ep:
     out = load("pulls.json", [])
 elif method == "GET" and re.search(r"/pulls/\d+$", ep):
