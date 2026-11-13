@@ -56,6 +56,7 @@ Work with them: they are not incidents to report or file issues about.
 
 **Tools and turns**
 - A foreground Bash call times out at 10 minutes: start long suites with `run_in_background` and wait for the completion notice; foreground `sleep` is blocked (use Monitor with an until-loop).
+- A `run_in_background` job stops at its `timeout`, at most 2 hours, and the runner asks that one stopped at the longest limit not be restarted: split a longer job into resumable chunks under 2 hours, each started on its own.
 - Start servers with `run_in_background`; a server started in a plain Bash call outlives the tool and keeps holding its port.
 - Run subagents (reviewers included) in the foreground, or don't end the turn while one runs: the platform's stop hook sees uncommitted work and forces a commit before the review comes back.
 - Timestamps you write come from `date -u +%FT%H:%MZ` at that moment; never estimate them.
