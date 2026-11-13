@@ -13,7 +13,7 @@ What the blind agent gets right, the collection now teaches; each **miss** is ei
 The work is done when the reviewer has the fixed work, the collection has the rules, and every miss is fixed or filed.
 
 It needs a subagent tool (two fresh agents) and a way to show the work (screenshots, a preview link).
-Run every subagent in the foreground, or wait for its report before acting: nothing it reports counts until you have checked it.
+Isolate, set up and check each subagent by the `delegating` skill (its two briefs stay as [BRIEFS.md](BRIEFS.md) writes them); run it in the foreground, or wait for its report before acting.
 
 ## Steps
 
