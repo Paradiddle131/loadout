@@ -8,6 +8,7 @@ State lives in $STUB_DIR:
 - calls.jsonl: every call as {"method", "endpoint", "fields"}.
 STUB_FAIL=<text>: a call whose endpoint contains it fails the way gh does on an HTTP error.
 STUB_MANGLE=1: a comment read back by id differs from the one posted.
+STUB_SLEEP=<seconds>: every call waits that long first (a slow GitHub).
 """
 
 from __future__ import annotations
@@ -47,6 +48,10 @@ while i < len(args):
         ep = a
         i += 1
 method = method or ("POST" if fields else "GET")
+if os.environ.get("STUB_SLEEP"):
+    import time
+
+    time.sleep(float(os.environ["STUB_SLEEP"]))
 with (d / "calls.jsonl").open("a") as log:
     log.write(json.dumps({"method": method, "endpoint": ep, "fields": fields}) + "\n")
 fail = os.environ.get("STUB_FAIL")

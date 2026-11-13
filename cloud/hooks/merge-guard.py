@@ -15,14 +15,17 @@ guard checked (`expectedHeadSha`, `--match-head-commit`, `-f sha=`), so GitHub i
 lands between this check and the merge.
 
 Caught: the GitHub MCP merge tool (any server's `merge_pull_request`, owner, repo and number from its
-input); `gh pr merge` (a number, URL or branch; `-R`, `GH_REPO`, or the origin of the directory it runs
-in); `gh api` writes to `repos/<o>/<r>/pulls/<n>/merge` (`{owner}`/`{repo}` placeholders included);
-and the same through `bash -c`, `eval`, a heredoc fed to a shell, `cd <dir> &&`, or wrappers such as
-`timeout`. Refused outright: auto-merge (`gh pr merge --auto`, the MCP `enable_pr_auto_merge`), which
-merges later at a head nobody checked; GraphQL merge mutations and curl/wget writes to a merge URL,
-which the guard does not parse: use the MCP tool or `gh`. Also refused: `--no-verify` (or `-n`) on
-`git commit`, `--no-verify` on `git push`, and `-c core.hooksPath=` on either, typed by the agent: fix
-what the hook reports instead.
+input); `gh pr merge` (a number, URL or branch; `-R`/`--repo` anywhere in the command, `GH_REPO`, or the
+origin of the directory it runs in); `gh api` writes to `repos/<o>/<r>/pulls/<n>/merge` (`-XPUT`,
+`--method=PUT`, `{owner}`/`{repo}` placeholders); and the same behind shell keywords (`if … then`, `do`,
+`!`, `{`), through `bash -c` (`-lc`, `-c --` too), `eval`, a heredoc fed to a shell, `cd <dir> &&`, or
+wrappers such as `timeout`. Refused outright: auto-merge (`gh pr merge --auto`, the MCP
+`enable_pr_auto_merge`), which merges later at a head nobody checked; a GraphQL call that names a merge
+mutation, or whose query the guard cannot read (`-F query=@file`, `--input`, curl `-d @file`); and
+curl/wget writes to a merge URL: use the MCP tool or `gh`. Also refused, typed by the agent: `git commit`
+or `git push` with `--no-verify` (or an abbreviation git accepts, `--no-veri`), `git commit -n`, and
+core.hooksPath overridden (`-c`, `--config-env`, `GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_PARAMETERS`): fix what
+the hook reports instead.
 
 Not caught (out of scope): `git push` of a merge commit to the default branch, a merge through the web
 UI, code calling the API from a script, or a command built at run time (`x=merge; gh pr $x`). Hooks see
@@ -32,7 +35,9 @@ only the agent's tool calls, never commands a hook runs, so the save-work hook's
 Honest limits: the records guard against forgetting, not against a dishonest author; the same account
 posts them and could type a marker by hand. The guard fails closed on a merge: when it cannot read the PR
 or its comments, or the guard itself fails on a command that looks like a merge, it refuses and says why.
-Any other command passes untouched and costs no network call.
+All the calls of one decision share a 30 s budget, under the hook's 45 s timeout (a timed-out hook does not
+block), and a merge whose reads run past it is refused. Any other command passes untouched and costs no
+network call.
 
 Hook mode (no arguments): reads the hook's JSON on stdin; prints a deny decision on stdout or nothing;
 always exits 0. Check mode, for scripts that merge: `merge-guard.py --check <owner>/<repo>#<n>` (or `<n>`,
@@ -48,13 +53,14 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 # The shell parsing is the GCP guard's (cloud/gcp/guard.py). Should it fail to load, every call that looks like
 # a merge is refused (below) and every other call passes.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "gcp"))
 try:
-    from guard import SHELLS, program, segments, split_heredocs, tokenize
+    from guard import KEYWORDS, SHELLS, WRAPPERS, program, segments, split_heredocs, tokenize
 except Exception as _exc:  # noqa: BLE001
     IMPORT_ERROR: Exception | None = _exc
 else:
@@ -72,7 +78,14 @@ FIELDS = {"gates": {"sha", "state"}, "review": {"sha", "state", "tier", "reviewe
 RANK = {"routine": 0, "standard": 1, "sensitive": 2}
 TIER_SH = Path(__file__).resolve().parents[2] / "skills/review/scripts/tier.sh"
 MAX_PAGES = 30
-TIMEOUT = 10
+TIMEOUT = 10  # any one call
+# All calls of one decision together stay inside this budget, well under the hook's 45 s timeout: a hook that
+# times out does not block the tool call, so the guard refuses as unreadable before that can happen.
+try:  # tests shrink it; nothing raises it
+    BUDGET = min(30.0, float(os.environ.get("MERGE_GUARD_BUDGET_S") or 30))
+except ValueError:
+    BUDGET = 30.0
+_deadline = [time.monotonic() + BUDGET]
 MERGE_ENDPOINT = re.compile(r"(?:^|/)repos/([^/\s]+)/([^/\s]+)/pulls/(\d+)/merge/?(?:\?|$)")
 MERGE_URL = re.compile(r"api\.github\.com/repos/[^/\s]+/[^/\s]+/pulls/\d+/merge\b")
 MERGE_MUTATION = re.compile(r"\b(mergePullRequest|enablePullRequestAutoMerge)\b")
@@ -86,6 +99,7 @@ GH_API_VALUE_FLAGS = {"-X", "--method", "-f", "--raw-field", "-F", "--field", "-
 GH_MERGE_VALUE_FLAGS = {"-b", "--body", "-F", "--body-file", "-t", "--subject", "-A",
                         "--author-email", "-R", "--repo", "--match-head-commit"}
 COMMIT_VALUE_SHORT = set("mFcCt")  # short options of `git commit` that take a value
+COMMIT_ATTACHED = set("uS")  # ones whose optional value is attached (`-uno`)
 GIT_GLOBAL_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
 
 AUTO_MERGE = ("auto-merge merges later, at a head nobody checked; merge by hand once both records are "
@@ -98,10 +112,18 @@ class Unreadable(Exception):
     """GitHub could not be read: the merge is refused (fail closed)."""
 
 
+def left() -> float:
+    """Seconds left of this decision's budget, for the next call's timeout."""
+    return min(TIMEOUT, _deadline[0] - time.monotonic())
+
+
 def gh_json(endpoint: str) -> object:
+    budget = left()
+    if budget < 1:
+        raise Unreadable(f"its {BUDGET:.0f} s budget for reading GitHub ran out before `gh api {endpoint}`")
     try:
         done = subprocess.run(["gh", "api", endpoint], capture_output=True, text=True,
-                              timeout=TIMEOUT, check=False)
+                              timeout=budget, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise Unreadable(f"`gh api {endpoint}` did not run ({exc})") from exc
     if done.returncode != 0:
@@ -116,7 +138,7 @@ def gh_json(endpoint: str) -> object:
 def origin_repo(cwd: str) -> str | None:
     try:
         url = subprocess.run(["git", "-C", cwd, "remote", "get-url", "origin"], capture_output=True,
-                             text=True, timeout=TIMEOUT, check=False).stdout.strip()
+                             text=True, timeout=max(0.1, left()), check=False).stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
         return None
     m = re.search(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?/*$", url)
@@ -174,14 +196,14 @@ def paths_tier(repo: str, head: str, cwd: str) -> str | None:
     """The tier tier.sh gives the head's paths, in a local clone of `repo` holding it; None when it can't."""
     try:
         top = subprocess.run(["git", "-C", cwd, "rev-parse", "--show-toplevel"], capture_output=True,
-                             text=True, timeout=TIMEOUT, check=False).stdout.strip()
+                             text=True, timeout=max(0.1, left()), check=False).stdout.strip()
         if not top or origin_repo(top) != repo or not TIER_SH.is_file():
             return None
         if subprocess.run(["git", "-C", top, "cat-file", "-e", f"{head}^{{commit}}"], capture_output=True,
-                          timeout=TIMEOUT, check=False).returncode:
+                          timeout=max(0.1, left()), check=False).returncode:
             return None
         done = subprocess.run(["bash", str(TIER_SH), "--head", head], cwd=top, capture_output=True,
-                              text=True, timeout=TIMEOUT, check=False)
+                              text=True, timeout=max(0.1, left()), check=False)
     except (OSError, subprocess.TimeoutExpired):
         return None
     tier = done.stdout.split("\n", 1)[0].strip()
@@ -254,6 +276,39 @@ def flag_value(args: list[str], names: set[str]) -> str | None:
         for n in names:
             if n.startswith("--") and a.startswith(n + "="):
                 return a.split("=", 1)[1]
+            if len(n) == 2 and not a.startswith("--") and a.startswith(n) and len(a) > 2:
+                return a[2:]  # an attached short value: `-XPUT`, `-Ro/r`
+    return None
+
+
+def take_repo_flags(args: list[str]) -> tuple[list[str], str | None]:
+    """The words without gh's `-R`/`--repo` (which gh takes anywhere, even before the subcommand), and its value."""
+    out, repo, i = [], None, 0
+    while i < len(args):
+        a = args[i]
+        if a in ("-R", "--repo") and i + 1 < len(args):
+            repo, i = args[i + 1], i + 2
+            continue
+        if a.startswith("--repo="):
+            repo = a.split("=", 1)[1]
+        elif a.startswith("-R") and len(a) > 2:
+            repo = a[2:]
+        else:
+            out.append(a)
+        i += 1
+    return out, repo
+
+
+def shell_command(args: list[str]) -> str | None:
+    """The command string of `bash -c '...'`, with `-c` inside a cluster (`-lc`, `-ec`) and after `--` too."""
+    for i, a in enumerate(args):
+        if re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", a):
+            rest = args[i + 1:]
+            if rest[:1] == ["--"]:
+                rest = rest[1:]
+            return rest[0] if rest else None
+        if not a.startswith("-"):
+            return None  # a script name: what follows are its arguments
     return None
 
 
@@ -274,13 +329,14 @@ def gh_repo(seg_env: dict[str, str], cwd: str) -> str | None:
 
 
 def check_gh(args: list[str], env: dict[str, str], cwd: str) -> str:
+    args, repo_flag = take_repo_flags(args)
     if args[:2] == ["pr", "merge"]:
         rest = args[2:]
         if "--auto" in rest:
             return "refused `gh pr merge --auto`: " + AUTO_MERGE
         if "--disable-auto" in rest:
             return ""
-        repo = flag_value(rest, {"-R", "--repo"}) or gh_repo(env, cwd)
+        repo = repo_flag or gh_repo(env, cwd)
         pos = positionals(rest, GH_MERGE_VALUE_FLAGS)
         ref = pos[0] if pos else None
         if ref:
@@ -300,6 +356,11 @@ def check_gh(args: list[str], env: dict[str, str], cwd: str) -> str:
             if any(MERGE_MUTATION.search(f) for f in fields):
                 return ("refused a GraphQL merge mutation: the guard checks merges through REST only; use "
                         "the MCP merge tool or `gh api -X PUT repos/<o>/<r>/pulls/<n>/merge`")
+            hidden = "--input" in rest or any(
+                a in ("-F", "--field") and i + 1 < len(rest) and "=@" in rest[i + 1] for i, a in enumerate(rest))
+            if hidden:
+                return ("refused a GraphQL call whose query comes from a file, which the guard cannot check for a "
+                        "merge mutation: pass the query inline with `-f query='...'`")
             return ""
         m = MERGE_ENDPOINT.search(endpoint)
         if not m:
@@ -323,26 +384,42 @@ def check_gh(args: list[str], env: dict[str, str], cwd: str) -> str:
 def current_branch(cwd: str) -> str | None:
     try:
         out = subprocess.run(["git", "-C", cwd, "symbolic-ref", "--short", "-q", "HEAD"],
-                             capture_output=True, text=True, timeout=TIMEOUT, check=False).stdout.strip()
+                             capture_output=True, text=True, timeout=max(0.1, left()), check=False).stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
         return None
     return out or None
 
 
-def check_git(args: list[str]) -> str:
+def no_verify(a: str) -> bool:
+    """`--no-verify`, or an abbreviation git takes for it (`--no-veri`; `--no-ver` could be `--no-verbose`)."""
+    return a == "--no-verify" or (len(a) >= 9 and "--no-verify".startswith(a))
+
+
+def hooks_path(text: str) -> bool:
+    return text.strip().lower().startswith("core.hookspath")
+
+
+def check_git(args: list[str], env: dict[str, str]) -> str:
     i, hooks_off = 0, False
     while i < len(args) and args[i].startswith("-"):
         a = args[i]
         if a == "-c" and i + 1 < len(args):
-            hooks_off |= args[i + 1].lower().startswith("core.hookspath")
+            hooks_off |= hooks_path(args[i + 1])
         elif a.startswith("-c") and len(a) > 2:
-            hooks_off |= a[2:].lower().startswith("core.hookspath")
+            hooks_off |= hooks_path(a[2:])
+        elif a == "--config-env" and i + 1 < len(args):
+            hooks_off |= hooks_path(args[i + 1])
+        elif a.startswith("--config-env="):
+            hooks_off |= hooks_path(a.split("=", 1)[1])
         i += 2 if a in GIT_GLOBAL_VALUE else 1
     if i >= len(args) or args[i] not in ("commit", "push"):
         return ""
     sub, rest = args[i], args[i + 1:]
+    # Config from the environment: GIT_CONFIG_COUNT with GIT_CONFIG_KEY_<n>, or GIT_CONFIG_PARAMETERS.
+    hooks_off |= any(re.fullmatch(r"GIT_CONFIG_KEY_\d+", k) and hooks_path(v) for k, v in env.items())
+    hooks_off |= "core.hookspath" in env.get("GIT_CONFIG_PARAMETERS", "").lower()
     if hooks_off:
-        return f"refused `git -c core.hooksPath=... {sub}`: " + NO_VERIFY
+        return f"refused `git {sub}` with core.hooksPath overridden: " + NO_VERIFY
     skip = False
     for a in rest:
         if skip:
@@ -350,8 +427,8 @@ def check_git(args: list[str]) -> str:
             continue
         if a == "--":
             break
-        if a == "--no-verify":
-            return f"refused `git {sub} --no-verify`: " + NO_VERIFY
+        if no_verify(a):
+            return f"refused `git {sub} {a}` (`--no-verify`): " + NO_VERIFY
         if sub == "commit" and a.startswith("-") and not a.startswith("--"):
             for ch in a[1:]:
                 if ch == "n":
@@ -359,6 +436,8 @@ def check_git(args: list[str]) -> str:
                 if ch in COMMIT_VALUE_SHORT:
                     skip = a.endswith(ch)  # `-m msg`: the next word is the value
                     break
+                if ch in COMMIT_ATTACHED:
+                    break  # `-uno`, `-Skey`: the rest of the word is the value
     return ""
 
 
@@ -369,16 +448,34 @@ def check_http(args: list[str]) -> str:
     if MERGE_URL.search(joined) and (method not in ("", "GET", "HEAD") or sends):
         return ("refused a merge sent with curl or wget, which this guard does not check: use the MCP merge "
                 "tool or `gh`, after both records are on the head")
-    if "api.github.com/graphql" in joined and MERGE_MUTATION.search(joined):
-        return ("refused a GraphQL merge mutation: the guard checks merges through REST only; use the MCP merge "
-                "tool or `gh api -X PUT repos/<o>/<r>/pulls/<n>/merge`")
+    if "api.github.com/graphql" in joined:
+        if MERGE_MUTATION.search(joined):
+            return ("refused a GraphQL merge mutation: the guard checks merges through REST only; use the MCP "
+                    "merge tool or `gh api -X PUT repos/<o>/<r>/pulls/<n>/merge`")
+        if "@" in joined.replace("api.github.com/graphql", "") and sends:
+            return ("refused a GraphQL call whose body comes from a file, which the guard cannot check for a "
+                    "merge mutation: send the query inline")
     return ""
 
 
-def verdict(command: str, cwd: str, depth: int = 0) -> str:
+def assignments(seg: list[str]) -> dict[str, str]:
+    """The `NAME=value` words a segment sets for its command, past wrappers such as `env` and `timeout`."""
+    env = {}
+    for t in seg:
+        m = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", t, re.DOTALL)
+        if m:
+            env[m.group(1)] = m.group(2)
+        elif not (t in KEYWORDS or os.path.basename(t) in WRAPPERS or t.startswith("-") or t.isdigit()
+                  or re.fullmatch(r"\d+[smhd]?", t)):
+            break
+    return env
+
+
+def verdict(command: str, cwd: str, depth: int = 0, exported: dict[str, str] | None = None) -> str:
+    exported = {} if exported is None else exported
     command, bodies = split_heredocs(command)
     for body in bodies if depth < 3 else []:
-        reason = verdict(body, cwd, depth + 1)
+        reason = verdict(body, cwd, depth + 1, dict(exported))
         if reason:
             return reason
     tokens = tokenize(command)
@@ -386,16 +483,15 @@ def verdict(command: str, cwd: str, depth: int = 0) -> str:
         return ("refused a command this guard cannot parse (unbalanced quotes) that looks like a merge or a "
                 "hook bypass" if MERGE_HINT.search(command) else "")
     for seg in segments(tokens):
-        env = {}
-        for t in seg:
-            m = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", t)
-            if not m:
-                break
-            env[m.group(1)] = m.group(2)
         prog = program(seg)
         if not prog:
+            exported.update(assignments(seg))  # `X=1` alone sets a shell variable a later `export X` sends
             continue
         name, args = prog
+        env = {**exported, **assignments(seg)}
+        if name == "export":
+            exported.update(assignments(args))
+            continue
         if name in ("cd", "pushd") and args:
             cwd = os.path.normpath(os.path.join(cwd, os.path.expanduser(args[0])))
             continue
@@ -403,32 +499,43 @@ def verdict(command: str, cwd: str, depth: int = 0) -> str:
         if name == "gh":
             reason = check_gh(args, env, cwd)
         elif name == "git":
-            reason = check_git(args)
+            reason = check_git(args, env)
         elif name in ("curl", "wget", "http"):
             reason = check_http(args)
-        elif depth < 3 and (name in SHELLS and "-c" in args or name == "eval"):
-            inner = (args[args.index("-c") + 1] if name in SHELLS and args.index("-c") + 1 < len(args)
-                     else " ".join(args))
-            reason = verdict(inner, cwd, depth + 1)
+        elif depth < 3 and name in SHELLS:
+            inner = shell_command(args)
+            reason = verdict(inner, cwd, depth + 1, dict(env)) if inner is not None else ""
+        elif depth < 3 and name == "eval":
+            reason = verdict(" ".join(args), cwd, depth + 1, dict(env))
         if reason:
             return reason
     return ""
 
 
+def tool_input(event: dict) -> dict:
+    data = event.get("tool_input")
+    return data if isinstance(data, dict) else {}
+
+
 def decide(event: dict) -> str:
+    _deadline[0] = time.monotonic() + BUDGET
     tool = event.get("tool_name") or ""
-    data = event.get("tool_input") or {}
+    data = tool_input(event)
     if IMPORT_ERROR is not None and tool == "Bash":
         raise IMPORT_ERROR
     if re.fullmatch(r"mcp__.+__enable_pr_auto_merge", tool):
         return "refused enabling auto-merge: " + AUTO_MERGE
     if re.fullmatch(r"mcp__.+__merge_pull_request", tool):
         owner, name, number = data.get("owner"), data.get("repo"), data.get("pullNumber")
-        repo = f"{owner}/{name}" if owner and name else None
-        ref = str(int(number)) if isinstance(number, (int, float)) or str(number or "").isdigit() else None
-        return check_merge(repo, ref, data.get("expectedHeadSha") or None, event.get("cwd") or os.getcwd())[0]
+        repo = f"{owner}/{name}" if isinstance(owner, str) and isinstance(name, str) and owner and name else None
+        ref = (str(int(number)) if isinstance(number, (int, float)) and not isinstance(number, bool)
+               else number if isinstance(number, str) and number.isdigit() else None)
+        expected = data.get("expectedHeadSha")
+        return check_merge(repo, ref, expected if isinstance(expected, str) and expected else None,
+                           event.get("cwd") or os.getcwd())[0]
     if tool == "Bash":
-        return verdict(data.get("command") or "", event.get("cwd") or os.getcwd())
+        command = data.get("command")
+        return verdict(command if isinstance(command, str) else "", event.get("cwd") or os.getcwd())
     return ""
 
 
@@ -438,6 +545,7 @@ def check_mode(argv: list[str]) -> int:
     if not m:
         print("usage: merge-guard.py --check <owner>/<repo>#<n> | <n>", file=sys.stderr)
         return 2
+    _deadline[0] = time.monotonic() + BUDGET
     repo = m.group(1) or origin_repo(os.getcwd())
     try:
         reason, head = check_merge(repo, m.group(2), None, os.getcwd(), require_named=False)
@@ -462,13 +570,16 @@ def main() -> int:
     if not isinstance(event, dict):
         return 0
     tool = event.get("tool_name") or ""
+    if not isinstance(event.get("cwd"), str):
+        event["cwd"] = os.getcwd()
     try:
         reason = decide(event)
     except Unreadable as exc:
         reason = (f"refused the merge: it cannot read the PR's head or comments, so it fails closed ({exc}). "
                   "Retry once GitHub answers")
     except Exception as exc:  # noqa: BLE001 -- a guard bug must not wave a merge through, nor block other tools
-        looks = tool != "Bash" or MERGE_HINT.search((event.get("tool_input") or {}).get("command") or "")
+        command = tool_input(event).get("command")
+        looks = tool != "Bash" or MERGE_HINT.search(command if isinstance(command, str) else "")
         reason = f"refused: the merge guard failed on this call ({exc!r}), so it fails closed" if looks else ""
     if reason:
         print(json.dumps({"hookSpecificOutput": {

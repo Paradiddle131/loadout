@@ -396,3 +396,119 @@ def test_check_mode_refuses_with_the_reason(fx: Fx, clone: Path) -> None:
 def test_check_mode_usage(fx: Fx, clone: Path) -> None:
     assert check(fx, clone, "--check").returncode == 2
     assert check(fx, clone, "--check", "x#y").returncode == 2
+
+
+# Forms a fresh review found the guard let through, each now checked.
+
+HIDDEN_MERGES = [
+    "if gh pr checks 12; then gh pr merge 12 --squash; fi",
+    "for p in 12; do gh pr merge 12; done",
+    "while true; do gh pr merge 12; break; done",
+    "gh pr checks 12 && { gh pr merge 12; }",
+    "! gh pr merge 12",
+    "( gh pr merge 12 )",
+    "bash -lc 'gh pr merge 12'",
+    "bash -ec 'gh pr merge 12'",
+    "bash -c -- 'gh pr merge 12'",
+    "sh -xc 'gh pr merge 12'",
+    f"gh -R {REPO} pr merge 12",
+    f"gh --repo {REPO} pr merge 12",
+    f"gh --repo={REPO} pr merge 12",
+    f"gh pr -R {REPO} merge 12",
+    f"gh -R{REPO} pr merge 12",
+    f"gh api -XPUT repos/{REPO}/pulls/12/merge",
+    f"gh api --method=PUT repos/{REPO}/pulls/12/merge",
+]
+
+
+@pytest.mark.parametrize("command", HIDDEN_MERGES)
+def test_merges_behind_keywords_flags_and_attached_values_are_checked(fx: Fx, clone: Path,
+                                                                      command: str) -> None:
+    fx.comments(comment(record("gates")))
+    reason = bash(fx, command, clone)
+    assert reason and "no review record" in reason, command
+
+
+def test_a_repo_flag_before_the_subcommand_names_the_repo(fx: Fx, tmp_path: Path) -> None:
+    nowhere = tmp_path / "nowhere"  # no clone here: the repo can only come from the flag
+    nowhere.mkdir()
+    fx.comments(comment(record("gates")))
+    reason = bash(fx, f"gh -R {REPO} pr merge 12", nowhere)
+    assert reason and f"PR 12 of {REPO}" in reason
+
+
+@pytest.mark.parametrize("command", [
+    f"gh -R {REPO} pr merge 12 --auto",
+    f"gh --repo={REPO} pr merge --auto 12",
+    "if true; then gh pr merge 12 --auto; fi",
+])
+def test_auto_merge_behind_a_repo_flag_or_keyword_is_refused(fx: Fx, clone: Path, command: str) -> None:
+    reason = bash(fx, command, clone)
+    assert reason and "auto-merge" in reason
+
+
+@pytest.mark.parametrize("command", [
+    f"curl -XPUT https://api.github.com/repos/{REPO}/pulls/12/merge",
+    f"curl --request=PUT https://api.github.com/repos/{REPO}/pulls/12/merge",
+    "gh api graphql -F query=@merge.graphql",
+    "gh api graphql --input body.json",
+    "curl -d @q.json https://api.github.com/graphql",
+])
+def test_merges_the_guard_cannot_read_are_refused(fx: Fx, clone: Path, command: str) -> None:
+    assert bash(fx, command, clone), command
+
+
+def test_an_inline_graphql_read_passes(fx: Fx, clone: Path) -> None:
+    assert bash(fx, "gh api graphql -f query='{ viewer { login } }'", clone) is None
+
+
+@pytest.mark.parametrize("command", [
+    "git commit --no-veri -m x",
+    "git push --no-verif origin feature",
+    "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git commit -m x",
+    "env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=CORE.HOOKSPATH GIT_CONFIG_VALUE_0=/x git push",
+    "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/x; git commit -m x",
+    "GIT_CONFIG_PARAMETERS=\"'core.hooksPath'='/x'\" git commit -m x",
+    "git --config-env=core.hooksPath=EMPTY commit -m x",
+    "git -c Core.HooksPath=/x push",
+    "bash -lc 'git commit -n -m x'",
+    "if true; then git commit --no-verify -m x; fi",
+])
+def test_more_hook_bypasses_are_refused(fx: Fx, clone: Path, command: str) -> None:
+    reason = bash(fx, command, clone)
+    assert reason and "fix what it names" in reason, command
+
+
+@pytest.mark.parametrize("command", [
+    "git commit -uno -m x",
+    "git commit -Skey -m x",
+    "git commit --no-verbose -m x",
+    "git push --no-ver",  # ambiguous in git (`--no-verbose`), so git itself refuses it
+])
+def test_options_that_only_look_like_no_verify_pass(fx: Fx, clone: Path, command: str) -> None:
+    assert bash(fx, command, clone) is None, command
+
+
+def test_a_slow_github_runs_out_of_budget_and_refuses(fx: Fx, clone: Path) -> None:
+    import time
+
+    fx.comments(*[comment(f"note {i}") for i in range(250)], comment(record("gates")), comment(record("review")))
+    start = time.monotonic()
+    reason = run(fx, {"tool_name": "mcp__github__merge_pull_request",
+                      "tool_input": {"owner": "example-owner", "repo": "example-repo", "pullNumber": 12,
+                                     "expectedHeadSha": HEAD}}, clone,
+                 STUB_SLEEP="0.7", MERGE_GUARD_BUDGET_S="2")
+    assert time.monotonic() - start < 6
+    assert reason and "budget" in reason and "fails closed" in reason
+
+
+@pytest.mark.parametrize("data", ["gh pr merge 12", ["x"], 7, None])
+def test_a_malformed_tool_input_passes_an_ordinary_call(fx: Fx, clone: Path, data: object) -> None:
+    assert run(fx, {"tool_name": "Bash", "tool_input": data}, clone) is None
+    assert run(fx, {"tool_name": "Read", "tool_input": data}, clone) is None
+
+
+def test_a_malformed_merge_tool_input_is_refused(fx: Fx, clone: Path) -> None:
+    assert run(fx, {"tool_name": "mcp__github__merge_pull_request", "tool_input": "12"}, clone)
+    assert run(fx, {"tool_name": "mcp__github__merge_pull_request",
+                    "tool_input": {"owner": ["x"], "repo": 3, "pullNumber": True}}, clone)
