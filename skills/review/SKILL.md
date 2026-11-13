@@ -22,9 +22,9 @@ The author of a change fixes it and never reviews it; with no fresh-context suba
 
 ## 2. Stamp the gates
 
-- With the default branch merged in, a clean tree and the head pushed, run `$R/scripts/gate_stamp.sh`: it runs the repo's fast gates on that head and records the commit status `loadout/gates`.
+- With the default branch merged in, a clean tree and the head pushed, run `$R/scripts/gate_stamp.sh [--pr <n>] -- <the repo's fast gates>`: it runs them on that head and posts the `🤖 Gates` record, a comment on the item's PR naming the head (open the draft PR first).
 - Red: back to the author, as a cycle (step 5); no reviewer starts on red.
-- Done when `loadout/gates` is `success` on the head; a `routine` change goes to step 6.
+- Done when the gates record is `success` on the head; a `routine` change goes to step 6.
 
 ## 3. Find
 
@@ -63,18 +63,18 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 
 - If the default branch moved, merge it into the PR branch, push, and re-stamp (step 2); this counts as a cycle.
 - A clean merge needs no new review; any other new commit goes through steps 3 to 5 on the new diff.
-- Done when `loadout/gates` is `success` on the PR's head.
+- Done when the gates record is `success` on the PR's head.
 
 ## 7. Record the verdict
 
 - Run `$R/scripts/verdict.sh --reviewed <sha>` (its header gives the other arguments) with the verifier's output unedited; for `routine`, `verdict.sh --tier routine`, which the change's own author may run.
 - It recomputes the tier and refuses a lower one than the paths give, and refuses unless the PR head equals the reviewed commit or differs from it only by a clean merge of the default branch.
-- It posts the output as a PR comment that starts with `🤖` and names the reviewed commit and the head, and records `loadout/review` on the head: `success` only with no open `must-fix`.
-- Done when both statuses are `success` on the PR's head commit.
+- It posts the output as a PR comment that starts with `🤖` and names the reviewed commit and the head, as the `🤖 Review` record: `success` only with no open `must-fix`.
+- Done when both records are `success` on the PR's head commit.
 
 ## 8. Merge
 
-- Merge when both statuses are `success` on the PR's head commit; a hook refuses it otherwise.
+- Merge when both records are `success` on the PR's head commit, naming that head in the merge; on cloud a hook refuses it otherwise (`cloud/hooks/merge-guard.py`, whose `--check <owner>/<repo>#<n>` a script can call).
 - Where the owner keeps the merge (a repo's own rule, an autopilot profile's merge policy, or the owner's word), skip the merge and list the PR as ready; step 9 still runs.
 
 ## 9. File and brief

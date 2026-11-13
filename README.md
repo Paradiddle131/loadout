@@ -6,7 +6,7 @@ Agent skills, ways of working and standing rules, packaged as a [Claude Code](ht
 
 | Plugin | Holds | For |
 |---|---|---|
-| `loadout` | `pr`, `issue`, `draw-architecture`, `report-kit`, `grilling`, `writing-for-agents`, `concern-to-rule` | any machine |
+| `loadout` | `pr`, `issue`, `review`, `delegating`, `experiment-preflight`, `draw-architecture`, `report-kit`, `grilling`, `writing-for-agents`, `concern-to-rule`; review agents `correctness-reviewer`, `claims-auditor`, `guardrail-reviewer`, `leak-hunter`, `control-prober`, `finding-verifier`, `handoff-auditor` | any machine |
 | `cloud` | `autopilot`, `autopilot-brief`, `image-cache`, and session hooks | [Claude Code on the web](cloud/README.md) |
 
 - [`RULES.md`](RULES.md): standing rules for an agent in any repo.

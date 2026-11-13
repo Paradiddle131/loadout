@@ -9,7 +9,7 @@ Two tiers; no third.
 - **Default:** a current pick (a tool, a version, a pattern). The agent changes it in the PR that needs the change, with its reason in the architecture document ([`finished.md`](finished.md#decisions)).
 - Guardrails live in `CLAUDE.md § Guardrails`, one line each, under a short bold name. Defaults are the architecture document's choices; `CLAUDE.md` holds no list of them.
 - A guardrail states something checkable and its reason in one clause; a wish ("keep it simple") is a default or nothing.
-- A merged PR is the owner's acceptance; no `[owner]` or `[proposed]` tags, no status field.
+- A merged PR is the acceptance (the owner's merge, or an agent's after review for a choice it may take; a choice only the owner makes waits as a packet); no `[owner]` or `[proposed]` tags, no status field.
 
 ## Changing a guardrail
 

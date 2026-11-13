@@ -30,6 +30,8 @@ Work with them: they are not incidents to report or file issues about.
 - Agent writes go out under the owner's account: GitHub notifies nobody, and a bot comment starts with `🤖` so it can be told from the owner's.
 - Write only to repos of the owner's account: never file an issue, comment or PR on a repo outside it (an upstream bug goes into the owner's issue as a draft they may file).
 - Only repos attached to the session are reachable; tag pushes and branch deletions are refused.
+- Commit statuses are write-refused by the proxy (403 on `POST repos/<o>/<r>/statuses/<sha>`; reads work): gates and review records are PR comments with a marker (the `review` skill's `gate_stamp.sh` and `verdict.sh`).
+- A PR merge passes the merge guard only when its newest gates and review records, by the owner, a member or a collaborator and unedited, name the PR's current head as success, and the merge names that head (`expectedHeadSha`, `--match-head-commit`, `-f sha=`); auto-merge and `--no-verify` are refused: fix what the hook reports.
 - GitHub Actions doesn't run on this account (no minutes): a red check is no signal; run the fast gates in the session and quote their results in the PR, and leave the long ones to the machine the repo's autopilot profile names for its `local` gates.
 
 **Containers**
@@ -64,6 +66,5 @@ Work with them: they are not incidents to report or file issues about.
 - The harness names a session branch and asks for a PR after each push; in an unattended wake the profile's branch rule and standing permission win.
 - The stop hook forces a commit on a dirty tree: `git stash -u` before ending a turn that lands nothing.
 - Scheduled wakes overlap and share external quotas (model free tiers, registries).
-- A paid or quota-bound pass (model evals, load tests) first proves its setup on one known-easy case, unlogged, and stops after two misses; then read its first few logged results before leaving it running: an infrastructure failure the agent reports honestly (a refused connection, a withheld result) scores as a real answer and spends the whole budget.
-- A pass that measures a new setup or switch first shows the change at work in its first few logged runs (the new tool called, the new step in the trace); if it does not, stop and ask the owner before the rest, whatever the pass costs: the runs would only repeat the setup it was copied from.
+- A paid, quota-bound or long measured pass (model evals, benchmarks, load tests) starts or resumes only through the `experiment-preflight` skill (canary, parity, scorer, budget guard, first results): an infrastructure failure the agent reports honestly (a refused connection, a withheld result) scores as a real answer and spends the whole budget.
 - OpenRouter: free models only (ids ending `:free`), in every repo and every run, evals included; a key's paid budget is never permission, and a spent free quota means wait for its reset or report the gap, never a paid model.

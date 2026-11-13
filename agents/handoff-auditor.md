@@ -1,6 +1,6 @@
 ---
 name: handoff-auditor
-description: Audits a lead's handoff or summary against the record (commits, PR, issue comments, check statuses), and lists guardrails it weakened and findings it left without an issue. Use before a handoff reaches the owner.
+description: Audits a lead's handoff or summary against the record (commits, PR, issue comments, gates and review records), and lists guardrails it weakened and findings it left without an issue. Use before a handoff reaches the owner.
 tools: Read, Grep, Glob, Bash
 model: opus
 effort: high

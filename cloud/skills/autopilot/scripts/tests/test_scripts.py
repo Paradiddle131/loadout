@@ -52,8 +52,10 @@ if [ -n "$write" ]; then
   exit 0
 fi
 case "$ep" in
-  */commits/*/status*) f=status.json ;;
   */compare/*) f=compare.json ;;
+  *pulls/70/commits*) f=commits.json ;;
+  *pulls/*/commits*) f=other_commits.json ;;
+  *pulls\\?*state=open*) f=pulls_open.json ;;
   *pulls/*) f=pr.json ;;
   */comments*) f=comments.json ;;
   */issues/*) f=issue.json ;;
@@ -108,14 +110,12 @@ PR = {
     "head": {"sha": HEAD, "ref": "claude/12-exporter"},
     "labels": [{"name": "agent:claimed"}],
 }
-STATUS_GREEN = {
-    "state": "success",
-    "statuses": [
-        {"context": "loadout/review", "state": "success"},
-        {"context": "loadout/gates", "state": "success"},
-        {"context": "loadout/gates", "state": "failure"},
-    ],
-}
+# The merge guard's `--check`: logs its argument; refuses with a reason when STUB_GUARD_REFUSE is set.
+STUB_GUARD = """import os, sys
+open(os.path.join(os.environ["STUB_DIR"], "guard.log"), "a").write(" ".join(sys.argv[1:]) + "\\n")
+if os.environ.get("STUB_GUARD_REFUSE"):
+    sys.exit(print(os.environ["STUB_GUARD_REFUSE"], file=sys.stderr) or 2)
+"""
 
 
 @pytest.fixture
@@ -130,7 +130,13 @@ def stub(tmp_path: Path) -> dict[str, str]:
     fx.mkdir()
     (fx / "comments.json").write_text("[]")
     (fx / "pr.json").write_text(json.dumps(PR))
-    (fx / "status.json").write_text(json.dumps(STATUS_GREEN))
+    (fx / "commits.json").write_text(json.dumps([{"sha": "c" * 40}, {"sha": HEAD}]))
+    (fx / "other_commits.json").write_text(json.dumps([{"sha": "d" * 40}]))
+    (fx / "pulls_open.json").write_text(
+        json.dumps([PR, {"number": 71, "head": {"ref": "claude/11-reader"}}])
+    )
+    guard = tmp_path / "merge-guard.py"
+    guard.write_text(STUB_GUARD)
     (fx / "compare.json").write_text(json.dumps({"behind_by": 0, "ahead_by": 2}))
     (fx / "issue.json").write_text(json.dumps({"id": 123, "number": 5}))
     (fx / "write.json").write_text(json.dumps({"id": 99}))
@@ -140,9 +146,11 @@ def stub(tmp_path: Path) -> dict[str, str]:
         "STUB_DIR": str(fx),
         "WAKE_ID": "",
         "AUTOPILOT_REPO": "example-owner/example-repo",
+        "AUTOPILOT_MERGE_GUARD": str(guard),
     }
     env.pop("DRY_RUN", None)
-    env.pop("AUTOPILOT_HOLD_LABELS", None)
+    for key in ("AUTOPILOT_HOLD_LABELS", "AUTOPILOT_MERGE_POLICY", "STUB_GUARD_REFUSE"):
+        env.pop(key, None)
     return env
 
 
@@ -400,6 +408,8 @@ def test_merge_squashes_at_the_head_it_read_when_gated_and_reviewed(stub: dict[s
     assert done.stdout.strip() == "merged"
     assert MERGE_PUT in done.stderr
     assert "merge_method=squash" in done.stderr and f"sha={HEAD}" in done.stderr
+    guard_log = Path(stub["STUB_DIR"], "guard.log").read_text()
+    assert guard_log == "--check example-owner/example-repo#70\n"
 
 
 def _merge_with(stub: dict[str, str], **changes: object) -> subprocess.CompletedProcess[str]:
@@ -437,29 +447,34 @@ def test_merge_takes_the_profiles_hold_labels(stub: dict[str, str]) -> None:
     assert done.returncode == 3 and done.stdout.strip() == "held", done.stderr
 
 
-@pytest.mark.parametrize(
-    "statuses",
-    [
-        [{"context": "loadout/gates", "state": "success"}],
-        [{"context": "loadout/review", "state": "success"}],
-        [
-            {"context": "loadout/gates", "state": "success"},
-            {"context": "loadout/review", "state": "failure"},
-        ],
-        [
-            {"context": "loadout/gates", "state": "pending"},
-            {"context": "loadout/review", "state": "success"},
-        ],
-    ],
-    ids=["no-review", "no-gates", "review-failed", "gates-pending"],
-)
-def test_merge_needs_both_statuses_on_the_head(
-    stub: dict[str, str], statuses: list[dict[str, str]]
-) -> None:
-    Path(stub["STUB_DIR"], "status.json").write_text(json.dumps({"statuses": statuses}))
-    done = run("merge.sh", "70", "--dry-run", env=stub)
+def test_merge_asks_the_guard_and_writes_nothing_when_it_refuses(stub: dict[str, str]) -> None:
+    """The records rule is the guard's: merge.sh relays its refusal and merges nothing."""
+    env = {**stub, "STUB_GUARD_REFUSE": "no review record on the head"}
+    done = run("merge.sh", "70", "--dry-run", env=env)
     assert done.returncode == 3 and done.stdout.strip() == "unreviewed", done.stderr
+    assert "no review record on the head" in done.stderr
     assert "dry-run: gh api" not in done.stderr
+
+
+def test_merge_leaves_the_merge_to_the_owner_when_the_policy_says_so(
+    stub: dict[str, str],
+) -> None:
+    done = run("merge.sh", "70", "--dry-run", env={**stub, "AUTOPILOT_MERGE_POLICY": "owner"})
+    assert done.returncode == 3 and done.stdout.strip() == "held", done.stderr
+    assert "dry-run: gh api" not in done.stderr
+
+
+def test_merge_refuses_a_pr_carrying_another_open_agent_prs_commits(
+    stub: dict[str, str],
+) -> None:
+    """A stack aimed at the default branch would merge the held work beneath it."""
+    fx = Path(stub["STUB_DIR"])
+    fx.joinpath("other_commits.json").write_text(json.dumps([{"sha": "c" * 40}]))
+    done = run("merge.sh", "70", "--dry-run", env=stub)
+    assert done.returncode == 3 and done.stdout.strip() == "carries", done.stderr
+    assert "#71" in done.stderr
+    assert "dry-run: gh api" not in done.stderr
+    assert not fx.joinpath("guard.log").exists(), "refused before the guard is asked"
 
 
 def test_merge_sends_a_head_behind_the_base_back_for_gates_and_review(
@@ -472,7 +487,9 @@ def test_merge_sends_a_head_behind_the_base_back_for_gates_and_review(
 
 
 @pytest.mark.parametrize(
-    "fail_on", ["pulls/70", "/status", "/compare/"], ids=["pr", "status", "compare"]
+    "fail_on",
+    ["pulls/70", "pulls/70/commits", "state=open", "pulls/71/commits", "/compare/"],
+    ids=["pr", "commits", "open-prs", "other-commits", "compare"],
 )
 def test_merge_writes_nothing_when_a_read_fails(stub: dict[str, str], fail_on: str) -> None:
     done = run("merge.sh", "70", env={**stub, "STUB_WRITES": "1", "STUB_FAIL_ON": fail_on})

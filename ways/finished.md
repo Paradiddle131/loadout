@@ -30,7 +30,7 @@ A choice in the architecture document:
 - A decision is a fork with real alternatives; a step with none is just an issue and its PR.
 - It is weighed on its issue: the options with their cost, a recommendation, the owner's call (the choice under the `issue` skill's `Needs you`).
 - One costly to undo (a data model, a vendor, a security boundary) gets a write-up as an artifact on its issue: Context, Options with their cost, Choice and why, Undo cost, Revisit when.
-- The agent writes the architecture document's line in final form in the PR that needs it; the PR body lists each new or changed choice under its decisions, and the merge accepts them.
+- The agent writes the architecture document's line in final form in the PR that needs it; the PR body lists each new or changed choice under its decisions, and the merge accepts them (an agent's merge only after review, [`review.md`](review.md), and only for choices it may take).
 - A choice only the owner can make before the work starts goes as a decision packet on the issue first ([`guardrails.md`](guardrails.md)); the line follows the answer.
 - A superseded decision is a new issue linking the old one; the PR that acts on it rewrites the line, and the architecture document states only the outcome.
 - A PR that changes behaviour a line describes amends or deletes that line in the same diff; a line nothing depends on any more is deleted.

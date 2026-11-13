@@ -9,6 +9,9 @@ Every rule here acts inside the repo being worked on; the one rule that writes t
 - Make small, typed, testable changes, and validate them before calling the work done; report outcomes faithfully, including what you could not verify.
 - Prefer a mature, framework-native solution to a bespoke workaround; when the better path is a larger refactor, lay out the options with a recommendation instead of choosing the workaround silently.
 - When a tool is missing, install it in an isolated way (`uv tool`, `uvx`, `npx`) or state the gap; never pass off a weaker check as the real one.
+- Land every change by [`ways/review.md`](ways/review.md) (the `review` skill): a tier its changed paths set, fresh reviewers who verify by running things, and a gates record and a review verdict on its head commit before it merges; the author never reviews its own change.
+- Hand work to a subagent by the `delegating` skill: a full brief, its own worktree, model and effort set explicitly, and its report checked, never trusted.
+- Start or resume a paid, quota-bound or long measured pass by the `experiment-preflight` skill.
 - Write down every problem you find but do not fix: a GitHub issue in the `issue` skill's shape, with the session's durable plan, analysis or visual as an artifact on it.
 - Name work for what it does, never by a process id: no phase or milestone numbers, issue or PR numbers, or decision ids in anything checked in (code, comments, test names, documentation, file names); commit messages, PR titles and PR bodies cite issues and PRs freely ([`ways/finished.md § References`](ways/finished.md#references)).
 - Order work by dependency and value; never estimate its time or effort.

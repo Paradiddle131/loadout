@@ -6,17 +6,17 @@ Unattended cloud wakes on this repo follow the `cloud:autopilot` skill (if missi
 A wake with no `~/.claude/cloud-target` (the environment's setup didn't run) first runs `bash <clone>/cloud/setup.sh <repo>`.
 The routine prompt: "Follow `docs/agents/autopilot.md` in <repo> and do one wake." (optionally "on #n").
 Standing permission (owner, <date>): <what wakes may do without asking>.
-Every item is one branch `claude/<n>-<slug>` and one PR, reviewed by the `review` skill and merged by the wake when gated and reviewed, unless the merge policy holds it.
+Every item is one branch `claude/<n>-<slug>` and one PR, reviewed by the `review` skill and merged by the wake once its gates and review records pass, unless the merge policy holds it.
 
 <!-- A profile written for the retired train delivery (`Delivery: train …`, `in-train`, `AUTOPILOT_TRAIN`): set `Mode: paused`; have the open train PR reviewed and merged, or closed (then swap `in-train` back to `agent:ready` on its issues); delete the label, the Delivery slot and `AUTOPILOT_TRAIN`; move the train body's owner decisions to `needs-owner` issues and its steering lines to the Digest issue; then unpause. -->
 
 ## Merge policy
 
-<none: the wake merges when gated and reviewed | what holds a reviewed PR and who lifts it, e.g. `needs-local-verify` until the local checklist passes; `export AUTOPILOT_HOLD_LABELS="<label> …"` for labels of your own>.
+<none: the wake merges when gated and reviewed | what holds a reviewed PR and who lifts it, e.g. `needs-local-verify` until the local checklist passes; `export AUTOPILOT_HOLD_LABELS="<label> …"` for labels of your own | owner merges: the wake stops at ready, `export AUTOPILOT_MERGE_POLICY=owner`>.
 
 ## Review
 
-Sensitive paths and what each tier adds: `REVIEW.md` at the repo root (the `review` skill reads it).
+The paths that set a review tier: `REVIEW.md` at the repo root, read from the default branch by the `review` skill's `tier.sh`.
 
 ## Digest
 
