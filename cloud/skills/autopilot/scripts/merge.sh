@@ -7,8 +7,10 @@
 # merge guard's `--check` passing (the gates and review records on the head; the guard owns that
 # rule), and the head not behind the base.
 # The merge names the head sha, so a push after the reads makes GitHub refuse it.
-# Prints the case on stdout. Exit 0: `merged` (the merge sha on stderr); 3: `held`, `draft`,
-# `stacked`, `carries` or `unreviewed` (the reason on stderr; nothing written); 4: `behind` (merge
+# Also held: the owner's latest review requests changes (or the reviews cannot be read); the default
+# branch is the one the PR read names. Prints the case on stdout. Exit 0: `merged` (the merge sha on
+# stderr); 3: `held`, `draft`, `stacked`, `carries`, `unreviewed` or `moved` (the head moved between
+# the reads and the guard's check; the reason on stderr; nothing written); 4: `behind` (merge
 # the base in, push, stamp the gates and the verdict again); 1: usage or API error, or a refused merge.
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -28,6 +30,8 @@ pr="$(gh_get "repos/$REPO/pulls/$PR")"   # a failed read stops here
 [ "$(jq -r '.number // empty' <<<"$pr")" = "$PR" ] || die "the read of PR #$PR is not the PR; nothing merged"
 [ "$(jq -r '.state' <<<"$pr")" = open ] || die "PR #$PR is not open"
 HEAD="$(jq -r '.head.sha // empty' <<<"$pr")"
+BASE="$(jq -r '.base.repo.default_branch // empty' <<<"$pr")"   # the repo's default branch, whatever its name
+[ -n "$BASE" ] || die "the read of PR #$PR names no default branch; nothing merged"
 [[ "$HEAD" =~ ^[0-9a-f]{40}$ ]] || die "PR #$PR has no head sha; nothing merged"
 [ "$(jq -r '.draft' <<<"$pr")" = false ] || stop draft "PR #$PR is a draft: mark it ready first"
 base="$(jq -r '.base.ref' <<<"$pr")"
@@ -53,8 +57,19 @@ for other in $others; do
   fi
 done
 
-reason="$(python3 "$GUARD" --check "$REPO#$PR" 2>&1 >/dev/null)" \
-  || stop unreviewed "PR #$PR: the merge guard refuses: ${reason:-no reason given}"
+# The owner's latest verdict-bearing review: changes requested holds the PR, and so does a failed read.
+# shellcheck disable=SC2016  # jq program
+owner_review="$(gh_get "repos/$REPO/pulls/$PR/reviews?per_page=100" --jq '
+  [.[] | select((.author_association | IN("OWNER", "MEMBER", "COLLABORATOR"))
+    and (.state | IN("APPROVED", "CHANGES_REQUESTED", "DISMISSED")))] | last | .state // "none"')" \
+  || stop held "PR #$PR: its reviews could not be read, so an owner's request for changes cannot be ruled out"
+[ "$owner_review" != CHANGES_REQUESTED ] || stop held "PR #$PR: the owner's latest review requests changes"
+
+# The records rule is the merge guard's: it prints the head it checked, or refuses with its reason.
+err="$(mktemp)"; trap 'rm -f "$err"' EXIT
+checked="$(python3 "$GUARD" --check "$REPO#$PR" 2>"$err")" \
+  || stop unreviewed "PR #$PR: the merge guard refuses: $(cat "$err")"
+[ "$checked" = "$HEAD" ] || stop moved "PR #$PR: the guard checked ${checked:0:7}, not the head read (${HEAD:0:7}); run again"
 
 behind="$(gh_get "repos/$REPO/compare/$BASE...$HEAD" --jq '.behind_by')"
 [[ "$behind" =~ ^[0-9]+$ ]] || die "could not compare PR #$PR with $BASE; nothing merged"
