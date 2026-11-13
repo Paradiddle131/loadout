@@ -59,7 +59,7 @@ snapshot() { # <worktree>
   fi
   ref="claude/wip/${branch//\//-}-$session"
   if [ -z "$GITLEAKS" ]; then
-    echo "$(date -u +%FT%H:%MZ) $wt ($branch): gitleaks is not installed, so this push was NOT scanned for secrets" >>"$LOG"
+    echo "$(date -u +%FT%H:%MZ) UNSCANNED $wt ($branch): gitleaks is not installed, so this push was NOT scanned for secrets" >>"$LOG"
   else
     # Every commit the push would add to the remote: the snapshot and any commit on no origin branch.
     "$GITLEAKS" detect --source "$wt" --log-opts="$commit --not --remotes=origin" --no-banner --redact \

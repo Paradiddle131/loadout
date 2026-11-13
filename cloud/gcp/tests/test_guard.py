@@ -146,3 +146,27 @@ def test_commands_after_a_heredoc_are_checked(home: Path) -> None:
 
 def test_unparseable_gcp_command_is_refused(home: Path) -> None:
     assert run("gcloud services list --filter='oops", home)
+
+
+BEHIND_KEYWORDS = [
+    "if true; then gcloud services enable compute.googleapis.com; fi",
+    "if false; then :; elif true; then gcloud services enable x.googleapis.com; fi",
+    "if false; then :; else gcloud services enable x.googleapis.com; fi",
+    "for i in 1; do gcloud services enable x.googleapis.com; done",
+    "while true; do bq insert ds.t rows.json; break; done",
+    "until false; do gsutil mb -l europe-west1 gs://b; done",
+    "! gcloud services enable x.googleapis.com",
+    "true && { gcloud services enable x.googleapis.com; }",
+    "( gcloud services enable x.googleapis.com )",
+]
+
+
+@pytest.mark.parametrize("command", BEHIND_KEYWORDS)
+def test_a_command_behind_a_shell_keyword_is_checked(command: str, home: Path) -> None:
+    decision = run(command, home)
+    assert decision and decision["hookSpecificOutput"]["permissionDecision"] == "deny", command
+
+
+def test_keyword_words_as_arguments_still_pass(home: Path) -> None:
+    assert run("echo if then do gcloud services enable", home) is None
+    assert run("if true; then gcloud services list; fi", home) is None
