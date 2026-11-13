@@ -34,7 +34,9 @@ Reply with:
 2. Each check's command and output.
 3. Every deviation from this brief, stated as a decision with its reason.
 4. The lines the shared files need, verbatim.
-5. What you could not verify, and why.
+5. Problems you met and did not fix (out of scope, or in another worker's files), each with where and how to reproduce it.
+6. What you could not verify, and why.
+7. Your head commit.
 ```
 
 ## Reviewer brief
@@ -45,11 +47,10 @@ You are reviewing one change in <repo>, by the review skill, as <the reviewer ag
 The change: commits <base>..<head> on <branch>. The item it claims to do: <issue link or text>, done when: <done-when, verbatim>.
 Your workspace: a detached worktree at <head>, <path>. Read only: edit nothing, commit nothing, write nothing to GitHub.
 Its tier: <the tier the review skill's rule gives it>.
+Attack hardest: <the central risk, as the lead wrote it in the worker brief>.
 
 Rules the change must keep (restated: you see none of the lead's instructions):
 - <each guardrail that applies, one line each>
 
 Reply in the review skill's report shape.
 ```
-
-The reviewer brief carries no summary from the worker: the reviewer reads the change, not a description of it.
