@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # merge.sh <pr> [--dry-run]: the skill's merge step.
 # Squash-merges the PR at the head it read, and only when every condition holds: open, not a draft,
-# based on the default branch, no hold (`needs-owner`, `needs-review`, `needs-local-verify`,
-# $AUTOPILOT_HOLD_LABELS, a `[speculative` title, AUTOPILOT_MERGE_POLICY=owner), no commit of
+# based on the default branch, no hold (among the PR's labels: `needs-owner`, `needs-review`,
+# `needs-local-verify`, `owner-merges`, $AUTOPILOT_HOLD_LABELS; a `[speculative` title;
+# AUTOPILOT_MERGE_POLICY=owner), no commit of
 # another open agent PR among its own (a stack aimed at the default branch carries held work), the
 # merge guard's `--check` passing (the gates and review records on the head; the guard owns that
 # rule), and the head not behind the base.
@@ -21,7 +22,7 @@ set_dry_run "$@"
 mapfile -d '' -t ARGS < <(strip_dry_run "$@")
 PR="${ARGS[0]:-}"
 [[ "$PR" =~ ^[0-9]+$ ]] && [ ${#ARGS[@]} -eq 1 ] || die "usage: merge.sh <pr> [--dry-run]"
-HOLDS="needs-owner needs-review needs-local-verify ${AUTOPILOT_HOLD_LABELS:-}"
+HOLDS="needs-owner needs-review needs-local-verify owner-merges ${AUTOPILOT_HOLD_LABELS:-}"
 GUARD="${AUTOPILOT_MERGE_GUARD:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)/cloud/hooks/merge-guard.py}"
 
 stop() { echo "$2" >&2; echo "$1"; exit "${3:-3}"; }

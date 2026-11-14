@@ -12,7 +12,7 @@ Every item is one branch `claude/<n>-<slug>` and one PR, reviewed by the `review
 
 ## Merge policy
 
-<none: the wake merges when gated and reviewed | what holds a reviewed PR and who lifts it, e.g. `needs-local-verify` until the local checklist passes; `export AUTOPILOT_HOLD_LABELS="<label> …"` for labels of your own | owner merges: the wake stops at ready, `export AUTOPILOT_MERGE_POLICY=owner`>.
+<none: the wake merges when gated and reviewed | what holds a reviewed PR and who lifts it, e.g. `needs-local-verify` until the local checklist passes; `export AUTOPILOT_HOLD_LABELS="<label> …"` for labels of your own | the owner merges these: <PR categories, e.g. a guardrail line, a cost, a one-way door>, which the wake labels `owner-merges` | owner merges: the wake stops at ready, `export AUTOPILOT_MERGE_POLICY=owner`>.
 
 ## Review
 
