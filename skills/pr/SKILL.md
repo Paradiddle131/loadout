@@ -52,7 +52,7 @@ Everything else goes under `<details>`: it stays on record for the next agent wi
 - **Evidence is runs, not adjectives:** the command and its counts (`make check: exit 0; 199 passed`), or a screenshot when the change is visual.
   Show the test that failed before and passes after, as pseudocode when the code is long.
 - **Needs you is optional and appears only when it holds a real item:** an action or a decision the PR waits on.
-  Never fill it with a no-op ("merge when you're happy", "nothing to verify locally", "no action needed"): merging is always the owner's call, and an empty section is noise.
+  Never fill it with a no-op ("merge when you're happy", "nothing to verify locally", "no action needed"): merging needs no invitation (the owner's call, or an agent's once the `review` skill's records pass on the head), and an empty section is noise.
 - **Needs you speaks to the owner,** one plain-English sentence per item, with commands kept out of the sentence.
   A decision or an approval is the sentence alone; the owner answers on the PR.
   Work on the owner's machine (a run, a build, a check on their cluster, an edit to their local config) is work for their **local agent**: follow the sentence with a `Prompt for your local agent` block.
@@ -60,8 +60,8 @@ Everything else goes under `<details>`: it stays on record for the next agent wi
   It asks for a report (a PR comment with the result, or an issue on failure) only when this PR waits on that result; otherwise the local agent does the work and stops.
 - **Merge danger only when it bites.** A change that is hard to undo (a data migration, a deletion, a public interface, something published) gets one line under `Needs you`: `**One-way door:** <why>`.
   Easy-to-revert changes say nothing about it.
-- **A stacked PR targets `main`, not the PR below it,** when the forge merges each PR into its own base: merging the lower PR first leaves the upper one merging into a branch nothing reads.
-  Say in its first line which PR must merge first; its diff shows the lower PR's commits until then.
+- **A stacked PR targets the PR below it** and is retargeted to `main` when that one merges: one targeting `main` early carries the lower PR's commits into its own merge.
+  Say in its first line which PR must merge first.
 - **Required sections stay short.** When the repo asks for named sections (decisions, open questions), keep each as one-line bullets outside `<details>` and put the reasoning inside.
 - **Details hold the rest:** decisions and why, rejected options, the full verification list, what could not be verified, follow-ups filed.
   Several `<details>` blocks are fine when the topics differ.

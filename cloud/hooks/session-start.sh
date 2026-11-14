@@ -61,7 +61,45 @@ fi
 
 # 2b. A GCP project in the environment ($GCP_PROJECT) is a $0 lab: the byte cap, the guard's
 #     registration, the credential's fences and the month-to-date cost, as a few lines of context.
-[ -n "${GCP_PROJECT:-}" ] && timeout 120 bash "$ROOT/cloud/gcp/status.sh"
+#     A target that must not use the session's project (it has one of its own) says so with the file
+#     docs/agents/no-session-gcp, whose first line is the reason; the status then does not run.
+gcp_repo=${target:-${CLAUDE_PROJECT_DIR:-}}
+if [ -n "${GCP_PROJECT:-}" ] && [ -n "$gcp_repo" ] && [ -f "$gcp_repo/docs/agents/no-session-gcp" ]; then
+  echo "cloud: GCP status skipped: $(basename "$gcp_repo") declines the session's GCP project (docs/agents/no-session-gcp: $(head -n 1 "$gcp_repo/docs/agents/no-session-gcp")); do not use it there."
+elif [ -n "${GCP_PROJECT:-}" ]; then
+  timeout 120 bash "$ROOT/cloud/gcp/status.sh"
+fi
+
+# 2c. save-work.sh runs in the background where nobody sees it: for each clone whose latest save it skipped
+#     (gitleaks found a secret, or the scan failed), or whose latest push went out unscanned (no gitleaks),
+#     repeat that line here until a later save of that clone pushes after a scan.
+python3 - "$HOME/.claude/save-work.log" <<'EOF' 2>/dev/null || true
+import re, sys
+try:
+    lines = open(sys.argv[1], encoding="utf-8", errors="replace").read().splitlines()
+except OSError:
+    sys.exit()
+state, unscanned = {}, set()  # (worktree, branch) -> the line to repeat
+for line in lines:
+    m = re.match(r"\S+ (SKIPPED|UNSCANNED) (.+) \(([^()]*)\): ", line)
+    if m:
+        key = (m.group(2), m.group(3))
+        if m.group(1) == "SKIPPED":
+            state[key] = "did not push unsaved work: " + line
+        else:
+            unscanned.add(key)
+        continue
+    m = re.match(r"\S+ (.+) \(([^()]*)\) -> \S+ \S+$", line)
+    if m:
+        key = (m.group(1), m.group(2))
+        if key in unscanned:
+            state[key] = "pushed unsaved work NOT scanned for secrets (gitleaks missing): " + line
+        else:
+            state.pop(key, None)
+        unscanned.discard(key)
+for said in list(state.values())[-10:]:
+    print("cloud: save-work " + said)
+EOF
 
 # 3. Multi-repo sessions start above the clones and skip the target's own hooks: run its
 #    SessionStart commands here, as Claude Code would in a single-repo session.

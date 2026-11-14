@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import runpy
 import shlex
 import sys
 from pathlib import Path
@@ -40,6 +41,9 @@ WRAPPERS = {
     "stdbuf",
     "xargs",
 }
+# Shell reserved words that come before a command (`if cmd; then cmd; fi`, `! cmd`, `{ cmd; }`): skipped, so
+# the command after them is the one checked.
+KEYWORDS = {"if", "then", "elif", "else", "do", "while", "until", "!", "{", "(", "time"}
 TRACKS = {"alpha", "beta", "preview"}
 SHELLS = {"bash", "sh", "zsh", "dash"}
 SEPARATORS = {";", "&&", "||", "|", "&", "(", ")", "\n", "|&"}
@@ -169,7 +173,7 @@ def program(seg: list[str]) -> tuple[str, list[str]] | None:
             i += 1
             continue
         name = os.path.basename(t)
-        if name in WRAPPERS or re.fullmatch(r"\d+[smhd]?", t):
+        if t in KEYWORDS or name in WRAPPERS or re.fullmatch(r"\d+[smhd]?", t):
             i += 1
             continue
         return name, seg[i + 1 :]
@@ -353,23 +357,40 @@ def verdict(command: str, depth: int = 0) -> str | None:
     return None
 
 
-def main() -> int:
+def note_refusal(rule: str) -> None:
+    """Note a refusal in the collection's friction log (bin/friction): the guard and the rule, never the command."""
     try:
-        event = json.load(sys.stdin)
+        friction = Path(__file__).resolve().parents[2] / "bin/friction"
+        runpy.run_path(str(friction), run_name="friction")["record_refusal"]("gcp-guard", rule)
+    except Exception:  # noqa: BLE001 -- the log never changes or slows the decision
+        pass
+
+
+def main() -> int:
+    raw = sys.stdin.read()
+    try:
+        event, deep = json.loads(raw), False
     except ValueError:
         return 0
+    except RecursionError:  # nested past what json reads: the failure rule below, on the raw text
+        event, deep = {"tool_name": "Bash", "tool_input": {"command": raw}}, True
     if event.get("tool_name") != "Bash":
         return 0
     command = (event.get("tool_input") or {}).get("command") or ""
+    rule = "spend"
     try:
+        if deep:
+            raise ValueError("its input is nested too deep to read")
         reason = verdict(command)
     except Exception as exc:  # noqa: BLE001 -- a guard bug must not wave a GCP command through
+        rule = "guard-error"
         reason = (
             f"a GCP command the guard failed on ({exc})"
             if re.search(r"gcloud|\bbq\b|googleapis", command)
             else None
         )
     if reason:
+        note_refusal(rule)
         print(
             json.dumps(
                 {

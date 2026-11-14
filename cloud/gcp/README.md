@@ -10,7 +10,7 @@ They hold for every repo; a repo's own docs add its free-path allowlist and cost
 | Quotas | the project (owner, once) | BigQuery's daily query bytes, set inside the free tier |
 | The guard hook | `guard.py`, a `PreToolUse` hook on Bash registered by the cloud plugin's `hooks/hooks.json` | the same commands before they run, with a reason that tells the agent what to do instead |
 | Tool defaults | `status.sh` writes `~/.bigqueryrc` | any `bq query` above the byte cap (BigQuery refuses it unbilled) |
-| Session context | `status.sh`, run by `cloud/hooks/session-start.sh` | blind sessions: each one starts with the month-to-date cost, the cap, and any loose fence |
+| Session context | `status.sh`, run by `cloud/hooks/session-start.sh` unless the target repo has `docs/agents/no-session-gcp` (it uses a project of its own; the hook prints one line instead) | blind sessions: each one starts with the month-to-date cost, the cap, and any loose fence |
 | The rule | `cloud/CLAUDE.md`, GCP | what the hooks can't see (code calling client libraries) |
 | Kill switch (optional) | the repo's infrastructure | a runaway the other layers missed, at a threshold far above the first cent |
 

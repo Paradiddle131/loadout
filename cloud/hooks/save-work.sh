@@ -4,12 +4,17 @@
 # every git clone under SAVE_WORK_ROOTS (default /home/user), go to `claude/wip/<branch>-<session>`.
 # It never touches a working tree, its index or HEAD: the snapshot is built in a temporary index and pushed as
 # a commit whose parent is HEAD; a clone with nothing new is skipped, so most sessions push nothing.
-# Untracked files that look like secrets (.env*, keys, credentials) or are over SAVE_WORK_MAX_KB are left out.
+# Untracked files that look like secrets (.env*, keys, credentials) or are over SAVE_WORK_MAX_KB are left out, and
+# gitleaks (cloud/setup.sh installs it) scans the commits about to be pushed: on a finding, or a scan that fails,
+# that clone's push is skipped with a SKIPPED line in the log and on stderr, and the work stays only in the container.
 #
 # Hooks (the cloud plugin's hooks.json): StopFailure, a turn ended by an API error such as `rate_limit`, runs it
 # at once; PostToolUse runs `--periodic`, which acts at most every SAVE_WORK_EVERY_S (default 1200) and in the
 # background. `bash save-work.sh --now` runs it by hand. Its log: ~/.claude/save-work.log.
 # Recover: git ls-remote origin 'refs/heads/claude/wip/*', then git fetch origin <ref> and cherry-pick or diff it.
+# Then it flushes the friction log (bin/friction flush, at most FRICTION_FLUSH_S, default 40 s; its notice goes
+# to the log): a comment on this collection's `friction` issue; LOADOUT_FRICTION_POST=0 keeps it local. It runs
+# whatever the pushes did and never changes the exit status.
 set -u
 mode=${1:-}
 [ -t 0 ] || cat >/dev/null # the hook's JSON input: unused
@@ -18,6 +23,8 @@ LOG="$HOME/.claude/save-work.log"
 EVERY=${SAVE_WORK_EVERY_S:-1200}
 MAX_KB=${SAVE_WORK_MAX_KB:-10240}
 ROOTS=${SAVE_WORK_ROOTS:-/home/user}
+FRICTION="$(dirname "${BASH_SOURCE[0]}")/../../bin/friction"
+GITLEAKS=$(command -v gitleaks || { [ -x "$HOME/.local/bin/gitleaks" ] && echo "$HOME/.local/bin/gitleaks"; } || true)
 
 if [ "$mode" = "--periodic" ]; then
   now=$(date +%s)
@@ -55,6 +62,22 @@ snapshot() { # <worktree>
     return 0
   fi
   ref="claude/wip/${branch//\//-}-$session"
+  if [ -z "$GITLEAKS" ]; then
+    echo "$(date -u +%FT%H:%MZ) UNSCANNED $wt ($branch): gitleaks is not installed, so this push was NOT scanned for secrets" >>"$LOG"
+  else
+    # Every commit the push would add to the remote: the snapshot and any commit on no origin branch.
+    "$GITLEAKS" detect --source "$wt" --log-opts="$commit --not --remotes=origin" --no-banner --redact \
+      --exit-code 3 >>"$LOG" 2>&1
+    case $? in
+      0) ;;
+      3)
+        echo "$(date -u +%FT%H:%MZ) SKIPPED $wt ($branch): gitleaks found a secret in the work to push, so nothing went to $ref; remove it and save again (redacted findings in $LOG)" | tee -a "$LOG" >&2
+        return 0 ;;
+      *)
+        echo "$(date -u +%FT%H:%MZ) SKIPPED $wt ($branch): the gitleaks scan failed, so nothing went to $ref (see $LOG)" | tee -a "$LOG" >&2
+        return 0 ;;
+    esac
+  fi
   if timeout 90 git -C "$wt" push -q --force --no-verify origin "$commit:refs/heads/$ref" 2>>"$LOG"; then
     echo "$(date -u +%FT%H:%MZ) $wt ($branch) -> $ref ${commit:0:8}" >>"$LOG"
   else
@@ -73,9 +96,17 @@ run() {
   done
 }
 
+flush() {
+  local out
+  [ -f "$FRICTION" ] || return 0
+  out=$(timeout "${FRICTION_FLUSH_S:-40}" python3 "$FRICTION" flush 2>&1 </dev/null)
+  [ -z "$out" ] || echo "$(date -u +%FT%H:%MZ) $out" >>"$LOG"
+}
+
 if [ "$mode" = "--periodic" ]; then
-  (run >/dev/null 2>&1 &)
+  ({ run; flush; } >/dev/null 2>&1 &)
 else
   run
+  flush
 fi
 exit 0

@@ -146,3 +146,87 @@ def test_commands_after_a_heredoc_are_checked(home: Path) -> None:
 
 def test_unparseable_gcp_command_is_refused(home: Path) -> None:
     assert run("gcloud services list --filter='oops", home)
+
+
+BEHIND_KEYWORDS = [
+    "if true; then gcloud services enable compute.googleapis.com; fi",
+    "if false; then :; elif true; then gcloud services enable x.googleapis.com; fi",
+    "if false; then :; else gcloud services enable x.googleapis.com; fi",
+    "for i in 1; do gcloud services enable x.googleapis.com; done",
+    "while true; do bq insert ds.t rows.json; break; done",
+    "until false; do gsutil mb -l europe-west1 gs://b; done",
+    "! gcloud services enable x.googleapis.com",
+    "true && { gcloud services enable x.googleapis.com; }",
+    "( gcloud services enable x.googleapis.com )",
+]
+
+
+@pytest.mark.parametrize("command", BEHIND_KEYWORDS)
+def test_a_command_behind_a_shell_keyword_is_checked(command: str, home: Path) -> None:
+    decision = run(command, home)
+    assert decision and decision["hookSpecificOutput"]["permissionDecision"] == "deny", command
+
+
+def test_keyword_words_as_arguments_still_pass(home: Path) -> None:
+    assert run("echo if then do gcloud services enable", home) is None
+    assert run("if true; then gcloud services list; fi", home) is None
+
+
+def test_a_refusal_is_noted_in_the_friction_log_without_the_command(home: Path) -> None:
+    log = home / ".claude/loadout-friction.jsonl"
+    assert run("gcloud services enable private-api.googleapis.com --project p", home)
+    assert run("gcloud services list --enabled --project p", home) is None
+    lines = [json.loads(x) for x in log.read_text().splitlines()]
+    assert lines == [{"at": lines[0]["at"], "kind": "refusal", "guard": "gcp-guard", "rule": "spend"}]
+    assert "private" not in log.read_text()
+
+
+def test_an_unwritable_friction_log_leaves_the_refusal_alone(home: Path) -> None:
+    (home / "a-file").write_text("x")
+    decision = run("gcloud services enable x.googleapis.com", home,
+                   LOADOUT_FRICTION_LOG=str(home / "a-file" / "log.jsonl"))
+    assert decision and decision["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def guard_copy(tmp_path: Path, broken: bool) -> Path:
+    """A copy of the guard with no bin/friction beside it, or one whose verdict raises, beside a friction copy."""
+    root = tmp_path / ("broken" if broken else "alone")
+    copy = root / "cloud/gcp/guard.py"
+    copy.parent.mkdir(parents=True)
+    src = GUARD.read_text()
+    if broken:
+        assert src.count("def verdict(") == 1
+        src = src.replace("def verdict(", "def verdict(*a, **k):\n    raise RuntimeError('bug')\n\n\ndef unused(", 1)
+        (root / "bin").mkdir()
+        (root / "bin/friction").write_text((GUARD.parents[2] / "bin/friction").read_text())
+    copy.write_text(src)
+    return copy
+
+
+def run_copy(copy: Path, stdin: str, home: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([sys.executable, str(copy)], input=stdin, capture_output=True, text=True,
+                          env={"HOME": str(home), "PATH": "/usr/bin:/bin"}, timeout=60)
+
+
+def test_a_missing_friction_script_leaves_the_refusal_alone(home: Path, tmp_path: Path) -> None:
+    event = json.dumps({"tool_name": "Bash", "tool_input": {"command": "gcloud services enable x.googleapis.com"}})
+    done = run_copy(guard_copy(tmp_path, broken=False), event, home)
+    assert done.returncode == 0 and '"permissionDecision": "deny"' in done.stdout, done.stderr
+
+
+def test_a_guard_failure_is_refused_and_noted_under_its_own_rule(home: Path, tmp_path: Path) -> None:
+    event = json.dumps({"tool_name": "Bash", "tool_input": {"command": "gcloud services enable x.googleapis.com"}})
+    done = run_copy(guard_copy(tmp_path, broken=True), event, home)
+    assert done.returncode == 0 and "failed on" in done.stdout, done.stderr
+    [line] = [json.loads(x) for x in (home / ".claude/loadout-friction.jsonl").read_text().splitlines()]
+    assert (line["guard"], line["rule"]) == ("gcp-guard", "guard-error")
+
+
+@pytest.mark.parametrize("command, refused", [("gcloud services enable x.googleapis.com", True), ("ls", False)])
+def test_input_nested_too_deep_takes_the_failure_rule(home: Path, command: str, refused: bool) -> None:
+    deep = "[" * 100_000 + "]" * 100_000
+    event = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})[:-1] + f', "x": {deep}}}'
+    done = subprocess.run([sys.executable, str(GUARD)], input=event, capture_output=True, text=True,
+                          env={"HOME": str(home), "PATH": "/usr/bin:/bin"}, timeout=60)
+    assert done.returncode == 0 and done.stderr == "", done.stderr[-300:]
+    assert ('"permissionDecision": "deny"' in done.stdout) is refused

@@ -28,6 +28,8 @@ Ways of working: [ways](https://github.com/<owner>/<collection>/tree/main/ways) 
 Each line: the file, then when to use it.
 
 - [`finished.md`](finished.md): use when planning work, making a choice with real alternatives, writing or pruning a standing document, or a line is about to cite an issue, phase or decision.
+- [`review.md`](review.md) and [`../skills/review/`](../skills/review/SKILL.md): use before any change lands on a default branch, attended or unattended: its tier, its fresh reviewers, the gates and review records a merge needs.
+- [`../skills/delegating/`](../skills/delegating/SKILL.md): use when a session hands work to a subagent, or leads several.
 - [`guardrails.md`](guardrails.md): use when writing an owner's standing constraints, or when evidence conflicts with one.
 - [`portable.md`](portable.md): use when writing or editing a reusable document (a skill, a way, a template), or a line in one names a real account, repo, date or issue.
 - [`lessons.md`](lessons.md): use when changing the autopilot skill or a repo's profile; why it carries what it carries and dropped what it dropped.
