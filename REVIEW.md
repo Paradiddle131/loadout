@@ -5,7 +5,7 @@ Every repo that imports the collection runs what these paths hold, so a change t
 
 ## Sensitive
 - `ways/**` — the standing practices every adopting repo follows; lenses: claims-auditor, guardrail-reviewer
-- `FEEDBACK.md` — the one rule that writes outside the repo being worked on; lenses: guardrail-reviewer
+- `FEEDBACK.md` — the rules that write outside the repo being worked on; lenses: guardrail-reviewer
 - `agents/**` — the reviewers themselves; lenses: guardrail-reviewer, control-prober
 - `skills/review/**` — the landing path and its scripts; lenses: guardrail-reviewer, control-prober
 - `skills/delegating/**` — how work is handed out and checked; lenses: guardrail-reviewer

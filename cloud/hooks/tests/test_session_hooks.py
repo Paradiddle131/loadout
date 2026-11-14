@@ -122,24 +122,50 @@ def test_save_work_real_scan_finds_a_planted_token(clone: Path, tmp_path: Path) 
     assert "claude/wip/feature-sess1234" in wip_refs(clone)
 
 
-@pytest.mark.parametrize("gh", ["exit 1", "sleep 30"])
-def test_save_work_flushes_the_friction_log_without_losing_it_or_changing_its_exit(
-        clone: Path, tmp_path: Path, gh: str) -> None:
+def friction_world(tmp_path: Path, gh: str) -> Path:
+    """A stub `gh` and a friction log holding one refusal; the log's path."""
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
+    bin_dir.mkdir(exist_ok=True)
     (bin_dir / "gh").write_text(f"#!/bin/sh\n{gh}\n")
     (bin_dir / "gh").chmod(0o755)
     log = tmp_path / "home/.claude/loadout-friction.jsonl"
     log.parent.mkdir(parents=True)
     log.write_text('{"at": "x", "kind": "refusal", "guard": "merge-guard", "rule": "pr-merge"}\n')
+    return log
+
+
+def test_save_work_flushes_the_friction_log_without_losing_it_or_changing_its_exit(
+        clone: Path, tmp_path: Path) -> None:
+    log = friction_world(tmp_path, "exit 1")
     (clone / "a.txt").write_text("changed\n")
-    start = time.monotonic()
-    done = save(clone, tmp_path, fake_gitleaks(tmp_path, 0), FRICTION_FLUSH_S="3")
-    assert done.returncode == 0 and time.monotonic() - start < 20
-    assert "claude/wip/feature-sess1234" in wip_refs(clone)
+    done = save(clone, tmp_path, fake_gitleaks(tmp_path, 0))
+    assert done.returncode == 0 and "claude/wip/feature-sess1234" in wip_refs(clone)
     assert log.read_text().count("\n") == 1 and not Path(f"{log}.posted").exists()
-    if gh == "exit 1":
-        assert "friction: not posted" in (tmp_path / "home/.claude/save-work.log").read_text()
+    assert "friction: not posted" in (tmp_path / "home/.claude/save-work.log").read_text()
+
+
+def test_save_work_bounds_a_hanging_flush_itself(clone: Path, tmp_path: Path) -> None:
+    # The flush's own call timeout is longer than this bound, so only save-work's `timeout` ends it in time.
+    friction_world(tmp_path, "exec sleep 60")
+    start = time.monotonic()
+    done = save(clone, tmp_path, fake_gitleaks(tmp_path, 0), FRICTION_FLUSH_S="2")
+    assert done.returncode == 0 and time.monotonic() - start < 8
+
+
+def test_the_periodic_run_flushes_too(clone: Path, tmp_path: Path) -> None:
+    friction_world(tmp_path, "exit 1")
+    fake = fake_gitleaks(tmp_path, 0)
+    (tmp_path / "bin" / "gitleaks").symlink_to(fake)
+    env = {**os.environ, **ID, "HOME": str(tmp_path / "home"), "PATH": f"{tmp_path / 'bin'}:/usr/bin:/bin",
+           "SAVE_WORK_ROOTS": str(clone.parent), "CLAUDE_CODE_SESSION_ID": "sess1234"}
+    done = subprocess.run(["bash", str(HOOKS / "save-work.sh"), "--periodic"], env=env, capture_output=True,
+                          text=True, timeout=60, stdin=subprocess.DEVNULL)
+    assert done.returncode == 0
+    work_log = tmp_path / "home/.claude/save-work.log"
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline and "friction:" not in (work_log.read_text() if work_log.exists() else ""):
+        time.sleep(0.2)
+    assert "friction: not posted" in work_log.read_text()
 
 
 # session-start.sh

@@ -13,7 +13,8 @@
 # background. `bash save-work.sh --now` runs it by hand. Its log: ~/.claude/save-work.log.
 # Recover: git ls-remote origin 'refs/heads/claude/wip/*', then git fetch origin <ref> and cherry-pick or diff it.
 # Then it flushes the friction log (bin/friction flush, at most FRICTION_FLUSH_S, default 40 s; its notice goes
-# to the log), whatever the pushes did; the flush never changes the exit status.
+# to the log): a comment on this collection's `friction` issue; LOADOUT_FRICTION_POST=0 keeps it local. It runs
+# whatever the pushes did and never changes the exit status.
 set -u
 mode=${1:-}
 [ -t 0 ] || cat >/dev/null # the hook's JSON input: unused

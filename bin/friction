@@ -1,23 +1,31 @@
 #!/usr/bin/env python3
 """The friction record: when anything of this collection refuses, slows or misleads an agent, its owner hears of it.
 
-  friction note "<what got in the way>" [--part <skill, way, rule or hook>] [--workaround "<what I did instead>"]
+  friction note ("<what got in the way>" | --file <path>) [--part <skill, way, rule or hook>] [--workaround "<...>"]
   friction refusal --guard <name> --rule <id>
   friction flush
 
-`note` and `refusal` append one JSON line to the log ($LOADOUT_FRICTION_LOG, default
-~/.claude/loadout-friction.jsonl) in one O_APPEND write, so writers running at once never mix their lines;
-`note` then flushes. A refusal holds the guard and the rule, each a short slug, and nothing of the refused
-command: the log is posted to this collection's tracker, which may be public. Guards load this file with runpy
-and call record_refusal, which never raises and never reaches the network.
+The log ($LOADOUT_FRICTION_LOG, default ~/.claude/loadout-friction.jsonl) is per home directory; each append
+is one O_APPEND write of one JSON line, starting a fresh line when the log does not end in one.
+A refusal holds the guard and the rule, each a short slug, and nothing of the refused command. Guards load this
+file with runpy and call record_refusal, which never raises and never reaches the network.
+A note is posted on this collection's tracker, which may be public, so it is scanned first: gitleaks (a
+secret) and bin/check-generic.sh (the owner's login, a sibling repo, a deny-list word, a date, an issue
+number). A hit refuses the note, naming the kind of hit only, and stores nothing; with gitleaks missing or a
+scan failing, the note is kept in the log and never posted. `note --file` reads the note from a file, so its
+words never pass through a Bash command a guard reads. `note` then flushes.
 
-`flush` posts every unposted line as one comment, first line `🤖 Friction: ...`, on this collection's open
-issue labelled `friction` (label and issue created when missing), the repository taken from this clone's
-origin remote, through `gh api` (REST) only; then it moves the posted mark (the log's path plus `.posted`, a
-byte offset) past them. A flush that fails posts nothing, keeps the lines for the next one and exits 0 with
-one line on stderr. Each call has a timeout and the flush FLUSH_BUDGET seconds in all; one flush runs at a time
-(a lock beside the log); a comment holds at most MAX_COMMENT characters, and the rest waits for the next flush.
-With nothing unposted, a flush makes no call.
+`flush` posts the unposted lines as one comment, first line `🤖 Friction: ...`, on this collection's open issue
+labelled `friction`, creating the label and the issue when missing: refusals as one count per guard and rule,
+notes with their date but no time. The repository is this clone's origin, and it posts only when the
+origin's owner is the login `gh` is authenticated as; REST through `gh api` only. Then the posted mark (the
+log's path plus `.posted`: the offset and the log's identity) moves past them; a log replaced or truncated
+starts again from its beginning. A flush that fails keeps the lines for the next one and exits 0 with one line
+on stderr; it may already have created the label and the issue, and a comment GitHub took whose read-back
+then failed is posted again by the next flush. Each call has a timeout and the flush FLUSH_BUDGET seconds in
+all; one flush runs at a time (a lock beside the log); the notes of one comment hold at most MAX_COMMENT
+characters, the rest waits for the next flush. With nothing unposted it makes no call.
+LOADOUT_FRICTION_POST=0 turns posting off: everything is still recorded, nothing leaves the machine.
 """
 
 from __future__ import annotations
@@ -27,8 +35,10 @@ import fcntl
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -37,9 +47,13 @@ SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
 MAX_TEXT = 500
 MAX_COMMENT = 60_000
 CALL_TIMEOUT = 10
-FLUSH_BUDGET = 25
+try:  # tests shrink it; nothing raises it
+    FLUSH_BUDGET = min(25.0, float(os.environ.get("LOADOUT_FRICTION_BUDGET_S") or 25))
+except ValueError:
+    FLUSH_BUDGET = 25.0
+HERE = Path(__file__).resolve().parent
 ISSUE_BODY = ("🤖 Friction with this collection: each comment lists what refused, slowed or misled an agent, "
-              "from one session's log (bin/friction).")
+              "from one home directory's log (bin/friction).")
 
 
 class Failed(Exception):
@@ -51,58 +65,112 @@ def log_path() -> Path:
 
 
 def one_line(text: object) -> str:
-    return " ".join(str(text).split())[:MAX_TEXT]
+    clean = str(text).encode("utf-8", "replace").decode("utf-8")  # an argv that is not UTF-8 is kept, mended
+    return " ".join(clean.split())[:MAX_TEXT]
 
 
 def slug(text: object) -> str:
     return text if isinstance(text, str) and SLUG.fullmatch(text) else "unnamed"
 
 
-def append(entry: dict[str, str]) -> None:
+def append(entry: dict[str, object]) -> None:
     path = log_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    line = (json.dumps(entry, ensure_ascii=False) + "\n").encode()
+    fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o600)
     try:
-        os.write(fd, (json.dumps(entry, ensure_ascii=False) + "\n").encode())
+        size = os.fstat(fd).st_size
+        if size and os.pread(fd, 1, size - 1) != b"\n":
+            line = b"\n" + line  # a torn last line stays alone, and this one stays whole
+        if os.write(fd, line) != len(line):
+            raise OSError("the log took part of the line")
     finally:
         os.close(fd)
-
-
-def stamp() -> str:
-    return time.strftime("%Y-%m-%dT%H:%MZ", time.gmtime())
 
 
 def record_refusal(guard: str, rule: str) -> None:
     """For guards: note a refusal by the guard's name and the rule's id only. Never raises, never posts."""
     try:
-        append({"at": stamp(), "kind": "refusal", "guard": slug(guard), "rule": slug(rule)})
+        append({"at": time.strftime("%Y-%m-%dT%H:%MZ", time.gmtime()), "kind": "refusal", "guard": slug(guard),
+                "rule": slug(rule)})
     except Exception:  # noqa: BLE001 -- a guard's decision never depends on its log
         pass
 
 
-def record_note(text: str, part: str | None, workaround: str | None) -> None:
-    entry = {"at": stamp(), "kind": "note", "note": one_line(text)}
+def scan(text: str) -> tuple[str, bool]:
+    """(the kind of hit, '' when clean; whether every scanner ran). The matched text is never returned."""
+    leaks = shutil.which("gitleaks") or next((str(p) for p in [Path.home() / ".local/bin/gitleaks"] if p.is_file()),
+                                             None)
+    ran = True
+    if leaks:
+        try:
+            done = subprocess.run([leaks, "stdin", "--no-banner", "--redact", "--exit-code", "3"], input=text,
+                                  capture_output=True, text=True, timeout=CALL_TIMEOUT, check=False)
+            if done.returncode == 3:
+                return "it holds what gitleaks reads as a secret", True
+            ran = done.returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            ran = False
+    else:
+        ran = False
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+        f.write(text + "\n")
+    try:
+        done = subprocess.run(["bash", str(HERE / "check-generic.sh"), f.name], capture_output=True, text=True,
+                              timeout=CALL_TIMEOUT, check=False, stdin=subprocess.DEVNULL)
+        if done.returncode == 1:
+            return ("it names the owner's login, a sibling repo, a deny-list word, a date or an issue number "
+                    "(bin/check-generic.sh)"), ran
+        ran = ran and done.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        ran = False
+    finally:
+        os.unlink(f.name)
+    return "", ran
+
+
+def record_note(text: str, part: str | None, workaround: str | None) -> str:
+    """Scan, then append the note; '' when it may be posted, else why it was refused or kept local."""
+    entry: dict[str, object] = {"at": time.strftime("%Y-%m-%d", time.gmtime()), "kind": "note",
+                                "note": one_line(text)}
     if part:
         entry["part"] = one_line(part)
     if workaround:
         entry["workaround"] = one_line(workaround)
+    hit, ran = scan("\n".join(str(entry[k]) for k in ("note", "part", "workaround") if k in entry))
+    if hit:
+        raise ValueError(f"refused the note: {hit}; write it in generic words and note it again")
+    if not ran:
+        entry["local"] = True
     append(entry)
+    return "" if ran else ("friction: no scanner ran on the note (gitleaks missing or failing), so it stays in the "
+                           "log, unposted")
 
 
-def render(raw: bytes) -> str:
-    """One log line as one Markdown list line (every line starts with `- `, so none can close the fence)."""
+def render(raw: bytes, counts: dict[tuple[str, str], int]) -> str | None:
+    """A note as one list line (each line starts with `- `, so none can close the fence); a refusal is counted
+    in `counts`; a local note gives None; an unreadable line is counted under ('', '')."""
     try:
         e = json.loads(raw)
         if not isinstance(e, dict):
             raise ValueError
     except ValueError:
-        return "- an unreadable line"
-    at = one_line(e.get("at", "?"))
+        counts[("", "")] = counts.get(("", ""), 0) + 1
+        return None
     if e.get("kind") == "refusal":
-        return f"- {at} refusal: {slug(e.get('guard'))}, rule {slug(e.get('rule'))}"
+        key = (slug(e.get("guard")), slug(e.get("rule")))
+        counts[key] = counts.get(key, 0) + 1
+        return None
+    if e.get("kind") != "note" or e.get("local"):
+        return None
+    day = one_line(e.get("at", "?"))[:10]
     part = f" ({one_line(e['part'])})" if e.get("part") else ""
     workaround = f"; workaround: {one_line(e['workaround'])}" if e.get("workaround") else ""
-    return f"- {at} note{part}: {one_line(e.get('note', ''))}{workaround}"
+    return f"- {day} note{part}: {one_line(e.get('note', ''))}{workaround}"
+
+
+def loose(text: str) -> str:
+    return "\n".join(x.rstrip() for x in text.strip().splitlines())
 
 
 class Flush:
@@ -112,7 +180,7 @@ class Flush:
     def run(self, *args: str, payload: object = None) -> str:
         budget = min(CALL_TIMEOUT, self.deadline - time.monotonic())
         if budget < 1:
-            raise Failed(f"its {FLUSH_BUDGET} s ran out")
+            raise Failed(f"its {FLUSH_BUDGET:.0f} s ran out")
         try:
             done = subprocess.run(list(args), capture_output=True, text=True, timeout=budget, check=False,
                                   input=None if payload is None else json.dumps(payload),
@@ -132,10 +200,14 @@ class Flush:
             raise Failed(f"`gh api {args[-1]}` answered something that is not JSON") from exc
 
     def repo(self) -> str:
-        url = self.run("git", "-C", str(Path(__file__).resolve().parent), "remote", "get-url", "origin").strip()
+        """The origin's `<owner>/<repo>`, once the authenticated login is its owner."""
+        url = self.run("git", "-C", str(HERE), "remote", "get-url", "origin").strip()
         m = re.search(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?/*$", url)
         if not m:
             raise Failed("this clone's origin names no GitHub repository")
+        login = self.run("gh", "api", "user", "--jq", ".login").strip()
+        if login.lower() != m.group(1).lower():
+            raise Failed("the origin's owner is not the authenticated account, so nothing goes there")
         return f"{m.group(1)}/{m.group(2)}"
 
     def issue(self, repo: str) -> int:
@@ -159,6 +231,10 @@ class Flush:
         return new["number"]
 
 
+def identity(data: bytes, st: os.stat_result) -> dict[str, object]:
+    return {"ino": st.st_ino, "first": data.split(b"\n", 1)[0][:256].hex()}
+
+
 def flush() -> str:
     """Post the unposted lines; a one-line notice of what happened ('' when nothing was unposted)."""
     path = log_path()
@@ -170,45 +246,61 @@ def flush() -> str:
         except BlockingIOError:
             return "friction: another flush is running"
         mark = Path(f"{path}.posted")
-        try:
-            offset = int(mark.read_text().strip() or 0)
-        except (OSError, ValueError):
-            offset = 0
         data = path.read_bytes()
+        here = identity(data, path.stat())
+        try:
+            stored = json.loads(mark.read_text())
+            offset = int(stored["offset"]) if {k: stored.get(k) for k in here} == here else 0
+        except (OSError, ValueError, TypeError, KeyError):
+            offset = 0
         if offset > len(data):
             offset = 0  # the log was replaced: post it from its start
-        pending = data[offset:data.rfind(b"\n") + 1] if data.rfind(b"\n") >= offset else b""
-        lines, used, size = [], 0, 0
+        end = data.rfind(b"\n") + 1
+        pending = data[offset:end] if end > offset else b""
+        notes, counts, used, size = [], {}, 0, 0
         for raw in pending.splitlines(keepends=True):
-            text = render(raw.strip())
-            if lines and size + len(text) > MAX_COMMENT:
-                break
-            lines.append(text)
-            used, size = used + len(raw), size + len(text) + 1
-        if not lines:
+            text = render(raw.strip(), counts) if raw.strip() else None
+            if text is not None:
+                if notes and size + len(text) > MAX_COMMENT:
+                    break
+                notes.append(text)
+                size += len(text) + 1
+            used += len(raw)
+        if not used:
             return ""
+        lines = [f"- refusals: {g}, rule {r}: {n}" for (g, r), n in sorted(counts.items()) if g]
+        lines += [f"- unreadable lines: {counts[('', '')]}"] if ("", "") in counts else []
+        lines += notes
+        posted_mark = json.dumps({"offset": offset + used, **here})
+        if not lines:  # local notes only: nothing to post
+            mark.write_text(posted_mark)
+            return ""
+        if os.environ.get("LOADOUT_FRICTION_POST") == "0":
+            return f"friction: posting is off (LOADOUT_FRICTION_POST=0); {len(lines)} lines stay in {path}"
         try:
             run = Flush()
             repo = run.repo()
             number = run.issue(repo)
-            body = (f"🤖 Friction: {len(lines)} new {'entry' if len(lines) == 1 else 'entries'} from one "
-                    "session's log\n\n~~~text\n" + "\n".join(lines) + "\n~~~\n")
+            refusals = sum(n for (g, _), n in counts.items() if g)
+            body = (f"🤖 Friction: notes {len(notes)}, refusals {refusals}, from one home directory's log\n\n"
+                    "~~~text\n" + "\n".join(lines) + "\n~~~\n")
             posted = run.gh("-X", "POST", f"repos/{repo}/issues/{number}/comments", payload={"body": body})
-            if not isinstance(posted, dict) or posted.get("body") != body:
+            if not isinstance(posted, dict) or loose(str(posted.get("body"))) != loose(body):
                 raise Failed("the posted comment did not read back as sent")
         except Failed as exc:
             return f"friction: not posted, kept for the next flush ({exc})"
         tmp = Path(f"{mark}.tmp")
-        tmp.write_text(str(offset + used))
+        tmp.write_text(posted_mark)
         tmp.replace(mark)
-        return f"friction: posted {len(lines)} {'entry' if len(lines) == 1 else 'entries'} to {repo}#{number}"
+        return f"friction: posted {len(notes)} notes and {refusals} refusals to {repo}#{number}"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="friction", description=__doc__.split("\n\n", 1)[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    note = sub.add_parser("note", help="note what got in the way, then flush")
-    note.add_argument("text")
+    note = sub.add_parser("note", help="note what got in the way (scanned), then flush")
+    note.add_argument("text", nargs="?")
+    note.add_argument("--file", help="read the note from this file")
     note.add_argument("--part", help="the skill, way, rule or hook")
     note.add_argument("--workaround", help="what you did instead")
     refusal = sub.add_parser("refusal", help="note a guard's refusal (guard and rule only)")
@@ -220,11 +312,19 @@ def main() -> int:
         record_refusal(args.guard, args.rule)
         return 0
     if args.command == "note":
+        if (args.text is None) == (args.file is None):
+            parser.error("give the note as text or as --file <path>, one of them")
         try:
-            record_note(args.text, args.part, args.workaround)
-        except OSError as exc:
-            print(f"friction: could not write {log_path()} ({exc})", file=sys.stderr)
+            text = args.text if args.file is None else Path(args.file).read_bytes().decode("utf-8", "replace")
+            kept = record_note(text, args.part, args.workaround)
+        except ValueError as exc:
+            print(f"friction: {exc}", file=sys.stderr)
             return 1
+        except OSError as exc:
+            print(f"friction: could not read the note or write the log ({exc.strerror or exc})", file=sys.stderr)
+            return 1
+        if kept:
+            print(kept, file=sys.stderr)
     try:
         notice = flush()
     except Exception as exc:  # noqa: BLE001 -- a flush never fails its caller
