@@ -465,7 +465,8 @@ def test_the_refusal_says_how_to_merge_and_how_to_write_the_words(fx: Fx, clone:
     assert merge_sh and Path(merge_sh.group(1)).is_file(), reason
     assert friction and Path(friction.group(1)).is_file(), reason
     for words in ("MCP merge tool", "`expectedHeadSha`", "Grep tool", "Write tool", "`git commit -F <file>`",
-                  "-F body=@<file>", "--part merge-guard --workaround"):
+                  "-F body=@<file>", "note --file <file> --part merge-guard", "which may be public",
+                  "no repo name, path, data or secret"):
         assert words in reason, words
     hooks = bash(fx, "git commit --no-verify -m x", clone)
     assert hooks and "fix what it names" in hooks and "MCP merge tool" not in hooks and "Grep tool" in hooks
@@ -568,3 +569,42 @@ def test_an_unwritable_friction_log_leaves_the_decision_alone(fx: Fx, clone: Pat
         reason = run(fx, {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 12"}}, clone,
                      LOADOUT_FRICTION_LOG=log)
         assert reason and "rule `pr-merge`" in reason, log
+
+
+def test_a_pr_the_owner_merges_is_refused_whatever_its_records(fx: Fx, clone: Path) -> None:
+    fx.both()
+    (fx.d / "pr.json").write_text(json.dumps({**pr_answer(HEAD), "labels": [{"name": "owner-merges"}]}))
+    reason = mcp(fx, clone, expectedHeadSha=HEAD)
+    assert reason and "`owner-merges`" in reason and "the merge is the owner's" in reason, reason
+    done = check(fx, clone, "--check", f"{REPO}#12")
+    assert done.returncode == 1 and "`owner-merges`" in done.stderr and done.stdout == ""
+    (fx.d / "pr.json").write_text(json.dumps({**pr_answer(HEAD), "labels": [{"name": "other"}]}))
+    assert mcp(fx, clone, expectedHeadSha=HEAD) is None
+
+
+def nested(tool: str, command: str) -> str:
+    deep = "[" * 100_000 + "]" * 100_000
+    return json.dumps({"tool_name": tool, "tool_input": {"command": command, "owner": "example-owner",
+                                                         "repo": "example-repo", "pullNumber": 12}})[:-1] \
+        + f', "x": {deep}}}'
+
+
+@pytest.mark.parametrize("tool, refused", [("Bash", False), ("mcp__github__merge_pull_request", True),
+                                           ("mcp__github__enable_pr_auto_merge", True)])
+def test_input_nested_too_deep_fails_closed_for_a_merge_and_passes_a_command(
+        fx: Fx, clone: Path, tool: str, refused: bool) -> None:
+    done = subprocess.run([sys.executable, str(GUARD)], input=nested(tool, "ls"), capture_output=True, text=True,
+                          timeout=60, env=guard_env(fx))
+    assert done.returncode == 0 and done.stderr == "", done.stderr[-300:]
+    assert bool(done.stdout.strip()) is refused
+    if refused:
+        assert "fails closed" in done.stdout and [e["rule"] for e in fx.noted()] == ["guard-error"]
+
+
+def test_check_mode_fails_closed_on_a_guard_error(fx: Fx, clone: Path, tmp_path: Path) -> None:
+    fx.both()
+    done = subprocess.run([sys.executable, str(broken_copy(tmp_path, "check_merge")), "--check", f"{REPO}#12"],
+                          cwd=clone, capture_output=True, text=True, timeout=60, env=guard_env(fx),
+                          stdin=subprocess.DEVNULL)
+    assert done.returncode == 1 and "the merge guard failed" in done.stderr and "fails closed" in done.stderr
+    assert done.stdout == ""

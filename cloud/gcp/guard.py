@@ -367,15 +367,20 @@ def note_refusal(rule: str) -> None:
 
 
 def main() -> int:
+    raw = sys.stdin.read()
     try:
-        event = json.load(sys.stdin)
+        event, deep = json.loads(raw), False
     except ValueError:
         return 0
+    except RecursionError:  # nested past what json reads: the failure rule below, on the raw text
+        event, deep = {"tool_name": "Bash", "tool_input": {"command": raw}}, True
     if event.get("tool_name") != "Bash":
         return 0
     command = (event.get("tool_input") or {}).get("command") or ""
     rule = "spend"
     try:
+        if deep:
+            raise ValueError("its input is nested too deep to read")
         reason = verdict(command)
     except Exception as exc:  # noqa: BLE001 -- a guard bug must not wave a GCP command through
         rule = "guard-error"
