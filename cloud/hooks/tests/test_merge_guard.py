@@ -10,8 +10,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import runpy
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -50,8 +52,8 @@ def comment(body: str, assoc: str = "OWNER", edited: bool = False) -> dict:
 class Fx:
     def __init__(self, d: Path) -> None:
         self.d = d
+        self.friction = d.parent / "friction.jsonl"
         (d / "pr.json").write_text(json.dumps(pr_answer(HEAD)))
-        (d / "pulls.json").write_text(json.dumps([{"number": 12}]))
 
     def comments(self, *cs: dict) -> None:
         out = []
@@ -64,6 +66,9 @@ class Fx:
 
     def both(self, tier: str = "standard") -> None:
         self.comments(comment(record("gates")), comment(record("review", tier=tier)))
+
+    def noted(self) -> list[dict]:
+        return [json.loads(x) for x in self.friction.read_text().splitlines()] if self.friction.exists() else []
 
     def gets(self) -> list[str]:
         p = self.d / "calls.jsonl"
@@ -93,7 +98,8 @@ def guard_env(fx: Fx, gh: bool = True, **env: str) -> dict[str, str]:
         STUB.chmod(0o755)
         (bin_dir / "gh").symlink_to(STUB)
     e = {k: v for k, v in os.environ.items() if k != "GH_REPO"}
-    return {**e, **ID, "PATH": f"{bin_dir}:/usr/bin:/bin", "STUB_DIR": str(fx.d), **env}
+    return {**e, **ID, "PATH": f"{bin_dir}:/usr/bin:/bin", "STUB_DIR": str(fx.d),
+            "LOADOUT_FRICTION_LOG": str(fx.friction), **env}
 
 
 def run(fx: Fx, event: dict, cwd: Path, gh: bool = True, **env: str) -> str | None:
@@ -225,9 +231,10 @@ def test_no_gh_at_all_fails_closed(fx: Fx, clone: Path) -> None:
 
 def test_auto_merge_is_refused(fx: Fx, clone: Path) -> None:
     fx.both()
-    assert run(fx, {"tool_name": "mcp__github__enable_pr_auto_merge",
-                    "tool_input": {"owner": "example-owner", "repo": "example-repo", "pullNumber": 12}}, clone)
-    assert bash(fx, f"gh pr merge 12 --auto --match-head-commit {HEAD}", clone)
+    reason = run(fx, {"tool_name": "mcp__github__enable_pr_auto_merge",
+                      "tool_input": {"owner": "example-owner", "repo": "example-repo", "pullNumber": 12}}, clone)
+    assert reason and "auto-merge" in reason
+    assert fx.gets() == []
 
 
 # The tier check, in a local clone holding the head.
@@ -271,108 +278,6 @@ def test_without_a_local_clone_the_tier_check_is_skipped(fx: Fx, local: tuple[Pa
     assert mcp(fx, clone, expectedHeadSha=head) is None  # `clone` does not hold the head
 
 
-# Shell merges.
-
-SHELL_MERGES = [
-    "gh pr merge 12 --squash",
-    f"gh pr merge 12 -R {REPO} --squash",
-    "gh pr merge https://github.com/example-owner/example-repo/pull/12",
-    "gh pr merge feature",
-    "gh pr merge",
-    "cd {clone} && gh pr merge 12",
-    "GH_REPO=example-owner/example-repo gh pr merge 12",
-    f"gh api -X PUT repos/{REPO}/pulls/12/merge -f merge_method=squash",
-    f"gh api --method PUT /repos/{REPO}/pulls/12/merge",
-    "gh api -X PUT 'repos/{{owner}}/{{repo}}/pulls/12/merge'",
-    "timeout 30 gh pr merge 12",
-    "bash -c 'gh pr merge 12 --squash'",
-    "eval gh pr merge 12",
-    "bash <<'EOF'\ngh pr merge 12\nEOF",
-    "echo start; gh pr merge 12 | tail -1",
-]
-
-
-@pytest.mark.parametrize("command", SHELL_MERGES)
-def test_each_shell_merge_is_checked(fx: Fx, clone: Path, command: str) -> None:
-    command = command.replace("{clone}", str(clone)).replace("{{", "{").replace("}}", "}")
-    fx.comments(comment(record("gates")))
-    reason = bash(fx, command, clone)
-    assert reason and "no review record" in reason, command
-    assert f"repos/{REPO}/pulls/12" in fx.gets(), command
-
-
-def test_a_shell_merge_with_both_records_naming_the_head_passes(fx: Fx, clone: Path) -> None:
-    fx.both()
-    assert bash(fx, f"gh pr merge 12 --squash --match-head-commit {HEAD}", clone) is None
-    assert bash(fx, f"gh api -X PUT repos/{REPO}/pulls/12/merge -f sha={HEAD}", clone) is None
-    assert bash(fx, "gh pr merge 12 --squash", clone)  # names no head
-
-
-def test_a_merge_outside_rest_is_refused(fx: Fx, clone: Path) -> None:
-    assert bash(fx, "gh api graphql -f query='mutation { mergePullRequest(input: {}) { clientMutationId } }'",
-                clone)
-    assert bash(fx, f"curl -X PUT https://api.github.com/repos/{REPO}/pulls/12/merge", clone)
-
-
-ALLOWED = [
-    "gh pr view 12",
-    "gh pr list",
-    f"gh api repos/{REPO}/pulls/12/merge",  # GET: is it merged?
-    f"gh api repos/{REPO}/pulls/12",
-    "echo 'gh pr merge 12'",
-    "cat > notes.md <<'EOF'\ngh pr merge 12\ngit commit --no-verify\nEOF",
-    "git commit -m 'teach the guard about -n and --no-verify'",
-    "git commit -am 'x'",
-    "git push -n origin main",  # push's -n is --dry-run
-    "git push origin feature",
-    "ls -la",
-]
-
-
-@pytest.mark.parametrize("command", ALLOWED)
-def test_other_commands_pass_without_reading_github(fx: Fx, clone: Path, command: str) -> None:
-    assert bash(fx, command, clone) is None, command
-    assert fx.gets() == [], command
-
-
-NO_VERIFY = [
-    "git commit --no-verify -m x",
-    "git commit -n -m x",
-    "git commit -anm x",
-    "git -C /tmp/x commit --no-verify",
-    "git push --no-verify origin feature",
-    "git -c core.hooksPath=/dev/null commit -m x",
-    "cd /tmp && git commit -qnm x",
-    "bash -c 'git push --no-verify'",
-]
-
-
-@pytest.mark.parametrize("command", NO_VERIFY)
-def test_no_verify_is_refused(fx: Fx, clone: Path, command: str) -> None:
-    reason = bash(fx, command, clone)
-    assert reason and "fix what it names" in reason, command
-
-
-def test_a_guard_failure_on_a_merge_fails_closed_and_passes_other_calls(fx: Fx, clone: Path,
-                                                                       tmp_path: Path) -> None:
-    # A copy of the guard whose command reading is broken: a bug must neither wave a merge through nor block.
-    broken = tmp_path / "broken" / "merge-guard.py"
-    broken.parent.mkdir()
-    src = GUARD.read_text()
-    assert src.count("def command_of(words: list[str])") == 1
-    broken.write_text(src.replace("def command_of(words: list[str])",
-                                  "def command_of(words: list[str]) -> None:\n    raise RuntimeError('bug')\n\n\n"
-                                  "def unused(words: list[str])"))
-    for command, refused in (("gh pr merge 12", True), ("ls -la", False)):
-        done = subprocess.run([sys.executable, str(broken)], capture_output=True, text=True, env=guard_env(fx),
-                              input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command},
-                                                "cwd": str(clone)}), check=True)
-        assert bool(done.stdout.strip()) is refused, command
-        if refused:
-            assert "fails closed" in done.stdout
-    assert fx.gets() == []
-
-
 def test_bad_input_passes_silently(fx: Fx) -> None:
     done = subprocess.run([sys.executable, str(GUARD)], input="not json", capture_output=True, text=True)
     assert done.returncode == 0 and done.stdout == ""
@@ -407,100 +312,7 @@ def test_check_mode_usage(fx: Fx, clone: Path) -> None:
     assert check(fx, clone, "--check", "x#y").returncode == 2
 
 
-# Forms a fresh review found the guard let through, each now checked.
-
-HIDDEN_MERGES = [
-    "if gh pr checks 12; then gh pr merge 12 --squash; fi",
-    "for p in 12; do gh pr merge 12; done",
-    "while true; do gh pr merge 12; break; done",
-    "gh pr checks 12 && { gh pr merge 12; }",
-    "! gh pr merge 12",
-    "( gh pr merge 12 )",
-    "bash -lc 'gh pr merge 12'",
-    "bash -ec 'gh pr merge 12'",
-    "bash -c -- 'gh pr merge 12'",
-    "sh -xc 'gh pr merge 12'",
-    f"gh -R {REPO} pr merge 12",
-    f"gh --repo {REPO} pr merge 12",
-    f"gh --repo={REPO} pr merge 12",
-    f"gh pr -R {REPO} merge 12",
-    f"gh -R{REPO} pr merge 12",
-    f"gh api -XPUT repos/{REPO}/pulls/12/merge",
-    f"gh api --method=PUT repos/{REPO}/pulls/12/merge",
-]
-
-
-@pytest.mark.parametrize("command", HIDDEN_MERGES)
-def test_merges_behind_keywords_flags_and_attached_values_are_checked(fx: Fx, clone: Path,
-                                                                      command: str) -> None:
-    fx.comments(comment(record("gates")))
-    reason = bash(fx, command, clone)
-    assert reason and "no review record" in reason, command
-
-
-def test_a_repo_flag_before_the_subcommand_names_the_repo(fx: Fx, tmp_path: Path) -> None:
-    nowhere = tmp_path / "nowhere"  # no clone here: the repo can only come from the flag
-    nowhere.mkdir()
-    fx.comments(comment(record("gates")))
-    reason = bash(fx, f"gh -R {REPO} pr merge 12", nowhere)
-    assert reason and f"PR 12 of {REPO}" in reason
-
-
-@pytest.mark.parametrize("command", [
-    f"gh -R {REPO} pr merge 12 --auto",
-    f"gh --repo={REPO} pr merge --auto 12",
-    "if true; then gh pr merge 12 --auto; fi",
-])
-def test_auto_merge_behind_a_repo_flag_or_keyword_is_refused(fx: Fx, clone: Path, command: str) -> None:
-    reason = bash(fx, command, clone)
-    assert reason and "auto-merge" in reason
-
-
-@pytest.mark.parametrize("command", [
-    f"curl -XPUT https://api.github.com/repos/{REPO}/pulls/12/merge",
-    f"curl --request=PUT https://api.github.com/repos/{REPO}/pulls/12/merge",
-    "gh api graphql -F query=@merge.graphql",
-    "gh api graphql --input body.json",
-    "curl -d @q.json https://api.github.com/graphql",
-])
-def test_merges_the_guard_cannot_read_are_refused(fx: Fx, clone: Path, command: str) -> None:
-    assert bash(fx, command, clone), command
-
-
-def test_an_inline_graphql_read_passes(fx: Fx, clone: Path) -> None:
-    assert bash(fx, "gh api graphql -f query='{ viewer { login } }'", clone) is None
-
-
-@pytest.mark.parametrize("command", [
-    "git commit --no-veri -m x",
-    "git push --no-verif origin feature",
-    "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git commit -m x",
-    "env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=CORE.HOOKSPATH GIT_CONFIG_VALUE_0=/x git push",
-    "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/x; git commit -m x",
-    "GIT_CONFIG_PARAMETERS=\"'core.hooksPath'='/x'\" git commit -m x",
-    "git --config-env=core.hooksPath=EMPTY commit -m x",
-    "git -c Core.HooksPath=/x push",
-    "bash -lc 'git commit -n -m x'",
-    "if true; then git commit --no-verify -m x; fi",
-])
-def test_more_hook_bypasses_are_refused(fx: Fx, clone: Path, command: str) -> None:
-    reason = bash(fx, command, clone)
-    assert reason and "fix what it names" in reason, command
-
-
-@pytest.mark.parametrize("command", [
-    "git commit -uno -m x",
-    "git commit -Skey -m x",
-    "git commit --no-verbose -m x",
-    "git push --no-ver",  # ambiguous in git (`--no-verbose`), so git itself refuses it
-])
-def test_options_that_only_look_like_no_verify_pass(fx: Fx, clone: Path, command: str) -> None:
-    assert bash(fx, command, clone) is None, command
-
-
 def test_a_slow_github_runs_out_of_budget_and_refuses(fx: Fx, clone: Path) -> None:
-    import time
-
     fx.comments(*[comment(f"note {i}") for i in range(250)], comment(record("gates")), comment(record("review")))
     start = time.monotonic()
     reason = run(fx, {"tool_name": "mcp__github__merge_pull_request",
@@ -521,138 +333,6 @@ def test_a_malformed_merge_tool_input_is_refused(fx: Fx, clone: Path) -> None:
     assert run(fx, {"tool_name": "mcp__github__merge_pull_request", "tool_input": "12"}, clone)
     assert run(fx, {"tool_name": "mcp__github__merge_pull_request",
                     "tool_input": {"owner": ["x"], "repo": 3, "pullNumber": True}}, clone)
-
-
-# The token-to-decision points, each probed with unusual spellings: a shell's options, wrappers and their
-# values, runners, substitution and quoting, gh's flag forms, methods, endpoints, PR selectors and repos.
-
-CHECKED_MERGES = [
-    # shell options that take a value, `+` options, options after -c, here-strings
-    "bash -o pipefail -c 'gh pr merge 12'",
-    "sh -O extglob -c 'gh pr merge 12'",
-    "bash +x -c 'gh pr merge 12'",
-    "bash -c -e 'gh pr merge 12'",
-    "bash --rcfile /dev/null -c 'gh pr merge 12'",
-    "bash --norc --noprofile -c 'gh pr merge 12'",
-    "bash -co pipefail 'gh pr merge 12'",
-    "bash <<< 'gh pr merge 12'",
-    "zsh -fc 'gh pr merge 12'",
-    # wrappers with option values, substitution, quoting
-    "sudo -u root gh pr merge 12",
-    "timeout -s KILL 5 gh pr merge 12",
-    "timeout --kill-after=1 5 gh pr merge 12",
-    "env -i gh pr merge 12",
-    "env -S 'gh pr merge 12'",
-    "nice -n 5 gh pr merge 12",
-    "command gh pr merge 12",
-    "echo `gh pr merge 12`",
-    "x=$(gh pr merge 12)",
-    "gh pr $'merge' 12",
-    "g\\h pr merge 12",
-    "/usr/local/bin/gh pr merge 12",
-    # gh's flag forms, methods, endpoints
-    f"gh -R={REPO} pr merge 12",
-    f"gh pr merge 12 --repo {REPO}",
-    f"gh api -X GET -X PUT repos/{REPO}/pulls/12/merge",
-    f"gh api -X PUT -X GET repos/{REPO}/pulls/12/merge",
-    f"gh api -X=PUT repos/{REPO}/pulls/12/merge",
-    f"gh api -iXPUT repos/{REPO}/pulls/12/merge",
-    f"gh api -X put repos/{REPO}/pulls/12/merge",
-    f"gh api -f merge_method=squash repos/{REPO}/pulls/12/merge",
-    f"gh api -X PUT REPOS/{REPO}/PULLS/12/MERGE",
-    f"gh api -X PUT repos/{REPO}/pulls/12/../12/merge",
-    f"gh api -X PUT repos%2F{REPO.replace('/', '%2F')}%2Fpulls%2F12%2Fmerge",
-    f"gh api -X PUT https://api.github.com/repos/{REPO}/pulls/12/merge",
-    f"gh api -X PUT /repos/{REPO}/pulls/12/merge/",
-    # PR selectors
-    "gh pr merge '#12'",
-    "gh pr merge HTTPS://GITHUB.COM/example-owner/example-repo/pull/12/files",
-    "gh pr merge -- 12",
-    # a line continuation, substitutions inside double quotes, a `#` inside a word
-    "gh pr \\\nmerge 12",
-    "echo \"$(gh pr merge 12)\"",
-    "x=\"`gh pr merge 12`\"",
-    "echo a#b; gh pr merge 12",
-]
-
-
-@pytest.mark.parametrize("command", CHECKED_MERGES)
-def test_every_spelling_of_a_merge_reaches_the_record_check(fx: Fx, clone: Path, command: str) -> None:
-    fx.comments(comment(record("gates")))
-    reason = bash(fx, command, clone)
-    assert reason and "no review record" in reason, (command, reason)
-
-
-NOT_MERGES = [
-    "bash script.sh 'gh pr merge 12'",  # arguments of a script, not commands
-    "bash -o pipefail -c 'ls -la'",
-    "sudo -u root ls",
-    "timeout -s KILL 5 ls",
-    f"gh api --method=GET repos/{REPO}/pulls/12/merge",
-    f"gh api -XGET repos/{REPO}/pulls/12/merge",
-    f"gh api -X HEAD repos/{REPO}/pulls/12/merge",
-    "gh api graphql -F n=@count.txt -f query='{viewer{login}}'",
-    "gh api graphql -fquery='{viewer{login}}'",
-    "curl -u someone@example.com -d '{\"query\":\"{viewer{login}}\"}' https://api.github.com/graphql",
-    "curl -H 'X-Note: a@b' -d '{\"query\":\"{viewer{login}}\"}' https://api.github.com/graphql",
-    f"curl -s https://api.github.com/repos/{REPO}/pulls/12/merge",
-]
-
-
-@pytest.mark.parametrize("command", NOT_MERGES)
-def test_look_alikes_that_merge_nothing_pass(fx: Fx, clone: Path, command: str) -> None:
-    assert bash(fx, command, clone) is None, command
-
-
-GRAPHQL_REFUSED = [
-    "gh api graphql --input=q.json",
-    "gh api graphql --input q.json",
-    "gh api graphql -Fquery=@q.graphql",
-    "gh api graphql -F=query=@q.graphql",
-    "gh api graphql --field=query=@q.graphql",
-    "gh api graphql --field query=@q.graphql",
-    "gh api graphql -iFquery=@q.graphql",
-    "gh api graphql -fquery='mutation{mergePullRequest(input:{}){clientMutationId}}'",
-    "gh api graphql -f=query='mutation{mergePullRequest(input:{}){clientMutationId}}'",
-    "gh api graphql --raw-field=query='mutation{mergePullRequest(input:{}){clientMutationId}}'",
-    "gh api graphql --raw-field 'query=mutation{MERGEPULLREQUEST(input:{}){clientMutationId}}'",
-    "gh api graphql -F query='mutation{enablePullRequestAutoMerge(input:{}){clientMutationId}}'",
-    "gh api /graphql -F query=@q.graphql",
-    "gh api https://api.github.com/graphql --input q.json",
-    "curl -d @q.json https://api.github.com/graphql",
-    "curl --data-binary @q.json https://api.github.com/graphql",
-    "curl -d@q.json https://api.github.com/graphql",
-    "curl -T q.json https://api.github.com/graphql",
-    "curl --json @q.json https://API.GITHUB.COM/graphql",
-    "wget --post-file=q.json https://api.github.com/graphql",
-    "http POST https://api.github.com/graphql @q.json",
-    "curl -d '{\"query\":\"mutation{mergePullRequest(input:{}){clientMutationId}}\"}' https://api.github.com/graphql",
-]
-
-
-@pytest.mark.parametrize("command", GRAPHQL_REFUSED)
-def test_every_spelling_of_an_unreadable_or_merging_graphql_call_is_refused(fx: Fx, clone: Path,
-                                                                           command: str) -> None:
-    reason = bash(fx, command, clone)
-    assert reason and "GraphQL" in reason, (command, reason)
-
-
-HTTP_MERGES = [
-    f"curl -sSXPUT https://api.github.com/repos/{REPO}/pulls/12/merge",
-    f"curl -X PUT -X GET https://api.github.com/repos/{REPO}/pulls/12/merge",
-    f"curl -d '{{}}' https://api.github.com/repos/{REPO}/pulls/12/merge",
-    f"curl --request PUT HTTPS://API.GITHUB.COM/repos/{REPO}/pulls/12/merge",
-    f"curl -X PUT api.github.com//repos/{REPO}/pulls/12/merge",
-    f"wget --method=PUT https://api.github.com/repos/{REPO}/pulls/12/merge",
-    f"http PUT https://api.github.com/repos/{REPO}/pulls/12/merge",
-    f"xh put https://api.github.com/repos/{REPO}/pulls/12/merge merge_method=squash",
-]
-
-
-@pytest.mark.parametrize("command", HTTP_MERGES)
-def test_every_http_client_merge_is_refused(fx: Fx, clone: Path, command: str) -> None:
-    reason = bash(fx, command, clone)
-    assert reason and "HTTP client" in reason, (command, reason)
 
 
 def _slow_git(fx: Fx, seconds: float) -> None:
@@ -700,42 +380,191 @@ def test_a_clone_without_the_default_branch_skips_the_tier_check(fx: Fx, local: 
     assert mcp(fx, r, expectedHeadSha=head) is None
 
 
-# Forms outside what the guard covers pass unchecked, as its header says; ordinary searches among them.
+# The Bash rule: the command's text, never parsed as shell.
 
-OUT_OF_SCOPE = [
-    "find docs -name '*.md' -exec grep -l 'gh pr merge' {} +",
-    "strace -f -e trace=execve grep 'gh pr merge' README.md",
-    "parallel echo ::: 'gh pr merge 5'",
-    "setsid gh pr merge 12",
-    "find . -maxdepth 0 -exec gh pr merge 12 \\;",
-    "su -c 'gh pr merge 12' someone",
-    "echo 'gh pr merge 12' | bash",
-    "echo 12 | xargs gh pr merge",
-    "busybox sh -c 'gh pr merge 12'",
-    "x=merge; gh pr $x 12",
+
+def guard_module() -> dict:
+    return runpy.run_path(str(GUARD), run_name="merge_guard")
+
+
+# Each rule with the commands that mention only it: removing a pattern, or its case-insensitivity, turns one red.
+ONE_RULE = [
+    ("pr-merge", "gh pr merge 12 --squash"),
+    ("pr-merge", "GH PR MERGE 12"),
+    ("pr-merge", "gh pr\tmerge 12"),
+    ("merge-endpoint", f"gh api -X PUT repos/{REPO}/pulls/12/merge -f sha={HEAD}"),
+    ("merge-endpoint", "curl -X PUT https://api.github.com/REPOS/o/r/PULLS/$PR/MERGE"),
+    ("merge-mutation", "gh api graphql -f query='mutation{mergePullRequest(input:{}){clientMutationId}}'"),
+    ("merge-mutation", "gh api graphql -f query='mutation{ENABLEPULLREQUESTAUTOMERGE(input:{}){x}}'"),
+    ("no-verify", "git commit --no-verify -m x"),
+    ("no-verify", "git push --NO-VERIFY origin feature"),
+    ("hooks-path", "git -c core.hooksPath=/dev/null commit -m x"),
+    ("hooks-path", "git --config-env=CORE.HOOKSPATH=EMPTY push"),
 ]
 
 
-@pytest.mark.parametrize("command", OUT_OF_SCOPE)
-def test_forms_outside_the_covered_ones_pass_without_reading_github(fx: Fx, clone: Path, command: str) -> None:
-    assert bash(fx, command, clone) is None, command
+@pytest.mark.parametrize("rule, command", ONE_RULE)
+def test_each_rule_refuses_the_commands_that_mention_it(fx: Fx, clone: Path, rule: str, command: str) -> None:
+    hits = [r for r, _, pattern, _ in guard_module()["MENTIONS"] if pattern.search(command)]
+    assert hits == [rule], (command, hits)
+    reason = bash(fx, command, clone)
+    assert reason and f"rule `{rule}`" in reason, (command, reason)
     assert fx.gets() == [], command
 
 
-@pytest.mark.parametrize("command", ["time -p gh pr merge 5", "time gh pr merge 5", "time -f %e gh pr merge 5"])
-def test_time_with_its_options_is_a_wrapper(fx: Fx, clone: Path, command: str) -> None:
+ORDINARY = [
+    "git merge main",
+    'git commit -m "merge branch feature"',
+    "gh pr view 12",
+    "gh pr list --state merged",
+    f"gh api repos/{REPO}/pulls/5",
+    f"gh api repos/{REPO}/pulls/5 | jq .mergeable",
+    "git push origin feature",
+    "git config core.hooksPath .githooks",
+    'echo "the pr merged on time"',
+    'echo "an expr merge step"',
+    "ls -la",
+]
+
+
+@pytest.mark.parametrize("command", ORDINARY)
+def test_ordinary_commands_pass_without_reading_github(fx: Fx, clone: Path, command: str) -> None:
+    assert bash(fx, command, clone) is None, command
+    assert fx.gets() == [] and fx.noted() == [], command
+
+
+# The autopilot's merge script holds none of the words, so its calls pass; anything added that does is refused.
+MERGE_SH_CALLS = [
+    "bash /home/user/loadout/cloud/skills/autopilot/scripts/merge.sh 12",
+    "$AP/scripts/merge.sh 12 --dry-run",
+    "AUTOPILOT_HOLD_LABELS='hold-a hold-b' bash \"$AP/scripts/merge.sh\" 12",
+]
+MERGE_SH_SMUGGLED = [
+    "bash $AP/scripts/merge.sh 5; gh pr merge 6",
+    "bash $AP/scripts/merge.sh 5\ngh pr merge 6",
+    "bash $AP/scripts/merge.sh $(gh pr merge 6)",
+    f"bash $AP/scripts/merge.sh 5 && gh api -X PUT repos/{REPO}/pulls/6/merge",
+]
+
+
+@pytest.mark.parametrize("command", MERGE_SH_CALLS)
+def test_the_merge_script_passes(fx: Fx, clone: Path, command: str) -> None:
+    assert bash(fx, command, clone) is None, command
+
+
+@pytest.mark.parametrize("command", MERGE_SH_SMUGGLED)
+def test_a_merge_smuggled_beside_the_merge_script_is_refused(fx: Fx, clone: Path, command: str) -> None:
+    assert bash(fx, command, clone), command
+
+
+def test_the_refusal_says_how_to_merge_and_how_to_write_the_words(fx: Fx, clone: Path) -> None:
+    reason = bash(fx, "gh pr merge 12", clone)
+    assert reason
+    merge_sh = re.search(r"`(\S+/merge\.sh) <pr>`", reason)
+    friction = re.search(r"`(\S+/bin/friction) note ", reason)
+    assert merge_sh and Path(merge_sh.group(1)).is_file(), reason
+    assert friction and Path(friction.group(1)).is_file(), reason
+    for words in ("MCP merge tool", "`expectedHeadSha`", "Grep tool", "Write tool", "`git commit -F <file>`",
+                  "-F body=@<file>", "--part merge-guard --workaround"):
+        assert words in reason, words
+    hooks = bash(fx, "git commit --no-verify -m x", clone)
+    assert hooks and "fix what it names" in hooks and "MCP merge tool" not in hooks and "Grep tool" in hooks
+
+
+N = 1_000_000
+ADVERSARIAL = {
+    "pr then spaces": "pr" + " " * N,
+    "pr repeated": "pr " * (N // 3),
+    "pulls with no slash after": "pulls/" + "a" * N,
+    "pulls repeated": "pulls/" * (N // 6),
+    "pulls and segments": "pulls/a" * (N // 7),
+    "almost a mutation": "mergePullReques" * (N // 15),
+    "almost no-verify": "--no-verif" * (N // 10),
+    "hooksPath then spaces": "hooksPath" + " " * N,
+    "hooksPath repeated": "hooksPath " * (N // 10),
+}
+
+
+@pytest.mark.parametrize("name", ADVERSARIAL)
+def test_a_million_character_line_is_decided_well_under_a_second(name: str) -> None:
+    text_rule = guard_module()["text_rule"]
+    start = time.monotonic()
+    assert text_rule(ADVERSARIAL[name]) == ("", "")
+    assert time.monotonic() - start < 0.5, name
+
+
+def test_a_million_character_command_through_the_hook(fx: Fx, clone: Path) -> None:
+    start = time.monotonic()
+    reason = bash(fx, "pr " * (N // 3) + "gh pr merge 12", clone)
+    assert reason and "rule `pr-merge`" in reason
+    assert bash(fx, "pulls/" * (N // 6), clone) is None
+    assert time.monotonic() - start < 3
+
+
+# Failures of the guard itself.
+
+
+def broken_copy(tmp_path: Path, func: str) -> Path:
+    """A copy of the guard whose `func` raises (and with no friction log script beside it)."""
+    broken = tmp_path / "broken" / "cloud" / "hooks" / "merge-guard.py"
+    broken.parent.mkdir(parents=True)
+    src = GUARD.read_text()
+    assert src.count(f"def {func}(") == 1
+    broken.write_text(src.replace(f"def {func}(", f"def {func}(*a, **k):\n    raise RuntimeError('bug')\n\n\n"
+                                                  f"def unused_{func}(", 1))
+    return broken
+
+
+def run_copy(fx: Fx, guard: Path, event: dict) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([sys.executable, str(guard)], capture_output=True, text=True, env=guard_env(fx),
+                          input=json.dumps(event), timeout=60, check=False)
+
+
+def test_a_guard_failure_on_a_merge_tool_call_fails_closed(fx: Fx, clone: Path, tmp_path: Path) -> None:
+    done = run_copy(fx, broken_copy(tmp_path, "check_merge"), {
+        "tool_name": "mcp__github__merge_pull_request", "cwd": str(clone),
+        "tool_input": {"owner": "example-owner", "repo": "example-repo", "pullNumber": 12, "expectedHeadSha": HEAD}})
+    assert done.returncode == 0 and "fails closed" in done.stdout, done
+
+
+def test_a_guard_failure_on_a_bash_command_passes_it(fx: Fx, clone: Path, tmp_path: Path) -> None:
+    for command in ("gh pr merge 12", "ls -la"):
+        done = run_copy(fx, broken_copy(tmp_path / command[:2], "text_rule"),
+                        {"tool_name": "Bash", "cwd": str(clone), "tool_input": {"command": command}})
+        assert done.returncode == 0 and done.stdout == "", done
+
+
+# The friction log: each refusal noted by guard and rule, nothing of the command, and never in the way.
+
+
+def test_a_bash_refusal_is_noted_without_the_command(fx: Fx, clone: Path) -> None:
+    assert bash(fx, "gh pr merge 12 --body 'private-token-xyz in /srv/private/repo'", clone)
+    assert fx.noted() and [set(e) for e in fx.noted()] == [{"at", "kind", "guard", "rule"}]
+    assert [(e["kind"], e["guard"], e["rule"]) for e in fx.noted()] == [("refusal", "merge-guard", "pr-merge")]
+    raw = fx.friction.read_text()
+    assert "private" not in raw and "/srv" not in raw
+
+
+@pytest.mark.parametrize("case, rule", [("records", "merge-records"), ("unreadable", "unreadable"),
+                                        ("auto", "auto-merge")])
+def test_a_merge_tool_refusal_is_noted_with_its_rule(fx: Fx, clone: Path, case: str, rule: str) -> None:
     fx.comments(comment(record("gates")))
-    reason = bash(fx, command, clone)
-    assert reason and "PR 5" in reason, reason
+    tool = "mcp__github__enable_pr_auto_merge" if case == "auto" else "mcp__github__merge_pull_request"
+    env = {"STUB_FAIL": "pulls/12"} if case == "unreadable" else {}
+    assert run(fx, {"tool_name": tool, "tool_input": {"owner": "example-owner", "repo": "example-repo",
+                                                      "pullNumber": 12, "expectedHeadSha": HEAD}}, clone, **env)
+    assert [e["rule"] for e in fx.noted()] == [rule]
 
 
-@pytest.mark.parametrize("command", [
-    f"curl -X PUT https://api.github.com/repos%2F{REPO.replace('/', '%2F')}%2Fpulls%2F12%2Fmerge",
-    f"curl -X PUT https://api.github.com/repos/{REPO}/pulls/12/../12/merge",
-    f"curl -X PUT 'https://api.github.com/repos/{REPO}/pulls/12/merge?x=1'",
-    f"curl -X PUT https://api.github.com/REPOS/{REPO}/PULLS/12/MERGE/",
-    f"curl -X PUT --url https://api.github.com/repos/{REPO}/pulls/12/merge",
-])
-def test_an_http_client_merge_path_is_decoded_as_gh_does(fx: Fx, clone: Path, command: str) -> None:
-    reason = bash(fx, command, clone)
-    assert reason and "HTTP client" in reason, (command, reason)
+def test_an_allowed_merge_notes_nothing(fx: Fx, clone: Path) -> None:
+    fx.both()
+    assert mcp(fx, clone, expectedHeadSha=HEAD) is None
+    assert fx.noted() == []
+
+
+def test_an_unwritable_friction_log_leaves_the_decision_alone(fx: Fx, clone: Path, tmp_path: Path) -> None:
+    (tmp_path / "a-file").write_text("x")
+    for log in (str(tmp_path / "a-file" / "friction.jsonl"), "/proc/version"):
+        reason = run(fx, {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 12"}}, clone,
+                     LOADOUT_FRICTION_LOG=log)
+        assert reason and "rule `pr-merge`" in reason, log
