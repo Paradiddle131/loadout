@@ -243,7 +243,7 @@ def paths_tier(repo: str, head: str, base: object, cwd: str) -> str | None:
         raise Unreadable("GitHub named no default branch for the repo, so tier.sh has no base to compare with")
     ref = git_out("-C", top, "rev-parse", "-q", "--verify", f"refs/remotes/origin/{base}^{{commit}}")
     if not ref or ref.returncode:
-        return None  # this clone has no copy of the default branch: it cannot answer
+        raise Unreadable("probe")
     budget = left()
     if budget < 1:
         raise Unreadable("no time was left to run tier.sh on the head, which this clone holds")
