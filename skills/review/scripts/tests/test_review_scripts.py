@@ -287,7 +287,7 @@ def template_review_md() -> str:
         block = block.replace("<glob>", glob, 1)
     block = block.replace("<lens>, <lens>", "one, two")
     assert "<glob>" not in block and "<lens>" not in block
-    return re.sub(r"<[^<>]+>", "a reason, `in backticks`", block)
+    return re.sub(r"<[^<>]+>", "a reason, in plain words", block)
 
 
 @pytest.mark.parametrize("files, expected", [
@@ -311,12 +311,11 @@ def test_tier_reads_this_repos_review_md_with_its_lenses(w: World) -> None:
 
 
 @pytest.mark.parametrize("line, lenses", [
-    ("- `src/**` — runs `tier.sh` and `docs/**`; lenses: one", "one"),  # backticks in a reason are no globs
     ("- `src/**` — keeps the lenses honest; lenses: one, two", "one, two"),  # the word in a reason is text
     ("- `src/**` — lenses: one", ""),  # no `;`: a reason, not a lenses clause
     ("- `src/**`, `lib/**`", ""),  # the bare form
 ])
-def test_tier_a_reason_is_never_read_as_a_glob_or_a_lens(w: World, line: str, lenses: str) -> None:
+def test_tier_a_reason_is_never_read_as_a_lens(w: World, line: str, lenses: str) -> None:
     base_has(w, {"REVIEW.md": f"## Sensitive\n{line}\n"})
     w.commit({"src/app.py": "x = 2\n", "docs/a.py": "x\n", "tier.sh": "x\n"})
     code, out, err = tier(w)
@@ -328,6 +327,7 @@ def test_tier_a_reason_is_never_read_as_a_glob_or_a_lens(w: World, line: str, le
     "- `src/**` guards things",  # text with no em dash
     "- `src/**` - guards things",  # a hyphen is not the reason's dash
     "- `src/**` — guards; things",  # a `;` in a reason
+    "- `src/**` — and `docs/**`; lenses: one",  # a glob written in the reason by mistake
     "- `src/**` — x; lenses: one; two",  # a lenses clause that does not end the line
     "- `src/**`; lenses: one two",  # lens names only
 ])

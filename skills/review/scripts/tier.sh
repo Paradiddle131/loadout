@@ -19,7 +19,7 @@
 # - standard: everything else.
 # REVIEW.md (repo root) is read from the base, never from the change, so a change cannot lower its own tier.
 # REVIEW.md lists globs in backticks, one or more per `- ` line, each line optionally followed by ` — <reason>`
-# (free text with no `;`, never read as globs) and then, under `## Sensitive`, `; lenses: a, b` (lens names
+# (plain text with no backtick and no `;`) and then, under `## Sensitive`, `; lenses: a, b` (lens names
 # only). A glob without a slash matches the file name at any depth; `**` spans folders, `*` and `?` stay within one. A REVIEW.md this script cannot parse makes
 # every path sensitive, with a warning on stderr.
 set -euo pipefail
@@ -135,11 +135,12 @@ def parse(text):
             if section != "sensitive":
                 raise Unparsable(f"line {n}: lenses belong to sensitive globs")
             rest, lenses = rest[: m.start()], m.group(1)
-        # The reason is text after ` — `: its backticks are never globs, and it holds no `;`, so it cannot
-        # carry a lenses clause the end-anchored match above did not take.
+        # The reason is plain text after ` — `: no backtick (a glob written there by mistake would vanish) and no
+        # `;` (it cannot carry a lenses clause the end-anchored match above did not take).
         rest, dash, reason = rest.partition(" — ")
-        if dash and ";" in reason:
-            raise Unparsable(f"line {n}: a reason after ` — ` holds no `;` (only `; lenses: a, b` follows it)")
+        if dash and re.search(r"[`;]", reason):
+            raise Unparsable(f"line {n}: a reason after ` — ` holds no backtick and no `;` (globs go before it, "
+                             "`; lenses: a, b` after it)")
         globs = re.findall(r"`([^`]+)`", rest)
         if not globs or re.sub(r"`[^`]+`", "", rest).strip(" ,"):
             raise Unparsable(f"line {n}: an item is backticked globs, optionally ` — <reason>`, then optionally "
