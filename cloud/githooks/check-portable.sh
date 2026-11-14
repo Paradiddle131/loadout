@@ -4,7 +4,8 @@
 # builds, syncs and links against itself (ways/portable.md). The owner comes from `git remote get-url origin`.
 # By default it checks the lines the staged commit adds, so a literal already in the repo never blocks unrelated
 # work; --all checks every tracked file, for an audit. History keeps its facts: ledgers, changelogs and
-# lockfiles are not checked. A deliberate literal goes in with `git commit --no-verify`.
+# lockfiles are not checked. A deliberate literal is the owner's to commit, by hand past the hook; an agent derives
+# the value at run time or links relatively, as above, and otherwise asks the owner.
 # The pre-commit hook of the repos a cloud session works on (cloud/githooks/) runs it; this repo has its own,
 # stricter guard (bin/check-generic.sh).
 # Usage: cloud/githooks/check-portable.sh [--all] [repo-dir]   (repo-dir defaults to the current directory)
