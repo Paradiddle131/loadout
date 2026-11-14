@@ -10,7 +10,7 @@ Agent skills, ways of working and standing rules, packaged as a [Claude Code](ht
 | `cloud` | `autopilot`, `autopilot-brief`, `image-cache`, and session hooks | [Claude Code on the web](cloud/README.md) |
 
 - [`RULES.md`](RULES.md): standing rules for an agent in any repo.
-- [`FEEDBACK.md`](FEEDBACK.md): the one rule that writes back to this collection's own repo, kept apart so a machine can leave it out.
+- [`FEEDBACK.md`](FEEDBACK.md): the rules that write back to this collection's own repo, kept apart so a machine can leave them out; [`bin/friction`](bin/friction) carries what got in an agent's way to its tracker.
 - [`ways/`](ways/README.md): ways of working a repo can adopt with one line in its `CLAUDE.md`.
 
 The skills follow the [Agent Skills](https://agentskills.io) format, so agents other than Claude Code can read them from `skills/` as they are.

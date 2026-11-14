@@ -5,3 +5,5 @@ Import it beside [`RULES.md`](RULES.md) (`@<clone>/FEEDBACK.md`) only on a machi
 
 - Improve this collection as you use it: when one of its skills, ways or rules gets something wrong or lacks what the work needed, or the owner corrects how you worked in a way likely to recur in other repos, open a PR on the repo that holds this file (branch `claude/<slug>`), written generic, saying what you hit, the evidence and the smallest change.
   It waits for the owner's review and is never merged by an agent; the current work carries on with a local workaround meanwhile.
+- When anything of this collection refuses, slows or misleads the work, note it before working around it, naming the workaround: `<clone>/bin/friction note "<what got in the way>" --part <its name> --workaround "<what you did instead>"`, written generic, since it is posted to this collection's tracker.
+  A silent workaround hides the defect from the owner.

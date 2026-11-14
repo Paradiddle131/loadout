@@ -79,6 +79,7 @@ One `wrong` row per distinct problem, from the handoffs' `Went wrong:` lines and
 - `line`: what happened, in one sentence; `cost`: wakes or hours lost.
 - `status`: `open`, `still unknown`, `known` (a known condition or upstream), `filed`, or `fixed`. The page sorts by it, open first, so the owner reads what still bites before what is history.
 - Merge repeats into one row with the count.
+- Friction: the comments posted in the window on the collection's open `friction` issue (`issues?state=open&labels=friction` on the repo of its clone's `git remote get-url origin`, then that issue's comments): one `environment` row per distinct note or refusal rule, with its count and the notes' text.
 - A `setup` row ends its notes with the change to the profile or prompt that would have avoided it, so the next routine starts better.
 
 ## 8. Wakes that did no work

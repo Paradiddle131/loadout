@@ -24,7 +24,7 @@ The pre-commit hook runs them (`git config core.hooksPath .githooks`; the cloud 
 Tests:
 
 ```bash
-uvx --from pytest==8.4.2 pytest -q cloud/skills/autopilot/scripts/tests cloud/gcp/tests cloud/githooks/tests cloud/hooks/tests skills/review/scripts/tests skills/experiment-preflight/scripts/tests
+uvx --from pytest==8.4.2 pytest -q bin/tests cloud/skills/autopilot/scripts/tests cloud/gcp/tests cloud/githooks/tests cloud/hooks/tests skills/review/scripts/tests skills/experiment-preflight/scripts/tests
 node skills/report-kit/tests/scope.test.cjs
 node skills/report-kit/tests/dialog.test.cjs
 claude plugin validate --strict .

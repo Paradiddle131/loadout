@@ -14,3 +14,4 @@ Every repo that imports the collection runs what these paths hold, so a change t
 - `cloud/gcp/**` — the spend guard and its fences; lenses: guardrail-reviewer, control-prober
 - `cloud/skills/autopilot/**` — what an unattended run may do and merge; lenses: guardrail-reviewer, control-prober
 - `bin/**` — the collection's own checks; lenses: control-prober
+- `bin/friction` — posts from every session to this collection's tracker; lenses: leak-hunter, guardrail-reviewer
