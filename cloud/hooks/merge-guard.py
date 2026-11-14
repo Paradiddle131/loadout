@@ -77,7 +77,7 @@ MENTIONS = [
 ]
 ADVICE = {
     "merge": ("To merge, use the MCP merge tool (`merge_pull_request` with `expectedHeadSha`), which this guard "
-              "checks against the PR's gates and review records, or run `{merge_sh} <pr>`."),
+              "checks against the PR's gates and review records, or run `{merge_sh} <pr>` from the repo's root."),
     "hooks": ("A hook that fails is reporting something: fix what it names, or ask the owner about a deliberate "
               "exception, instead of bypassing it."),
 }
