@@ -103,7 +103,7 @@ flush() {
 }
 
 if [ "$mode" = "--periodic" ]; then
-  ({ run; flush; } >/dev/null 2>&1 &)
+  (run >/dev/null 2>&1 &)
 else
   run
   flush
