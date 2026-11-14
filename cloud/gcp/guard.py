@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import runpy
 import shlex
 import sys
 from pathlib import Path
@@ -356,6 +357,15 @@ def verdict(command: str, depth: int = 0) -> str | None:
     return None
 
 
+def note_refusal(rule: str) -> None:
+    """Note a refusal in the collection's friction log (bin/friction): the guard and the rule, never the command."""
+    try:
+        friction = Path(__file__).resolve().parents[2] / "bin/friction"
+        runpy.run_path(str(friction), run_name="friction")["record_refusal"]("gcp-guard", rule)
+    except Exception:  # noqa: BLE001 -- the log never changes or slows the decision
+        pass
+
+
 def main() -> int:
     try:
         event = json.load(sys.stdin)
@@ -364,15 +374,18 @@ def main() -> int:
     if event.get("tool_name") != "Bash":
         return 0
     command = (event.get("tool_input") or {}).get("command") or ""
+    rule = "spend"
     try:
         reason = verdict(command)
     except Exception as exc:  # noqa: BLE001 -- a guard bug must not wave a GCP command through
+        rule = "guard-error"
         reason = (
             f"a GCP command the guard failed on ({exc})"
             if re.search(r"gcloud|\bbq\b|googleapis", command)
             else None
         )
     if reason:
+        note_refusal(rule)
         print(
             json.dumps(
                 {

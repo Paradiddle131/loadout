@@ -10,6 +10,7 @@ import secrets
 import shutil
 import string
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -63,7 +64,7 @@ def clone(tmp_path: Path) -> Path:
     return r
 
 
-def save(clone: Path, tmp_path: Path, gitleaks: str | None) -> subprocess.CompletedProcess[str]:
+def save(clone: Path, tmp_path: Path, gitleaks: str | None, **extra: str) -> subprocess.CompletedProcess[str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     if gitleaks:
@@ -72,7 +73,7 @@ def save(clone: Path, tmp_path: Path, gitleaks: str | None) -> subprocess.Comple
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     env = {**os.environ, **ID, "HOME": str(home), "PATH": f"{bin_dir}:/usr/bin:/bin",
-           "SAVE_WORK_ROOTS": str(clone.parent), "CLAUDE_CODE_SESSION_ID": "sess1234"}
+           "SAVE_WORK_ROOTS": str(clone.parent), "CLAUDE_CODE_SESSION_ID": "sess1234", **extra}
     return subprocess.run(["bash", str(HOOKS / "save-work.sh"), "--now"], env=env, capture_output=True,
                           text=True, timeout=120, stdin=subprocess.DEVNULL)
 
@@ -119,6 +120,26 @@ def test_save_work_real_scan_finds_a_planted_token(clone: Path, tmp_path: Path) 
     (clone / "config.txt").write_text("nothing here\n")
     save(clone, tmp_path, GITLEAKS)
     assert "claude/wip/feature-sess1234" in wip_refs(clone)
+
+
+@pytest.mark.parametrize("gh", ["exit 1", "sleep 30"])
+def test_save_work_flushes_the_friction_log_without_losing_it_or_changing_its_exit(
+        clone: Path, tmp_path: Path, gh: str) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "gh").write_text(f"#!/bin/sh\n{gh}\n")
+    (bin_dir / "gh").chmod(0o755)
+    log = tmp_path / "home/.claude/loadout-friction.jsonl"
+    log.parent.mkdir(parents=True)
+    log.write_text('{"at": "x", "kind": "refusal", "guard": "merge-guard", "rule": "pr-merge"}\n')
+    (clone / "a.txt").write_text("changed\n")
+    start = time.monotonic()
+    done = save(clone, tmp_path, fake_gitleaks(tmp_path, 0), FRICTION_FLUSH_S="3")
+    assert done.returncode == 0 and time.monotonic() - start < 20
+    assert "claude/wip/feature-sess1234" in wip_refs(clone)
+    assert log.read_text().count("\n") == 1 and not Path(f"{log}.posted").exists()
+    if gh == "exit 1":
+        assert "friction: not posted" in (tmp_path / "home/.claude/save-work.log").read_text()
 
 
 # session-start.sh

@@ -12,6 +12,8 @@
 # at once; PostToolUse runs `--periodic`, which acts at most every SAVE_WORK_EVERY_S (default 1200) and in the
 # background. `bash save-work.sh --now` runs it by hand. Its log: ~/.claude/save-work.log.
 # Recover: git ls-remote origin 'refs/heads/claude/wip/*', then git fetch origin <ref> and cherry-pick or diff it.
+# Then it flushes the friction log (bin/friction flush, at most FRICTION_FLUSH_S, default 40 s; its notice goes
+# to the log), whatever the pushes did; the flush never changes the exit status.
 set -u
 mode=${1:-}
 [ -t 0 ] || cat >/dev/null # the hook's JSON input: unused
@@ -20,6 +22,7 @@ LOG="$HOME/.claude/save-work.log"
 EVERY=${SAVE_WORK_EVERY_S:-1200}
 MAX_KB=${SAVE_WORK_MAX_KB:-10240}
 ROOTS=${SAVE_WORK_ROOTS:-/home/user}
+FRICTION="$(dirname "${BASH_SOURCE[0]}")/../../bin/friction"
 GITLEAKS=$(command -v gitleaks || { [ -x "$HOME/.local/bin/gitleaks" ] && echo "$HOME/.local/bin/gitleaks"; } || true)
 
 if [ "$mode" = "--periodic" ]; then
@@ -92,9 +95,17 @@ run() {
   done
 }
 
+flush() {
+  local out
+  [ -f "$FRICTION" ] || return 0
+  out=$(timeout "${FRICTION_FLUSH_S:-40}" python3 "$FRICTION" flush 2>&1 </dev/null)
+  [ -z "$out" ] || echo "$(date -u +%FT%H:%MZ) $out" >>"$LOG"
+}
+
 if [ "$mode" = "--periodic" ]; then
-  (run >/dev/null 2>&1 &)
+  ({ run; flush; } >/dev/null 2>&1 &)
 else
   run
+  flush
 fi
 exit 0

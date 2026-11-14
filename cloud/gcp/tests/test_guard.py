@@ -170,3 +170,19 @@ def test_a_command_behind_a_shell_keyword_is_checked(command: str, home: Path) -
 def test_keyword_words_as_arguments_still_pass(home: Path) -> None:
     assert run("echo if then do gcloud services enable", home) is None
     assert run("if true; then gcloud services list; fi", home) is None
+
+
+def test_a_refusal_is_noted_in_the_friction_log_without_the_command(home: Path) -> None:
+    log = home / ".claude/loadout-friction.jsonl"
+    assert run("gcloud services enable private-api.googleapis.com --project p", home)
+    assert run("gcloud services list --enabled --project p", home) is None
+    lines = [json.loads(x) for x in log.read_text().splitlines()]
+    assert lines == [{"at": lines[0]["at"], "kind": "refusal", "guard": "gcp-guard", "rule": "spend"}]
+    assert "private" not in log.read_text()
+
+
+def test_an_unwritable_friction_log_leaves_the_refusal_alone(home: Path) -> None:
+    (home / "a-file").write_text("x")
+    decision = run("gcloud services enable x.googleapis.com", home,
+                   LOADOUT_FRICTION_LOG=str(home / "a-file" / "log.jsonl"))
+    assert decision and decision["hookSpecificOutput"]["permissionDecision"] == "deny"
