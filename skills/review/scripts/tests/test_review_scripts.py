@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -264,6 +265,65 @@ def test_tier_unparsable_review_md_fails_closed(w: World) -> None:
     w.commit({"docs/a.md": "x\n"})
     code, out, err = tier(w)
     assert code == 0 and out[0] == "sensitive" and "cannot be parsed" in err
+
+
+def template_review_md() -> str:
+    """The `REVIEW.md` sample in templates.md, its placeholders filled: globs a/**, b/**, c/**, lenses one, two."""
+    text = (SCRIPTS.parent / "templates.md").read_text()
+    block = text.split("## REVIEW.md", 1)[1].split("```markdown\n", 1)[1].split("```", 1)[0]
+    for glob in ("a/**", "b/**", "c/**"):
+        block = block.replace("<glob>", glob, 1)
+    block = block.replace("<lens>, <lens>", "one, two")
+    assert "<glob>" not in block and "<lens>" not in block
+    return re.sub(r"<[^<>]+>", "a reason, `in backticks`", block)
+
+
+@pytest.mark.parametrize("files, expected", [
+    ({"a/x.py": "x\n", "b/y.py": "y\n"}, ["sensitive", "a/x.py (lenses: one, two)", "b/y.py"]),
+    ({"c/z.py": "z\n"}, ["routine", "c/z.py"]),
+])
+def test_tier_reads_the_template_lines(w: World, files: dict[str, str], expected: list[str]) -> None:
+    base_has(w, {"REVIEW.md": template_review_md()})
+    w.commit(files)
+    code, out, err = tier(w)
+    assert code == 0 and "cannot be parsed" not in err, err
+    assert out == expected
+
+
+def test_tier_reads_this_repos_review_md_with_its_lenses(w: World) -> None:
+    base_has(w, {"REVIEW.md": (SCRIPTS.parents[2] / "REVIEW.md").read_text()})
+    w.commit({"cloud/gcp/guard.py": "x\n"})
+    code, out, err = tier(w)
+    assert code == 0 and err == "", err
+    assert out == ["sensitive", "cloud/gcp/guard.py (lenses: control-prober, guardrail-reviewer)"]
+
+
+@pytest.mark.parametrize("line, lenses", [
+    ("- `src/**` — runs `tier.sh` and `docs/**`; lenses: one", "one"),  # backticks in a reason are no globs
+    ("- `src/**` — keeps the lenses honest; lenses: one, two", "one, two"),  # the word in a reason is text
+    ("- `src/**` — lenses: one", ""),  # no `;`: a reason, not a lenses clause
+    ("- `src/**`, `lib/**`", ""),  # the bare form
+])
+def test_tier_a_reason_is_never_read_as_a_glob_or_a_lens(w: World, line: str, lenses: str) -> None:
+    base_has(w, {"REVIEW.md": f"## Sensitive\n{line}\n"})
+    w.commit({"src/app.py": "x = 2\n", "docs/a.py": "x\n", "tier.sh": "x\n"})
+    code, out, err = tier(w)
+    assert code == 0 and "cannot be parsed" not in err, err
+    assert out == ["sensitive", f"src/app.py (lenses: {lenses})" if lenses else "src/app.py"], out
+
+
+@pytest.mark.parametrize("line", [
+    "- `src/**` guards things",  # text with no em dash
+    "- `src/**` - guards things",  # a hyphen is not the reason's dash
+    "- `src/**` — guards; things",  # a `;` in a reason
+    "- `src/**` — x; lenses: one; two",  # a lenses clause that does not end the line
+    "- `src/**`; lenses: one two",  # lens names only
+])
+def test_tier_a_malformed_item_fails_closed(w: World, line: str) -> None:
+    base_has(w, {"REVIEW.md": f"## Sensitive\n{line}\n"})
+    w.commit({"docs/a.md": "x\n"})
+    code, out, err = tier(w)
+    assert code == 0 and out[0] == "sensitive" and "cannot be parsed" in err, (line, out, err)
 
 
 def test_tier_a_rename_counts_its_old_path(w: World) -> None:

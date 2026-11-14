@@ -23,6 +23,7 @@ A reviewer that is not one of the shipped agents gets that agent file's text ahe
 
 A repo's root `REVIEW.md`, read from the default branch: two headed lists of backticked globs, which `tier.sh` reads.
 `## Sensitive` only adds to the built-in floor; with no `## Routine`, routine is prose documentation outside the sensitive set; any other path is `standard`.
+The reason after ` — ` is optional free text with no `;` (its backticks are never read as globs); `; lenses: …` comes last, lens names only.
 
 ```markdown
 # Review

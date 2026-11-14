@@ -17,8 +17,9 @@
 # - routine: the globs under `## Routine` in REVIEW.md; with no such list, **/*.md, **/*.txt and licence files.
 # - standard: everything else.
 # REVIEW.md (repo root) is read from the base, never from the change, so a change cannot lower its own tier.
-# REVIEW.md lists globs in backticks, one or more per `- ` line. A glob without a slash matches the file name
-# at any depth; `**` spans folders, `*` and `?` stay within one. A REVIEW.md this script cannot parse makes
+# REVIEW.md lists globs in backticks, one or more per `- ` line, each line optionally followed by ` — <reason>`
+# (free text with no `;`, never read as globs) and then, under `## Sensitive`, `; lenses: a, b` (lens names
+# only). A glob without a slash matches the file name at any depth; `**` spans folders, `*` and `?` stay within one. A REVIEW.md this script cannot parse makes
 # every path sensitive, with a warning on stderr.
 set -euo pipefail
 exec python3 - "$@" <<'EOF'
@@ -102,6 +103,9 @@ class Unparsable(Exception):
     pass
 
 
+LENSES = re.compile(r";\s*lenses:\s*([\w-]+(?:\s*,\s*[\w-]+)*)\s*$")
+
+
 def parse(text):
     """{'sensitive': [(glob, lenses)], 'routine': [glob] or None}."""
     lists, section, seen = {"sensitive": [], "routine": None}, None, set()
@@ -125,14 +129,20 @@ def parse(text):
         if not item:
             raise Unparsable(f"line {n}: under `## {section.title()}` every line is a `- ` item")
         rest, lenses = item.group(1), ""
-        m = re.search(r";\s*lenses:\s*(.+?)\s*$", rest)
+        m = LENSES.search(rest)
         if m:
             if section != "sensitive":
                 raise Unparsable(f"line {n}: lenses belong to sensitive globs")
             rest, lenses = rest[: m.start()], m.group(1)
+        # The reason is text after ` — `: its backticks are never globs, and it holds no `;`, so it cannot
+        # carry a lenses clause the end-anchored match above did not take.
+        rest, dash, reason = rest.partition(" — ")
+        if dash and ";" in reason:
+            raise Unparsable(f"line {n}: a reason after ` — ` holds no `;` (only `; lenses: a, b` follows it)")
         globs = re.findall(r"`([^`]+)`", rest)
         if not globs or re.sub(r"`[^`]+`", "", rest).strip(" ,"):
-            raise Unparsable(f"line {n}: an item is backticked globs (and optionally `; lenses: a, b`)")
+            raise Unparsable(f"line {n}: an item is backticked globs, optionally ` — <reason>`, then optionally "
+                             "`; lenses: a, b`")
         for g in globs:
             if g.strip() != g or g.startswith("/") or "\\" in g:
                 raise Unparsable(f"line {n}: `{g}` is not a glob this script reads")
