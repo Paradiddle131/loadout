@@ -22,8 +22,11 @@ FRICTION = BIN / "friction"
 REPO = "example-owner/example-repo"
 
 # `gh api` against files in $STUB_DIR: issues.json, label.json, comments.json; calls.jsonl logs every call.
-# STUB_FAIL=<text>: a call whose endpoint contains it fails as gh does; STUB_MANGLE=1 (or `ws`): a posted comment
-# reads back changed (or with trailing whitespace); STUB_LOGIN: the authenticated login; STUB_SLEEP: seconds per call.
+# STUB_FAIL=<text>: a call whose endpoint contains it fails as gh does; STUB_LOGIN: the authenticated login;
+# STUB_SLEEP: seconds per call. STUB_MANGLE: how a posted comment reads back: `ws` (trailing whitespace), `footer`
+# (the relay's footer), `footer+` (text after the footer), `between` (text before it), `twice` (the footer twice),
+# `glued` (the footer on the body's last line), `empty`, `drop` (the last list line gone), any other value (an `x`
+# appended).
 STUB_GH = r'''#!/usr/bin/env python3
 import json, os, sys, time
 from pathlib import Path
@@ -71,10 +74,15 @@ elif method == "POST" and endpoint.endswith("/comments"):
     posted = load("comments.json", [])
     out = {"id": len(posted) + 1, "endpoint": endpoint, "body": payload["body"]}
     (d / "comments.json").write_text(json.dumps(posted + [out]))
-    mangle = os.environ.get("STUB_MANGLE")
+    mangle, body = os.environ.get("STUB_MANGLE"), out["body"]
     if mangle:
-        out = {**out, "body": out["body"] + {"ws": "\n  ", "footer": FOOTER, "footer+": FOOTER + "\nmore"}.get(
-            mangle, "x")}
+        lines = body.split("\n")
+        last = max(i for i, x in enumerate(lines) if x.startswith("- "))
+        out = {**out, "body": {
+            "ws": body + "\n  ", "footer": body + FOOTER, "footer+": body + FOOTER + "\nmore",
+            "between": body + "x" + FOOTER, "twice": body + FOOTER + FOOTER,
+            "glued": body.rstrip("\n") + FOOTER.lstrip("\n"), "empty": "",
+            "drop": "\n".join(lines[:last] + lines[last + 1:]) + FOOTER}.get(mangle, body + "x")}
 else:
     sys.exit(f"stub gh: no route for {method} {endpoint}")
 print(json.dumps(out))
@@ -336,10 +344,29 @@ def test_a_read_back_with_trailing_whitespace_or_the_relays_footer_counts_as_pos
     assert len(fx.calls()) == calls  # nothing posted twice
 
 
-def test_a_read_back_with_more_than_the_footer_is_not_posted(fx: Fx) -> None:
+@pytest.mark.parametrize("mangle", ["footer+", "between", "twice", "glued", "empty", "drop"])
+def test_a_read_back_other_than_the_body_and_the_footer_is_not_posted(fx: Fx, mangle: str) -> None:
     fx.refuse("pr-merge")
-    done = fx.run("flush", STUB_MANGLE="footer+")
-    assert "did not read back as sent" in done.stderr and fx.posted() == 0 and len(fx.lines()) == 1
+    fx.refuse("no-verify")
+    done = fx.run("flush", STUB_MANGLE=mangle)
+    assert "did not read back as sent" in done.stderr and fx.posted() == 0 and len(fx.lines()) == 2
+    fx.run("flush")
+    assert entries(fx.comments()[-1]) == ["- refusals: merge-guard, rule no-verify: 1",
+                                          "- refusals: merge-guard, rule pr-merge: 1"]
+
+
+def test_a_carriage_return_before_a_cut_posts_each_entry_once(fx: Fx) -> None:
+    fx.log.parent.mkdir(parents=True)
+    note = lambda i: json.dumps({"at": "2000-01-01", "kind": "note", "note": f"n{i:03d} " + "w" * 480})  # noqa: E731
+    fx.log.write_text("\n".join(note(i) for i in range(118)) + "\njunk\r" + note(118) + "\n"
+                      + "\n".join(note(i) for i in range(119, 200)) + "\n")
+    marks = []
+    for _ in range(4):
+        fx.run("flush")
+        marks.append(fx.posted())
+    assert marks[-1] == fx.log.stat().st_size and marks[0] < marks[1] == marks[2] == marks[3]
+    posted = [e for body in fx.comments() for e in entries(body)]
+    assert len(fx.comments()) == 2 and len(posted) == 199  # the `junk\r` line is unreadable
 
 
 def test_a_log_line_with_fields_that_are_not_strings_is_posted_as_unnamed(fx: Fx) -> None:
