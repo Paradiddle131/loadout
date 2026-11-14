@@ -231,6 +231,18 @@ def test_tier_floor_is_not_removable_by_review_md(w: World) -> None:
     assert tier(w)[1] == ["sensitive", ".githooks/pre-commit"]
 
 
+@pytest.mark.parametrize("path", ["docs/agents/autopilot.md", "docs/agents/no-session-gcp",
+                                  "docs/agents/cloud-setup.local.sh"])
+@pytest.mark.parametrize("review_md", [None, "## Routine\n- `docs/**`\n- `**/*.md`\n"])
+def test_tier_floor_holds_an_unattended_runs_profile(w: World, path: str, review_md: str | None) -> None:
+    if review_md:
+        base_has(w, {"REVIEW.md": review_md})
+    w.commit({path: "x\n"})
+    code, out, err = tier(w)
+    assert code == 0 and "cannot be parsed" not in err, err
+    assert out == ["sensitive", path]
+
+
 def test_tier_reads_review_md_from_the_base_not_the_change(w: World) -> None:
     (w.seed / "REVIEW.md").write_text("# Review\n\n## Sensitive\n- `src/**`; lenses: security, data\n")
     w.git(w.seed, "add", ".")

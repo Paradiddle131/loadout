@@ -12,7 +12,8 @@
 #   there may end with `; lenses: a, b`). The floor: agent instruction and rule files at any depth, matched
 #   whatever their case (CLAUDE.md, CLAUDE.local.md, AGENTS.md, GEMINI.md, REVIEW.md, RULES.md, SKILL.md),
 #   .mcp.json and CODEOWNERS at any depth, **/.claude/**, **/.githooks/**, **/.husky/**, **/hooks/**,
-#   **/githooks/**, .github/workflows/**, .github/actions/**, and every file the base's instruction files
+#   **/githooks/**, .github/workflows/**, .github/actions/**, docs/agents/** (an unattended run's profile and
+#   markers, which set what it may do and merge), and every file the base's instruction files
 #   import with an `@path` line, followed through their own imports (five levels, as Claude Code does).
 # - routine: the globs under `## Routine` in REVIEW.md; with no such list, **/*.md, **/*.txt and licence files.
 # - standard: everything else.
@@ -30,7 +31,7 @@ FLOOR_NAMES = ["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "GEMINI.md", "REVIEW
                ".mcp.json", "CODEOWNERS"]
 INSTRUCTION = {n.lower() for n in FLOOR_NAMES if n.endswith(".md")}
 FLOOR = ["**/.claude/**", "**/.githooks/**", "**/.husky/**", "**/hooks/**", "**/githooks/**",
-         ".github/workflows/**", ".github/actions/**"]
+         ".github/workflows/**", ".github/actions/**", "docs/agents/**"]
 IMPORT_DEPTH, IMPORT_FILES = 5, 500
 DEFAULT_ROUTINE = ["*.md", "*.txt", "LICENSE*", "LICENCE*", "COPYING*"]
 RANK = {"routine": 0, "standard": 1, "sensitive": 2}

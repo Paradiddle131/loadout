@@ -28,7 +28,7 @@ The setup result is cached for days; the session-start hook re-runs the setup wh
 
 ## What a target repo declares
 
-A target carries no agent setup of its own; two optional files under its `docs/agents/` adjust the session:
+A target carries no agent setup of its own; two optional files under its `docs/agents/` adjust the session (a change anywhere under that folder, the autopilot profile included, is reviewed at the `sensitive` tier):
 
 - `cloud-setup.local.sh`: tools only that repo needs, run by `setup.sh` with the clone's path.
 - `no-session-gcp`: the repo must not use the environment's GCP project (it has its own); its first line is the reason.

@@ -13,7 +13,7 @@ The author of a change fixes it and never reviews it; with no fresh-context suba
 
 - Run `$R/scripts/tier.sh [--base <ref>]`: it prints `routine`, `standard` or `sensitive` and the paths that decided it.
 - The changed paths decide, never the author or the change's size; the highest tier wins:
-  - **sensitive:** a built-in floor, always applied: agent instruction and rule files (`CLAUDE.md`, `AGENTS.md`, `REVIEW.md`, the rule files they import), hook and agent-settings directories (`.claude/**`, `.githooks/**`, `**/hooks/**`), CI workflow files; plus the globs under `REVIEW.md § Sensitive`, which can only add to it.
+  - **sensitive:** a built-in floor, always applied: agent instruction and rule files (`CLAUDE.md`, `AGENTS.md`, `REVIEW.md`, the rule files they import), hook and agent-settings directories (`.claude/**`, `.githooks/**`, `**/hooks/**`), CI workflow files, an unattended run's profile and markers (`docs/agents/**`); plus the globs under `REVIEW.md § Sensitive`, which can only add to it.
   - **routine:** the globs under `REVIEW.md § Routine`; with no such list, prose documentation (`**/*.md`, `**/*.txt`, licence files) outside the sensitive set.
   - **standard:** every other path.
 - `REVIEW.md` is read from the default branch, never from the change.
