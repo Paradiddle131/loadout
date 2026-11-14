@@ -15,7 +15,7 @@ Nobody answers during a wake, a usage limit can cut it off at any step, and othe
 
 | Slot | Holds | Default |
 |---|---|---|
-| `Merge policy` | what holds a reviewed PR from the wake's merge and who lifts it (`needs-local-verify`, `AUTOPILOT_HOLD_LABELS`), the PR categories whose merge is the owner's (`owner-merges`), or `owner merges` for all (`AUTOPILOT_MERGE_POLICY=owner`: stop at ready) | none: merge when gated and reviewed |
+| `Merge policy` | what holds a reviewed PR from the wake's merge and who lifts it (`needs-local-verify`, `AUTOPILOT_HOLD_LABELS`), the PR categories whose merge is the owner's (`owner-merges`), or `owner merges` for all (`AUTOPILOT_MERGE_POLICY=owner`: stop at ready); a variable goes on the `merge.sh` call itself | none: merge when gated and reviewed |
 | `Review` | `REVIEW.md` on the default branch: the paths that set a tier (`tier.sh` reads it) | at the target's root |
 | `Queue` | where work comes from, in order (epics, maps); each item still needs a pickable label | open `agent:ready` issues, oldest first |
 | `Digest` | a pinned issue whose body holds the owner's steering lines (§ Steering); wakes only read it | none: the profile's defaults steer |
@@ -25,7 +25,7 @@ Nobody answers during a wake, a usage limit can cut it off at any step, and othe
 
 ## Labels
 
-`agent:ready` (doable unattended), `agent:research` (answer with a sourced comment), `agent:claimed`, `needs-owner` (the question is its last comment), `needs-review` (gated, no reviewer ran), `needs-local-verify` (reviewed, waits for the local checklist), `owner-merges` (the merge is the owner's: the wake puts it on a PR the merge policy names as the owner's, such as a guardrail line, a cost or a one-way door, and never removes it), `blocked: upstream`, `blocked: org` (the last comment names what), `epic` (its sub-issues are the work, in order).
+`agent:ready` (doable unattended), `agent:research` (answer with a sourced comment), `agent:claimed`, `needs-owner` (the question is its last comment), `needs-review` (gated, no reviewer ran), `needs-local-verify` (reviewed, waits for the local checklist), `owner-merges` (the merge is the owner's: the wake puts it on a PR the merge policy names as the owner's, such as a guardrail line, a cost or a one-way door, and never removes it; `merge.sh` and the merge guard refuse a PR carrying it, and nothing stops removing the label, which is the owner's alone), `blocked: upstream`, `blocked: org` (the last comment names what), `epic` (its sub-issues are the work, in order).
 An **agent PR** has head `claude/<n>-<slug>` and a `🤖 Handoff` comment; a **held** one carries the merge policy's label, `owner-merges` or `needs-local-verify`, or is titled `[speculative: …]`.
 `merge.sh` reads holds from the PR's labels only: a hold meant to stop a merge goes on the PR, not just its issue.
 **Blocked by** means both the issue body's section and GitHub's `blocked_by` relation (`gh api repos/<o>/<r>/issues/<n>/dependencies/blocked_by`).

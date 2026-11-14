@@ -12,7 +12,8 @@ Every item is one branch `claude/<n>-<slug>` and one PR, reviewed by the `review
 
 ## Merge policy
 
-<none: the wake merges when gated and reviewed | what holds a reviewed PR and who lifts it, e.g. `needs-local-verify` until the local checklist passes; `export AUTOPILOT_HOLD_LABELS="<label> …"` for labels of your own | the owner merges these: <PR categories, e.g. a guardrail line, a cost, a one-way door>, which the wake labels `owner-merges` | owner merges: the wake stops at ready, `export AUTOPILOT_MERGE_POLICY=owner`>.
+<none: the wake merges when gated and reviewed | what holds a reviewed PR and who lifts it, e.g. `needs-local-verify` until the local checklist passes; labels of your own, given on the merge call itself, `AUTOPILOT_HOLD_LABELS="<label> …" $AP/scripts/merge.sh <pr>` | the owner merges these: <PR categories, e.g. a guardrail line, a cost, a one-way door>, which the wake labels `owner-merges` | owner merges: the wake stops at ready, `AUTOPILOT_MERGE_POLICY=owner $AP/scripts/merge.sh <pr>`>.
+A variable goes on the command it sets: an agent's shell keeps nothing between calls.
 
 ## Review
 

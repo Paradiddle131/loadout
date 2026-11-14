@@ -30,7 +30,7 @@ The author of a change fixes it and never reviews it; with no fresh-context suba
 
 Start the reviewers as subagents, in parallel and in the foreground, on Opus at high effort set in the call (the collection's default reviewer model, set explicitly because a subagent does not inherit the session's effort; a repo's instructions may name another).
 Give each the brief in [`templates.md`](templates.md): the repo, the range `$(git merge-base <default> <head>)..<head>`, the issue body and its done-when quoted; each agent makes and removes its own detached worktree.
-Give no summary of the work; the PR body goes only to `claims-auditor`, as material under audit.
+Give no summary of the work; the PR body goes only to `claims-auditor`, or to a repo's own lens its `REVIEW.md` names that asks for it, as material under audit.
 
 | Reviewer | Runs on |
 |---|---|
@@ -74,7 +74,7 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 
 ## 8. Merge
 
-- Merge when both records are `success` on the PR's head commit, naming that head in the merge; on cloud a hook refuses it otherwise, and refuses any Bash command that mentions a PR merge, so merge there with the MCP merge tool (`expectedHeadSha`) or a script that calls the hook's `--check <owner>/<repo>#<n>` (`cloud/hooks/merge-guard.py`), as the autopilot's `merge.sh` does.
+- Merge when both records are `success` on the PR's head commit, naming that head in the merge; on cloud a hook refuses it otherwise, and refuses any Bash command whose text holds `pr merge` or a `pulls/<n>/merge` endpoint, so merge there with the MCP merge tool (`expectedHeadSha`) or a script that calls the hook's `--check <owner>/<repo>#<n>` (`cloud/hooks/merge-guard.py`), as the autopilot's `merge.sh` does.
 - Where the owner keeps the merge (a repo's own rule, an autopilot profile's merge policy, or the owner's word), skip the merge and list the PR as ready; step 9 still runs.
 
 ## 9. File and brief

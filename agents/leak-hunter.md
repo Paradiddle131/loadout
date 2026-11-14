@@ -18,6 +18,9 @@ A commit range `<base>..<head>`, the absolute path `<repo>` of the target repo's
   - the same value in clear in another column, file, log line or error;
   - free text (descriptions, memos, notes) carrying a name or number past field-level masking;
   - joins: two outputs that each look safe and together pick out a person.
+- Network posts are outputs: an issue or PR comment, a request body, a webhook; where a real write is forbidden, run the change against a stub of the endpoint and search what it would send: that counts as running it.
+- Metadata leaks too: timestamps, counts, names of files or repos, and how often something happens, sent where a reader outside the work can see it.
+- Probe with invented values (a made-up token, name or path planted in the input), never a real secret, and say they are invented.
 - Quote at most three redacted values per leak; never a real value in full.
 
 ## How you work
