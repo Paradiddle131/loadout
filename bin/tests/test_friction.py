@@ -159,15 +159,31 @@ def test_a_note_is_scanned_appended_then_posted_on_a_new_friction_issue(fx: Fx) 
     assert issue["labels"] == ["friction"] and issue["body"].startswith("🤖")
 
 
-@pytest.mark.parametrize("rule, kept", [
-    ("pr-merge", "pr-merge"), ("a" * 40, "a" * 40), ("a" * 41, "unnamed"), ("home/user/private-repo", "unnamed"),
-    ("Pr-Merge", "unnamed"), ("gh pr merge 12; cat /srv/secret", "unnamed"), ("x_y", "unnamed"),
+@pytest.mark.parametrize("guard, rule, kept", [
+    ("merge-guard", "pr-merge", ("merge-guard", "pr-merge")), ("gcp-guard", "spend", ("gcp-guard", "spend")),
+    ("gcp-guard", "pr-merge", ("gcp-guard", "unnamed")),  # a rule of another guard
+    ("merge-guard", "a" * 41, ("merge-guard", "unnamed")), ("merge-guard", "home/user/private-repo",
+                                                            ("merge-guard", "unnamed")),
+    ("merge-guard", "Pr-Merge", ("merge-guard", "unnamed")), ("example-owner", "pr-merge", ("unnamed", "unnamed")),
+    ("private-repo", "spend", ("unnamed", "unnamed")),  # a slug, but no guard this collection ships
 ])
-def test_a_refusal_holds_a_slug_guard_and_rule_only_and_never_posts(fx: Fx, rule: str, kept: str) -> None:
-    fx.refuse(rule)
+def test_a_refusal_holds_a_shipped_guard_and_rule_only_and_never_posts(
+        fx: Fx, guard: str, rule: str, kept: tuple[str, str]) -> None:
+    fx.refuse(rule, guard)
     [line] = fx.lines()
-    assert set(line) == {"at", "kind", "guard", "rule"} and line["rule"] == kept
+    assert set(line) == {"at", "kind", "guard", "rule"} and (line["guard"], line["rule"]) == kept
     assert fx.calls() == []
+
+
+def test_every_rule_the_guards_refuse_under_is_known() -> None:
+    known = runpy.run_path(str(FRICTION), run_name="friction")["KNOWN"]
+    guard = runpy.run_path(str(BIN.parent / "cloud/hooks/merge-guard.py"), run_name="merge_guard")
+    rules = {r for r, *_ in guard["MENTIONS"]}
+    source = (BIN.parent / "cloud/hooks/merge-guard.py").read_text()
+    rules |= {r for r in ("auto-merge", "merge-records", "unreadable", "guard-error") if f'"{r}"' in source}
+    assert rules <= known["merge-guard"] and len(rules) == 9
+    gcp = (BIN.parent / "cloud/gcp/guard.py").read_text()
+    assert all(f'"{r}"' in gcp for r in known["gcp-guard"])
 
 
 def test_record_refusal_never_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -195,10 +211,12 @@ def test_refusals_are_posted_as_counts_per_rule_with_no_times(fx: Fx) -> None:
 def test_fields_are_checked_again_when_posted(fx: Fx) -> None:
     fx.log.parent.mkdir(parents=True)
     fx.log.write_text(json.dumps({"at": "x", "kind": "refusal", "guard": "/srv/private", "rule": "a b"}) + "\n"
+                      + json.dumps({"at": "x", "kind": "refusal", "guard": "private-repo", "rule": "x"}) + "\n"
                       + json.dumps({"at": "2000-01-02T03:04Z", "kind": "note", "note": "n"}) + "\n")
     fx.run("flush")
     [body] = fx.comments()
-    assert entries(body) == ["- refusals: unnamed, rule unnamed: 1", "- 2000-01-02 note: n"] and "/srv" not in body
+    assert entries(body) == ["- refusals: unnamed, rule unnamed: 2", "- 2000-01-02 note: n"]
+    assert "/srv" not in body and "private-repo" not in body
 
 
 def test_note_text_cannot_leave_the_code_block(fx: Fx) -> None:
@@ -223,6 +241,30 @@ def test_a_note_that_names_a_secret_or_the_owners_world_is_refused_and_stored_no
     assert done.returncode == 1 and "refused the note" in done.stderr and kind in done.stderr, done.stderr
     for word in ("PLANTED", "acme", "example-owner", "#12"):
         assert word not in done.stderr
+    assert not fx.log.exists() and fx.calls() == []
+
+
+def test_a_secret_past_the_text_cap_is_still_refused(fx: Fx) -> None:
+    done = fx.run("note", "x" * 600 + " PLANTED-SECRET")
+    assert done.returncode == 1 and "gitleaks" in done.stderr and not fx.log.exists() and fx.calls() == []
+
+
+REAL_GITLEAKS = shutil.which("gitleaks") or next(
+    (str(p) for p in [Path.home() / ".local/bin/gitleaks"] if p.is_file()), None)
+
+
+@pytest.mark.skipif(not (REAL_GITLEAKS and shutil.which("openssl")), reason="gitleaks or openssl not installed")
+def test_an_invented_private_key_longer_than_the_cap_is_refused(fx: Fx, tmp_path: Path) -> None:
+    assert REAL_GITLEAKS
+    (fx.bin / "gitleaks").unlink()
+    (fx.bin / "gitleaks").symlink_to(REAL_GITLEAKS)
+    key = subprocess.run(["openssl", "genrsa", "2048"], capture_output=True, text=True, check=True).stdout
+    assert len(key) > 1000  # generated here, never checked in
+    note = tmp_path / "note.md"
+    note.write_text("the guard refused this while I worked:\n" + key)
+    done = fx.run("note", "--file", str(note), "--part", "merge-guard")
+    assert done.returncode == 1 and "gitleaks reads as a secret" in done.stderr, done.stderr
+    assert "PRIVATE" not in done.stderr and key.splitlines()[1][:20] not in done.stderr
     assert not fx.log.exists() and fx.calls() == []
 
 
@@ -315,9 +357,9 @@ def test_a_replaced_or_regrown_log_is_posted_from_its_start(fx: Fx) -> None:
     assert entries(fx.comments()[1]) == ["- refusals: merge-guard, rule pr-merge: 1"]
     fx.log.write_text("")  # truncated in place, then regrown past the old offset
     for rule in ("no-verify", "hooks-path", "merge-records"):
-        fx.refuse(rule, guard="another-guard")
+        fx.refuse(rule, guard="merge-guard")
     fx.run("flush")
-    assert entries(fx.comments()[2]) == [f"- refusals: another-guard, rule {r}: 1"
+    assert entries(fx.comments()[2]) == [f"- refusals: merge-guard, rule {r}: 1"
                                          for r in ("hooks-path", "merge-records", "no-verify")]
 
 

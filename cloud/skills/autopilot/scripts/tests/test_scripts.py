@@ -441,9 +441,11 @@ def _merge_with(stub: dict[str, str], **changes: object) -> subprocess.Completed
         ({"labels": [{"name": "blocked: upstream"}, {"name": "needs-owner"}]}, "held"),
         ({"labels": [{"name": "needs-review"}]}, "held"),
         ({"labels": [{"name": "owner-merges"}]}, "held"),
+        ({"labels": [{"name": "Owner-Merges"}]}, "held"),
+        ({"labels": [{"name": "NEEDS-OWNER"}]}, "held"),
         ({"title": "[speculative: #9 = B] Backfill thirty days"}, "held"),
     ],
-    ids=["draft", "stacked", "local-verify", "needs-owner", "unreviewed-label", "owner-merges", "speculative"],
+    ids=["draft", "stacked", "local-verify", "needs-owner", "unreviewed-label", "owner-merges", "owner-merges-any-case", "needs-owner-any-case", "speculative"],
 )
 def test_merge_writes_nothing_for_a_held_pr(
     stub: dict[str, str], changes: dict[str, object], case: str

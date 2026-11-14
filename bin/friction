@@ -7,19 +7,21 @@
 
 The log ($LOADOUT_FRICTION_LOG, default ~/.claude/loadout-friction.jsonl) is per home directory; each append
 is one O_APPEND write of one JSON line, starting a fresh line when the log does not end in one.
-A refusal holds the guard and the rule, each a short slug, and nothing of the refused command. Guards load this
-file with runpy and call record_refusal, which never raises and never reaches the network.
-A note is posted on this collection's tracker, which may be public, so it is scanned first: gitleaks (a
-secret) and bin/check-generic.sh (the owner's login, a sibling repo, a deny-list word, a date, an issue
-number). A hit refuses the note, naming the kind of hit only, and stores nothing; with gitleaks missing or a
-scan failing, the note is kept in the log and never posted. `note --file` reads the note from a file, so its
+A refusal holds the guard and the rule, each one this collection ships (KNOWN; anything else is `unnamed`),
+and nothing of the refused command. Guards load this file with runpy and call record_refusal, which never
+raises and never reaches the network.
+A note is posted on this collection's tracker, which may be public, so it is scanned first, on the text exactly
+as given, before it is cut to MAX_TEXT: gitleaks (a secret) and bin/check-generic.sh (the owner's login, a
+sibling clone's name beside a slash, a deny-list word, a date, an issue number). A hit refuses the note, naming
+the kind of hit only, and stores nothing; with gitleaks missing or a scan failing, the note is kept in the log
+and never posted. `note --file` reads the note from a file, so its
 words never pass through a Bash command a guard reads. `note` then flushes.
 
 `flush` posts the unposted lines as one comment, first line `🤖 Friction: ...`, on this collection's open issue
 labelled `friction`, creating the label and the issue when missing: refusals as one count per guard and rule,
 notes with their date but no time. The repository is this clone's origin, and it posts only when the
 origin's owner is the login `gh` is authenticated as; REST through `gh api` only. Then the posted mark (the
-log's path plus `.posted`: the offset and the log's identity) moves past them; a log replaced or truncated
+log's path plus `.posted`: the offset and the log's first line) moves past them; a log replaced or truncated
 starts again from its beginning. A flush that fails keeps the lines for the next one and exits 0 with one line
 on stderr; it may already have created the label and the issue, and a comment GitHub took whose read-back
 then failed is posted again by the next flush. Each call has a timeout and the flush FLUSH_BUDGET seconds in
@@ -44,6 +46,10 @@ from pathlib import Path
 
 LABEL = "friction"
 SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
+# The guards this collection ships and their rule ids: anything else is posted as `unnamed`.
+KNOWN = {"merge-guard": {"pr-merge", "merge-endpoint", "merge-mutation", "no-verify", "hooks-path", "auto-merge",
+                         "merge-records", "unreadable", "guard-error"},
+         "gcp-guard": {"spend", "guard-error"}}
 MAX_TEXT = 500
 MAX_COMMENT = 60_000
 CALL_TIMEOUT = 10
@@ -73,6 +79,13 @@ def slug(text: object) -> str:
     return text if isinstance(text, str) and SLUG.fullmatch(text) else "unnamed"
 
 
+def known(guard: object, rule: object) -> tuple[str, str]:
+    """(guard, rule) when the collection ships them, else `unnamed` for what is not."""
+    if guard not in KNOWN:
+        return "unnamed", "unnamed"
+    return str(guard), str(rule) if rule in KNOWN[str(guard)] else "unnamed"
+
+
 def append(entry: dict[str, object]) -> None:
     path = log_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -91,8 +104,9 @@ def append(entry: dict[str, object]) -> None:
 def record_refusal(guard: str, rule: str) -> None:
     """For guards: note a refusal by the guard's name and the rule's id only. Never raises, never posts."""
     try:
-        append({"at": time.strftime("%Y-%m-%dT%H:%MZ", time.gmtime()), "kind": "refusal", "guard": slug(guard),
-                "rule": slug(rule)})
+        guard, rule = known(guard, rule)
+        append({"at": time.strftime("%Y-%m-%dT%H:%MZ", time.gmtime()), "kind": "refusal", "guard": guard,
+                "rule": rule})
     except Exception:  # noqa: BLE001 -- a guard's decision never depends on its log
         pass
 
@@ -119,8 +133,8 @@ def scan(text: str) -> tuple[str, bool]:
         done = subprocess.run(["bash", str(HERE / "check-generic.sh"), f.name], capture_output=True, text=True,
                               timeout=CALL_TIMEOUT, check=False, stdin=subprocess.DEVNULL)
         if done.returncode == 1:
-            return ("it names the owner's login, a sibling repo, a deny-list word, a date or an issue number "
-                    "(bin/check-generic.sh)"), ran
+            return ("it names the owner's login, a sibling repo's path, a deny-list word, a date or an issue "
+                    "number (bin/check-generic.sh)"), ran
         ran = ran and done.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         ran = False
@@ -131,15 +145,17 @@ def scan(text: str) -> tuple[str, bool]:
 
 def record_note(text: str, part: str | None, workaround: str | None) -> str:
     """Scan, then append the note; '' when it may be posted, else why it was refused or kept local."""
+    given = [x for x in (text, part, workaround) if x]
+    # Scanned exactly as given: cutting first could keep part of a secret the scanner needs whole to see.
+    hit, ran = scan("\n".join(str(x).encode("utf-8", "replace").decode("utf-8") for x in given))
+    if hit:
+        raise ValueError(f"refused the note: {hit}; write it in generic words and note it again")
     entry: dict[str, object] = {"at": time.strftime("%Y-%m-%d", time.gmtime()), "kind": "note",
                                 "note": one_line(text)}
     if part:
         entry["part"] = one_line(part)
     if workaround:
         entry["workaround"] = one_line(workaround)
-    hit, ran = scan("\n".join(str(entry[k]) for k in ("note", "part", "workaround") if k in entry))
-    if hit:
-        raise ValueError(f"refused the note: {hit}; write it in generic words and note it again")
     if not ran:
         entry["local"] = True
     append(entry)
@@ -158,7 +174,7 @@ def render(raw: bytes, counts: dict[tuple[str, str], int]) -> str | None:
         counts[("", "")] = counts.get(("", ""), 0) + 1
         return None
     if e.get("kind") == "refusal":
-        key = (slug(e.get("guard")), slug(e.get("rule")))
+        key = known(e.get("guard"), e.get("rule"))
         counts[key] = counts.get(key, 0) + 1
         return None
     if e.get("kind") != "note" or e.get("local"):
@@ -231,8 +247,9 @@ class Flush:
         return new["number"]
 
 
-def identity(data: bytes, st: os.stat_result) -> dict[str, object]:
-    return {"ino": st.st_ino, "first": data.split(b"\n", 1)[0][:256].hex()}
+def identity(data: bytes) -> dict[str, object]:
+    """The log's first line: a log replaced or truncated and regrown starts with another one."""
+    return {"first": data.split(b"\n", 1)[0][:256].hex()}
 
 
 def flush() -> str:
@@ -247,7 +264,7 @@ def flush() -> str:
             return "friction: another flush is running"
         mark = Path(f"{path}.posted")
         data = path.read_bytes()
-        here = identity(data, path.stat())
+        here = identity(data)
         try:
             stored = json.loads(mark.read_text())
             offset = int(stored["offset"]) if {k: stored.get(k) for k in here} == here else 0

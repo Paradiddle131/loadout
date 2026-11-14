@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # merge.sh <pr> [--dry-run]: the skill's merge step.
 # Squash-merges the PR at the head it read, and only when every condition holds: open, not a draft,
-# based on the default branch, no hold (among the PR's labels: `needs-owner`, `needs-review`,
+# based on the default branch, no hold (among the PR's labels, in any case: `needs-owner`, `needs-review`,
 # `needs-local-verify`, `owner-merges`, $AUTOPILOT_HOLD_LABELS; a `[speculative` title;
 # AUTOPILOT_MERGE_POLICY=owner), no commit of
 # another open agent PR among its own (a stack aimed at the default branch carries held work), the
@@ -42,8 +42,8 @@ case "$(jq -r '.title' <<<"$pr")" in
   "[speculative"*) stop held "PR #$PR is speculative: it waits for its packet's answer" ;;
 esac
 # shellcheck disable=SC2016  # jq program
-hold="$(jq -r --arg holds "$HOLDS" '($holds | split(" ") | map(select(. != ""))) as $h
-  | [.labels[].name | select(. as $l | $h | index([$l]))][0] // empty' <<<"$pr")"
+hold="$(jq -r --arg holds "$HOLDS" '($holds | split(" ") | map(select(. != "") | ascii_downcase)) as $h
+  | [.labels[].name | select(ascii_downcase as $l | $h | index([$l]))][0] // empty' <<<"$pr")"
 [ -z "$hold" ] || stop held "PR #$PR carries $hold"
 
 # Another open agent PR whose commits are among this PR's: this PR would merge that work too.

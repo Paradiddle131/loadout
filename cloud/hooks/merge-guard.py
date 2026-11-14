@@ -12,8 +12,8 @@ by the owner, a member or a collaborator whose first line is `🤖 Gates: <state
 a success. In a local clone holding the head and the default branch GitHub names, tier.sh runs with `--base
 origin/<that branch>` and a review below the paths' tier refuses, as does a tier.sh that fails or runs out of
 time; with no such clone the tier check is skipped. The merge must name the head checked (`expectedHeadSha`),
-so GitHub refuses it if a push lands in between. A PR labelled `owner-merges` is refused whatever its records
-(the merge is the owner's), here and in `--check`. `enable_pr_auto_merge` is refused.
+so GitHub refuses it if a push lands in between. A PR labelled `owner-merges`, in any case, is refused whatever
+its records (the merge is the owner's), here and in `--check`. `enable_pr_auto_merge` is refused.
 
 Bash: the command is read as text, never as shell. A command whose text holds one of the five MENTIONS
 patterns (`pr merge`, `pulls/<n>/merge`, a GraphQL merge mutation, `--no-verify`, `hooksPath=`) is refused,
@@ -26,7 +26,7 @@ commands a hook or script runs (save-work's push, merge.sh's merge).
 
 Each refusal in hook mode is noted in the friction log (bin/friction): the guard's name and the rule, never the
 command. Bounds: one 30 s budget per merge-tool decision, under the hook's 45 s timeout (a timed-out hook does
-not block); a merge it cannot check (GitHub unreadable, a guard failure, input nested too deep to read) is
+not block); a merge it cannot check (GitHub unreadable, a guard failure, input it cannot parse) is
 refused; a guard failure on a Bash command passes it.
 
 Hook mode (no arguments): the hook's JSON on stdin, a deny decision or nothing on stdout, exit 0. Check
@@ -233,7 +233,7 @@ def check_merge(repo: str | None, number: str | None, expected: str | None, cwd:
     head = (pr.get("head") or {}).get("sha")
     if not head or not re.fullmatch(r"[0-9a-f]{40}", head):
         raise Unreadable(f"PR {number} in {repo} shows no head commit")
-    if any(isinstance(lb, dict) and lb.get("name") == OWNER_MERGES for lb in pr.get("labels") or []):
+    if any(isinstance(lb, dict) and str(lb.get("name")).lower() == OWNER_MERGES for lb in pr.get("labels") or []):
         return (f"refused merging PR {number} of {repo}: it carries `{OWNER_MERGES}`, so the merge is the "
                 "owner's: they merge it in GitHub, or remove the label themselves"), head
     if expected and expected != head:
@@ -347,14 +347,12 @@ def main() -> int:
     raw = sys.stdin.read()
     try:
         event = json.loads(raw)
-    except ValueError:
-        return 0
-    except RecursionError:  # nested past what json reads: refuse a merge-tool call, pass a command
+    except (ValueError, RecursionError):  # unreadable (nested too deep, a huge number): fail closed for a merge
         if re.search(r'"tool_name"\s*:\s*"mcp__[^"]*__(?:merge_pull_request|enable_pr_auto_merge)"', raw):
             print(json.dumps({"hookSpecificOutput": {
                 "hookEventName": "PreToolUse", "permissionDecision": "deny",
-                "permissionDecisionReason": "Merge guard: refused: the call's input is nested too deep to read, "
-                                            "so it fails closed."}}))
+                "permissionDecisionReason": "Merge guard: refused: the call's input cannot be read, so it "
+                                            "fails closed."}}))
             note_refusal("guard-error")
         return 0
     if not isinstance(event, dict):

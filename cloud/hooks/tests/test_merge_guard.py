@@ -573,7 +573,7 @@ def test_an_unwritable_friction_log_leaves_the_decision_alone(fx: Fx, clone: Pat
 
 def test_a_pr_the_owner_merges_is_refused_whatever_its_records(fx: Fx, clone: Path) -> None:
     fx.both()
-    (fx.d / "pr.json").write_text(json.dumps({**pr_answer(HEAD), "labels": [{"name": "owner-merges"}]}))
+    (fx.d / "pr.json").write_text(json.dumps({**pr_answer(HEAD), "labels": [{"name": "Owner-Merges"}]}))
     reason = mcp(fx, clone, expectedHeadSha=HEAD)
     assert reason and "`owner-merges`" in reason and "the merge is the owner's" in reason, reason
     done = check(fx, clone, "--check", f"{REPO}#12")
@@ -608,3 +608,14 @@ def test_check_mode_fails_closed_on_a_guard_error(fx: Fx, clone: Path, tmp_path:
                           stdin=subprocess.DEVNULL)
     assert done.returncode == 1 and "the merge guard failed" in done.stderr and "fails closed" in done.stderr
     assert done.stdout == ""
+
+
+@pytest.mark.parametrize("tool, refused", [("Bash", False), ("mcp__github__merge_pull_request", True)])
+def test_input_json_cannot_read_fails_closed_for_a_merge(fx: Fx, clone: Path, tool: str, refused: bool) -> None:
+    event = json.dumps({"tool_name": tool, "tool_input": {"command": "ls", "owner": "example-owner",
+                                                          "repo": "example-repo", "pullNumber": 12}})
+    event = event.replace('"pullNumber": 12', '"pullNumber": 1' + "0" * 5000)  # past the parser's digit limit
+    done = subprocess.run([sys.executable, str(GUARD)], input=event, capture_output=True, text=True,
+                          timeout=60, env=guard_env(fx))
+    assert done.returncode == 0 and done.stderr == "", done.stderr[-300:]
+    assert bool(done.stdout.strip()) is refused
