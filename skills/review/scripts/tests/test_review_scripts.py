@@ -596,3 +596,4 @@ def test_read_back_accepts_only_the_relay_footer(tmp_path: Path) -> None:
     assert same(body.rstrip("\n") + "\n\nanything else") == 1
     assert same(body.rstrip("\n") + footer + "\nmore") == 1
     assert same("changed " + body) == 1
+    assert same(body.rstrip("\n") + footer.lstrip("\n")) == 1  # glued to the body's last line
