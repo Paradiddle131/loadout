@@ -17,7 +17,7 @@ Cloud conditions every repo shares live in [`cloud/CLAUDE.md`](../cloud/CLAUDE.m
 - The mechanical steps are scripts with `--dry-run` and tests from the start: prose steps drift, and script bugs surface early.
 - Decision packets: at most three questions, A/B/C with one trade-off line each, a recommendation; the owner answers in a few characters and usually takes the recommendation.
 - Build ahead on a reversible recommendation instead of idling while a packet waits.
-- One handoff comment per PR, edited in place, five lines outside `<details>`; local resume edits the same comment and removes the label.
+- One handoff comment per PR, edited in place, five lines outside `<details>` besides its `Edited` lines; local resume edits the same comment and removes the label.
 - PRs waiting on the owner never cap new work; only dependencies do. Stack only on a held PR, targeting its branch: a stack aimed at the default branch merges the held work beneath it.
 - Needing the owner's machine to verify never makes work local-only: build it, verify what cloud can, hand off the rest.
 - The issue body is the spec: when newer facts change the ask, rewrite the body and cite the source.
