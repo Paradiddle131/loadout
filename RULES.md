@@ -22,6 +22,6 @@ Every rule here acts inside the repo being worked on; the one rule that writes t
 - In a repo with a UI, follow its `DESIGN.md` (repo root, then `docs/design/`) before any UI change.
 - Draw an architecture or system diagram with the `draw-architecture` skill, unless the repo's `DESIGN.md` asks for another style.
 - Write PR bodies with the `pr` skill; a repo's own template only renames its sections.
-- Commit in the repo's message style (conventional commits by default), with no agent co-author and no session trailer.
+- Commit in the repo's message style (conventional commits by default).
 - Put each sentence of long Markdown on its own line.
 - Follow the [ways of working](ways/README.md) in a repo whose `CLAUDE.md` opts in.
