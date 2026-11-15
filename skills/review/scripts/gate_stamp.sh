@@ -11,9 +11,8 @@
 # 3. Runs the command, its output shown as it runs.
 # 4. Refuses to record when the command moved HEAD or changed a tracked file: the result would not be the head's.
 # 5. Posts `🤖 Gates: success|failure` with the gates marker naming the head (lib.sh has the format), the
-#    command, its exit code and the output's last 40 non-blank lines, leaving out the lines a package installer
-#    prints (uv's and pip's resolve, download and install lines, counted in the record); the whole log stays in
-#    the terminal. Reads the comment back and fails if it differs.
+#    command, its exit code, and the output's last 40 non-blank lines (colour codes and NUL bytes stripped)
+#    with its total line count; the whole log stays in the terminal. Reads the comment back and fails if it differs.
 # 6. Prints a block a PR body can quote; exits with the command's exit code (2 when this script refused before
 #    running it, 3 when the command passed but its record could not be posted).
 #
@@ -62,28 +61,20 @@ changed=$(git status --porcelain --untracked-files=no)
 [ -z "$changed" ] || die "the command changed tracked files, so its result is not the head's; nothing recorded:
 $changed"
 
-# The record keeps the summary: the last non-blank lines without colour codes, past the installer's lines.
+# The record keeps the summary: the last non-blank lines, without colour codes or NUL bytes, read as text
+# whatever bytes they hold (grep calls a file with a NUL or an invalid byte binary and prints none of it).
 tail_lines=40
-installer_lines=(
-  '[+-] [A-Za-z0-9_.-]+(\[[^]]*\])?( ?==| @ )'                            # uv: ` + pkg==1.0`, ` + pkg @ file://…`
-  '(Resolved|Prepared|Installed|Uninstalled|Audited) [0-9]+ packages? in ' # uv's step summaries
-  'Downloading [^[:space:]]+ \([0-9.]+ ?[kKMG]i?B\)$' 'Downloaded [^[:space:]]+$'
-  '(Collecting|Using cached|Installing collected packages:|Successfully installed|Requirement already satisfied:) ' # pip
-)
-installer="^[[:space:]]*($(IFS='|'; echo "${installer_lines[*]}"))"
-sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g; s/[[:space:]]+$//' "$out" >"$tmp/plain"
-total=$(grep -c '' "$tmp/plain" || true)
-noise=$(grep -cE "$installer" "$tmp/plain" || true)
-{ grep -vE "$installer" "$tmp/plain" || true; } | { grep -v '^$' || true; } | tail -n "$tail_lines" >"$tmp/tail"
-kept=$(grep -c '' "$tmp/tail" || true)
+tr -d '\000' <"$out" | sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g; s/[[:space:]]+$//' >"$tmp/plain"
+total=$(grep -ac '' "$tmp/plain" || true)
+{ grep -av '^$' "$tmp/plain" || true; } | tail -n "$tail_lines" >"$tmp/tail"
+kept=$(grep -ac '' "$tmp/tail" || true)
 summary=$(tail -n 1 "$tmp/tail")
 state=failure
 [ "$code" = 0 ] && state=success
 build_record --kind gates --sha "$head" --state "$state" --title "🤖 Gates: $state" \
   --line "- Head commit: \`$head\`" --line "- Command: \`$shown\`" --line "- Exit code: $code" \
   --line "- Last line: ${summary:-no output}" --file "$tmp/tail" --tail \
-  --details "Output: its last $kept non-blank lines of $total, without the $noise a package installer printed" \
-  >"$tmp/body.md"
+  --details "Output: its last $kept non-blank lines of $total" >"$tmp/body.md"
 
 rc=$code
 recorded="recorded on PR $pr"

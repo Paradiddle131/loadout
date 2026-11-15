@@ -94,7 +94,7 @@ class World:
 
     def run(self, script: str, *args: str, **extra: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(["bash", str(SCRIPTS / script), *args], cwd=self.repo, env={**self.env, **extra},
-                              capture_output=True, text=True, timeout=60)
+                              capture_output=True, text=True, errors="replace", timeout=60)
 
     def comments(self) -> list[dict]:
         p = self.fx / "comments.json"
@@ -145,33 +145,36 @@ def test_gate_stamp_posts_a_gates_record_for_the_head(w: World) -> None:
     assert "exit 0" in done.stdout
 
 
-INSTALL_NOISE = ("Resolved 41 packages in 3ms", "Prepared 2 packages in 50ms", "Installed 41 packages in 20ms",
-                 " + pytest==8.4.2", " - pytest==8.3.0", " + example-pkg @ file:///tmp/x",
-                 "Uninstalled 1 package in 1ms", "Audited 41 packages in 1ms", "Downloading cpython-3.12.3 (17.8MiB)",
-                 " Downloaded cpython-3.12.3", "Collecting example-pkg==1.0",
-                 "Requirement already satisfied: example-pkg in ./x",
-                 "Using cached example_pkg-1.0-py3-none-any.whl (12 kB)", "Installing collected packages: example-pkg",
-                 "Successfully installed example-pkg-1.0")
-
-
-def test_gate_stamp_posts_the_tail_of_the_output_without_installer_lines(w: World, tmp_path: Path) -> None:
+def test_gate_stamp_posts_the_last_40_non_blank_lines_whatever_they_say(w: World, tmp_path: Path) -> None:
     w.commit({"src/app.py": "x = 2\n"})
     log = tmp_path / "log.txt"
-    lines = [f"early line {i}" for i in range(200)]
-    for i in range(39):
-        lines += INSTALL_NOISE
-        lines.append(f"late line {i}")
-    lines += ["Resolved 41 packages in 3ms", "", "\x1b[32m12 passed in 0.3s\x1b[0m"]
+    # Lines of every shape stay, installer-like ones included: the record leaves out only what is above the tail.
+    shapes = ["lockfile drift:", " - numpy==1.26.0", " + numpy==2.0.0", "- total == 3", "Downloaded report.csv",
+              "Collecting garbage failed hard", "Installed 3 packages in 2ms", "Resolved 41 packages in 3ms"]
+    lines = [f"early line {i}" for i in range(200)] + [f"late line {i}" for i in range(31)] + shapes
+    lines += ["", "\x1b[32m1 failed in 0.3s\x1b[0m"]
     log.write_text("\n".join(lines) + "\n")
-    done = w.run("gate_stamp.sh", "--", "cat", str(log))
-    assert done.returncode == 0, done.stderr
+    done = w.run("gate_stamp.sh", "--", "bash", "-c", f"cat {log}; exit 1")
+    assert done.returncode == 1, done.stderr
     body = w.comments()[0]["body"]
     assert len(body) < 4000, len(body)
-    assert "- Exit code: 0" in body and "- Last line: 12 passed in 0.3s" in body
-    assert "late line 38" in body and "late line 0\n" in body and "early line" not in body
-    assert not [n for n in INSTALL_NOISE if n in body], [n for n in INSTALL_NOISE if n in body]
-    assert (f"its last 40 non-blank lines of {len(lines)}, without the {39 * len(INSTALL_NOISE) + 1} "
-            "a package installer printed") in body
+    assert "- Exit code: 1" in body and "- Last line: 1 failed in 0.3s" in body
+    assert "late line 0\n" in body and "early line" not in body and "\x1b" not in body
+    assert [x for x in shapes if x not in body] == []
+    assert f"<summary>Output: its last 40 non-blank lines of {len(lines)}</summary>" in body
+
+
+@pytest.mark.parametrize("odd", [b"\x00", b"\xff"])
+def test_gate_stamp_keeps_the_tail_of_output_holding_a_byte_grep_calls_binary(w: World, tmp_path: Path,
+                                                                             odd: bytes) -> None:
+    w.commit({"src/app.py": "x = 2\n"})
+    log = tmp_path / "log.txt"
+    log.write_bytes(b"line one\nbinary " + odd + b" here\n1 failed, 11 passed in 0.3s\n")
+    done = w.run("gate_stamp.sh", "--", "bash", "-c", f"cat {log}; exit 1")
+    assert done.returncode == 1, done.stderr
+    body = w.comments()[0]["body"]
+    assert "- Last line: 1 failed, 11 passed in 0.3s" in body and "<details>" in body
+    assert "line one\nbinary " in body and "of 3</summary>" in body and "\x00" not in body
 
 
 def test_gate_stamp_records_failure_and_keeps_the_exit_code(w: World) -> None:
