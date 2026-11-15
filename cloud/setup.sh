@@ -80,7 +80,8 @@ else
   echo "plugins: claude CLI not found; read skills from the clone by path"
 fi
 
-# 3. Settings: no agent attribution on commits and PRs. Drop hook entries whose script no longer exists (a hook
+# 3. Settings: Claude Code's own attribution defaults apply, so drop the blank `attribution` block an older setup
+#    wrote (a value set any other way is left alone). Drop hook entries whose script no longer exists (a hook
 #    from a repo that left the environment would fail every turn), and entries that run this collection's own hook
 #    scripts from any clone (an older setup wrote them here; the cloud plugin registers them now, so they would
 #    run twice).
@@ -89,7 +90,8 @@ import json, os, pathlib, shlex
 OWN = ("/cloud/hooks/session-start.sh", "/cloud/hooks/save-work.sh", "/cloud/gcp/guard.py")
 p = pathlib.Path.home() / ".claude/settings.json"
 s = json.loads(p.read_text()) if p.exists() and p.read_text().strip() else {}
-s["attribution"] = {"commit": "", "pr": "", "sessionUrl": False}
+if s.get("attribution") == {"commit": "", "pr": "", "sessionUrl": False}:
+    del s["attribution"]
 def alive(h):
     words = shlex.split(h.get("command", ""))
     scripts = [w for w in words[1:2] if w.startswith("/")]
@@ -103,7 +105,6 @@ for event, matchers in list(s.get("hooks", {}).items()):
 p.parent.mkdir(parents=True, exist_ok=True)
 p.write_text(json.dumps(s, indent=2) + "\n")
 EOF
-echo "settings: attribution off"
 
 # 3b. gitleaks, pinned and checksum-checked, for the secret scan in this repo's pre-commit hook.
 GITLEAKS_VERSION=8.21.2 GITLEAKS_SHA256=5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba
