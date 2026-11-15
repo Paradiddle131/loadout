@@ -57,7 +57,7 @@ if [ "$tier" != routine ]; then
   sha_re='`?([0-9a-f]{7,40})`?'
   verdict_re="^[[:space:]]*VERDICT: (PASS|FAIL) ${sha_re}[[:space:]]*\$"
   reviewed_re="^[[:space:]]*Reviewed: ${sha_re}[[:space:]]*\$"
-  # -a: a NUL byte anywhere in the output would make grep call the file binary and print no line.
+  # -a: a NUL byte in the output can make grep call the file binary and print no line.
   verdict_line=$(grep -a -m 1 -E '^[[:space:]]*VERDICT:' "$file" || true)
   reviewed_line=$(grep -a -m 1 -E '^[[:space:]]*Reviewed:' "$file" || true)
   shape="--file is not finding-verifier's output: it needs a \`VERDICT: PASS|FAIL <sha>\` line and a \`Reviewed: <sha>\` line"

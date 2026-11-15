@@ -62,7 +62,7 @@ changed=$(git status --porcelain --untracked-files=no)
 $changed"
 
 # The record keeps the summary: the last non-blank lines, first made valid UTF-8 text (NUL bytes dropped,
-# invalid bytes replaced) so nothing below sees a raw byte, then stripped of colour codes.
+# invalid bytes replaced) so the record's tail and last line hold no raw byte, then stripped of colour codes.
 tail_lines=40
 python3 -c 'import sys; sys.stdout.buffer.write(sys.stdin.buffer.read().replace(b"\0", b"").decode("utf-8", "replace").encode())' \
   <"$out" | sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g; s/[[:space:]]+$//' >"$tmp/plain"
