@@ -11,7 +11,8 @@
 # 3. Runs the command, its output shown as it runs.
 # 4. Refuses to record when the command moved HEAD or changed a tracked file: the result would not be the head's.
 # 5. Posts `🤖 Gates: success|failure` with the gates marker naming the head (lib.sh has the format), the
-#    command, its exit code and the output's tail; reads the comment back and fails if it differs.
+#    command, its exit code, and the output's last 40 non-blank lines (NUL bytes and colour codes stripped,
+#    invalid UTF-8 replaced) with its total line count; the whole log stays in the terminal. Reads the comment back and fails if it differs.
 # 6. Prints a block a PR body can quote; exits with the command's exit code (2 when this script refused before
 #    running it, 3 when the command passed but its record could not be posted).
 #
@@ -60,13 +61,21 @@ changed=$(git status --porcelain --untracked-files=no)
 [ -z "$changed" ] || die "the command changed tracked files, so its result is not the head's; nothing recorded:
 $changed"
 
-# The last non-empty line, without colour codes.
-summary=$(sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g; s/[[:space:]]+$//' "$out" | grep -v '^$' | tail -n 1 || true)
+# The record keeps the summary: the last non-blank lines, with NUL bytes dropped and invalid UTF-8 replaced first,
+# so the tail and the last line hold no NUL or invalid byte, then colour codes stripped.
+tail_lines=40
+python3 -c 'import sys; sys.stdout.buffer.write(sys.stdin.buffer.read().replace(b"\0", b"").decode("utf-8", "replace").encode())' \
+  <"$out" | sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g; s/[[:space:]]+$//' >"$tmp/plain"
+total=$(grep -c '' "$tmp/plain" || true)
+{ grep -v '^$' "$tmp/plain" || true; } | tail -n "$tail_lines" >"$tmp/tail"
+kept=$(grep -c '' "$tmp/tail" || true)
+summary=$(tail -n 1 "$tmp/tail")
 state=failure
 [ "$code" = 0 ] && state=success
 build_record --kind gates --sha "$head" --state "$state" --title "🤖 Gates: $state" \
   --line "- Head commit: \`$head\`" --line "- Command: \`$shown\`" --line "- Exit code: $code" \
-  --line "- Last line: ${summary:-no output}" --file "$out" --details "Output (raw)" --tail >"$tmp/body.md"
+  --line "- Last line: ${summary:-no output}" --file "$tmp/tail" --tail \
+  --details "Output: its last $kept non-blank lines of $total" >"$tmp/body.md"
 
 rc=$code
 recorded="recorded on PR $pr"

@@ -94,7 +94,7 @@ class World:
 
     def run(self, script: str, *args: str, **extra: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(["bash", str(SCRIPTS / script), *args], cwd=self.repo, env={**self.env, **extra},
-                              capture_output=True, text=True, timeout=60)
+                              capture_output=True, text=True, errors="replace", timeout=60)
 
     def comments(self) -> list[dict]:
         p = self.fx / "comments.json"
@@ -143,6 +143,62 @@ def test_gate_stamp_posts_a_gates_record_for_the_head(w: World) -> None:
     assert "- Exit code: 0" in c["body"] and "12 passed in 0.3s" in c["body"] and "<details>" in c["body"]
     assert f"Gates on {head}: success, recorded on PR 12" in done.stdout
     assert "exit 0" in done.stdout
+
+
+def test_gate_stamp_posts_the_last_40_non_blank_lines_whatever_they_say(w: World, tmp_path: Path) -> None:
+    w.commit({"src/app.py": "x = 2\n"})
+    log = tmp_path / "log.txt"
+    # Installer-shaped lines stay like any other line.
+    shapes = ["lockfile drift:", " - numpy==1.26.0", " + numpy==2.0.0", "- total == 3", "Downloaded report.csv",
+              "Collecting garbage failed hard", "Installed 3 packages in 2ms", "Resolved 41 packages in 3ms"]
+    lines = [f"early line {i}" for i in range(200)] + [f"late line {i}" for i in range(31)] + shapes
+    lines += ["", "\x1b[32m1 failed in 0.3s\x1b[0m"]
+    log.write_text("\n".join(lines) + "\n")
+    done = w.run("gate_stamp.sh", "--", "bash", "-c", f"cat {log}; exit 1")
+    assert done.returncode == 1, done.stderr
+    body = w.comments()[0]["body"]
+    assert len(body) < 4000, len(body)
+    assert "- Exit code: 1" in body and "- Last line: 1 failed in 0.3s" in body
+    assert "late line 0\n" in body and "early line" not in body and "\x1b" not in body
+    assert [x for x in shapes if x not in body] == []
+    assert f"<summary>Output: its last 40 non-blank lines of {len(lines)}</summary>" in body
+
+
+@pytest.mark.parametrize("odd", [b"\x00", b"\xff"])
+@pytest.mark.parametrize("on_last", [False, True])
+def test_gate_stamp_records_output_holding_a_nul_or_invalid_byte(w: World, tmp_path: Path, odd: bytes,
+                                                                on_last: bool) -> None:
+    w.commit({"src/app.py": "x = 2\n"})
+    log = tmp_path / "log.txt"
+    middle, last = b"middle line", b"12 passed in 0.3s"
+    if on_last:
+        last += b" " + odd
+    else:
+        middle += b" " + odd
+    log.write_bytes(b"line one\n" + middle + b"\n" + last + b"\n")
+    done = w.run("gate_stamp.sh", "--", "cat", str(log), LC_ALL="C.UTF-8")
+    assert done.returncode == 0, done.stderr
+    [c] = w.comments()
+    body = c["body"]
+    assert "- Last line: 12 passed in 0.3s" in body and "line one\nmiddle line" in body
+    assert "its last 3 non-blank lines of 3</summary>" in body and "\x00" not in body
+
+
+def test_gate_stamp_gives_whitespace_only_lines_no_tail_slot(w: World, tmp_path: Path) -> None:
+    w.commit({"src/app.py": "x = 2\n"})
+    log = tmp_path / "log.txt"
+    log.write_text("".join(f"line {i}\n" for i in range(60)) + "   \n\t\n" * 5 + "done\n")
+    done = w.run("gate_stamp.sh", "--", "cat", str(log))
+    assert done.returncode == 0, done.stderr
+    body = w.comments()[0]["body"]
+    assert "```text\nline 21\n" in body and "line 20\n" not in body and "line 59\ndone\n" in body
+
+
+def test_gate_stamp_counts_a_short_output_as_it_is(w: World) -> None:
+    w.commit({"src/app.py": "x = 2\n"})
+    done = w.run("gate_stamp.sh", "--", "printf", "a\\nb\\nc\\n")
+    assert done.returncode == 0, done.stderr
+    assert "<summary>Output: its last 3 non-blank lines of 3</summary>" in w.comments()[0]["body"]
 
 
 def test_gate_stamp_records_failure_and_keeps_the_exit_code(w: World) -> None:
@@ -355,16 +411,18 @@ def test_tier_empty_diff_is_an_error(w: World) -> None:
 # verdict.sh
 
 
-def review_file(tmp: Path, text: str = "No findings.\n```\nquoted fence\n```\n") -> str:
+def review_file(tmp: Path, sha: str, verdict: str = "PASS",
+                text: str = "No findings.\n```\nquoted fence\n```\n") -> str:
+    """A verifier's output (agents/finding-verifier.md § Output): its verdict and reviewed lines, then `text`."""
     p = tmp / "review.txt"
-    p.write_text(text)
+    p.write_text(f"VERDICT: {verdict} {sha}\nReviewed: {sha}\n\n{text}")
     return str(p)
 
 
 def test_verdict_pass_posts_a_review_record(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
     done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "fresh-reviewer",
-                 "--reviewed", head, "--file", review_file(tmp_path))
+                 "--reviewed", head, "--file", review_file(tmp_path, head))
     assert done.returncode == 0, done.stderr
     [c] = w.comments()
     lines = c["body"].split("\n")
@@ -376,16 +434,110 @@ def test_verdict_pass_posts_a_review_record(w: World, tmp_path: Path) -> None:
 def test_verdict_fail_records_failure(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
     done = w.run("verdict.sh", "12", "--tier", "sensitive", "--result", "fail", "--reviewers", "a, b",
-                 "--reviewed", head, "--file", review_file(tmp_path, "BLOCKER\n"))
+                 "--reviewed", head, "--file", review_file(tmp_path, head, "FAIL", "BLOCKER\n"))
     assert done.returncode == 0, done.stderr
     assert w.comments()[0]["body"].startswith(
         f"🤖 Review: fail (sensitive tier)\n{REVIEW} sha={head} state=failure tier=sensitive")
 
 
+@pytest.mark.parametrize("verdict, state", [("PASS", "success"), ("FAIL", "failure")])
+def test_verdict_takes_its_result_from_the_verifiers_verdict_line(w: World, tmp_path: Path, verdict: str,
+                                                                   state: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", review_file(tmp_path, head, verdict))
+    assert done.returncode == 0, done.stderr
+    assert f"{REVIEW} sha={head} state={state} tier=standard" in w.comments()[0]["body"]
+
+
+@pytest.mark.parametrize("result, verdict", [("pass", "FAIL"), ("fail", "PASS")])
+def test_verdict_refuses_a_result_the_verifier_did_not_give(w: World, tmp_path: Path, result: str,
+                                                            verdict: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--result", result, "--reviewers", "x",
+                 "--reviewed", head, "--file", review_file(tmp_path, head, verdict))
+    assert done.returncode == 2 and "contradicts the verifier" in done.stderr
+    assert w.writes() == []
+
+
+def test_verdict_refuses_output_that_reviewed_another_commit(w: World, tmp_path: Path) -> None:
+    older = w.commit({"src/app.py": "x = 2\n"})
+    head = w.commit({"src/app.py": "x = 3\n"})
+    for text in (f"VERDICT: PASS {head}\nReviewed: {older}\n", f"VERDICT: PASS {older}\nReviewed: {head}\n"):
+        (tmp_path / "out.txt").write_text(text)
+        done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                     "--file", str(tmp_path / "out.txt"))
+        assert done.returncode == 2 and f"names commit {older}" in done.stderr, done.stderr
+    assert w.writes() == []
+
+
+@pytest.mark.parametrize("text", [
+    "No findings.\n",  # not the verifier's output
+    "VERDICT: PASS\nReviewed: {sha}\n",  # no sha on the verdict line
+    "VERDICT: MAYBE {sha}\nReviewed: {sha}\n",
+    "VERDICT: PASS {sha}\n",  # no reviewed line
+    "Verdict: pass {sha}\nReviewed: {sha}\n",  # not the verifier's spelling
+    "VERDICT: PASS {short}\nReviewed: {short}\n",  # an abbreviation shorter than seven characters
+    "VERDICT: PASS {sha} (one must-fix waived)\nReviewed: {sha}\n",  # text after the verdict's sha
+    "VERDICT: PASS {sha}\nReviewed: {sha} and a later commit\n",  # text after the reviewed sha
+])
+def test_verdict_refuses_output_without_the_verifiers_lines(w: World, tmp_path: Path, text: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    (tmp_path / "out.txt").write_text(text.format(sha=head, short=head[:6]))
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
+                 "--reviewed", head, "--file", str(tmp_path / "out.txt"))
+    assert done.returncode == 2 and "VERDICT: PASS|FAIL" in done.stderr, done.stderr
+    assert w.writes() == []
+
+
+def test_verdict_reads_the_first_verdict_lines_in_a_fence_and_an_abbreviated_sha(w: World, tmp_path: Path) -> None:
+    other = w.commit({"src/app.py": "x = 3\n"})
+    head = w.commit({"src/app.py": "x = 2\n"})
+    text = (f"```\nVERDICT: FAIL `{head[:12]}`\nReviewed: {head[:12]}\n```\n"
+            f"## Must-fix\n- evidence: verdict.sh ->\nVERDICT: PASS {head}\nReviewed: {other}\n")
+    (tmp_path / "out.txt").write_text(text)
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", str(tmp_path / "out.txt"))
+    assert done.returncode == 0, done.stderr
+    assert f"{REVIEW} sha={head} state=failure" in w.comments()[0]["body"]
+
+
+def test_verdict_reads_its_lines_past_a_nul_byte(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    (tmp_path / "out.txt").write_bytes(b"## Nits\n- evidence: \x00" + f"\nVERDICT: PASS {head}\nReviewed: {head}\n".encode())
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", str(tmp_path / "out.txt"), LC_ALL="C.UTF-8")
+    assert done.returncode == 0, done.stderr
+    assert f"{REVIEW} sha={head} state=success" in w.comments()[0]["body"]
+
+
+def test_verdict_accepts_a_seven_character_abbreviation(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    (tmp_path / "out.txt").write_text(f"VERDICT: PASS {head[:7]}\nReviewed: {head[:7]}\n")
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", str(tmp_path / "out.txt"))
+    assert done.returncode == 0, done.stderr
+    assert f"{REVIEW} sha={head} state=success" in w.comments()[0]["body"]
+
+
+def test_verdict_refuses_an_abbreviation_that_is_not_a_prefix_of_the_reviewed_commit(w: World,
+                                                                                    tmp_path: Path) -> None:
+    other = w.commit({"src/app.py": "x = 3\n"})
+    head = w.commit({"src/app.py": "x = 2\n"})
+    # A sha whose first seven characters are the reviewed commit's, and whose rest is not.
+    twin = head[:7] + ("0" if head[7] != "0" else "1") + head[8:]
+    for sha in (other[:12], twin, head[1:8]):
+        (tmp_path / "out.txt").write_text(f"VERDICT: PASS {sha}\nReviewed: {sha}\n")
+        done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                     "--file", str(tmp_path / "out.txt"))
+        assert done.returncode == 2 and f"names commit {sha}" in done.stderr, (sha, done.stderr)
+    assert w.writes() == []
+
+
 def test_verdict_refuses_a_tier_below_the_paths(w: World, tmp_path: Path) -> None:
     head = w.commit({".githooks/pre-commit": "x\n"})
     done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
-                 "--reviewed", head, "--file", review_file(tmp_path))
+                 "--reviewed", head, "--file", review_file(tmp_path, head))
     assert done.returncode == 2 and "make it sensitive" in done.stderr
     assert w.comments() == []
     done = w.run("verdict.sh", "12", "--tier", "routine")
@@ -405,7 +557,7 @@ def test_verdict_routine_on_routine_paths_needs_no_reviewer(w: World) -> None:
 def test_verdict_allows_a_higher_tier(w: World, tmp_path: Path) -> None:
     head = w.commit({"docs/a.md": "x\n"})
     done = w.run("verdict.sh", "12", "--tier", "sensitive", "--result", "pass", "--reviewers", "x",
-                 "--reviewed", head, "--file", review_file(tmp_path))
+                 "--reviewed", head, "--file", review_file(tmp_path, head))
     assert done.returncode == 0, done.stderr
 
 
@@ -413,7 +565,7 @@ def test_verdict_refuses_a_head_with_an_unreviewed_commit(w: World, tmp_path: Pa
     reviewed = w.commit({"src/app.py": "x = 2\n"})
     w.commit({"src/app.py": "x = 3\n"})
     done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
-                 "--reviewed", reviewed, "--file", review_file(tmp_path))
+                 "--reviewed", reviewed, "--file", review_file(tmp_path, reviewed))
     assert done.returncode == 2 and "nobody reviewed" in done.stderr
     assert w.comments() == []
 
@@ -425,7 +577,7 @@ def test_verdict_accepts_a_clean_merge_of_the_base(w: World, tmp_path: Path) -> 
     w.push()
     head = w.git(w.repo, "rev-parse", "HEAD")
     done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
-                 "--reviewed", reviewed, "--file", review_file(tmp_path))
+                 "--reviewed", reviewed, "--file", review_file(tmp_path, reviewed))
     assert done.returncode == 0, done.stderr
     body = w.comments()[0]["body"]
     assert f"sha={head} state=success tier=standard reviewed={reviewed} -->" in body
@@ -441,7 +593,7 @@ def test_verdict_refuses_a_merge_that_adds_changes(w: World, tmp_path: Path) -> 
     w.git(w.repo, "commit", "-qm", "merge main")
     w.push()
     done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
-                 "--reviewed", reviewed, "--file", review_file(tmp_path))
+                 "--reviewed", reviewed, "--file", review_file(tmp_path, reviewed))
     assert done.returncode == 2 and "nobody reviewed" in done.stderr
 
 
@@ -450,14 +602,14 @@ def test_verdict_standard_needs_output_and_the_reviewed_commit(w: World, tmp_pat
     assert w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
                  "--reviewed", head).returncode == 2
     assert w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
-                 "--file", review_file(tmp_path)).returncode == 2
+                 "--file", review_file(tmp_path, head)).returncode == 2
     assert w.writes() == []
 
 
 def test_verdict_clips_output_to_the_comment_limit(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
     done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
-                 "--reviewed", head, "--file", review_file(tmp_path, "é" * 70000 + "\nEND\n"))
+                 "--reviewed", head, "--file", review_file(tmp_path, head, "PASS", "é" * 70000 + "\nEND\n"))
     assert done.returncode == 0, done.stderr
     body = w.comments()[0]["body"]
     assert len(body) <= 65536 and "Clipped to fit GitHub's comment size" in body and "END" not in body
@@ -467,7 +619,7 @@ def test_verdict_clips_output_to_the_comment_limit(w: World, tmp_path: Path) -> 
 def test_verdict_read_back_mismatch_fails(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
     done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
-                 "--reviewed", head, "--file", review_file(tmp_path), STUB_MANGLE="1")
+                 "--reviewed", head, "--file", review_file(tmp_path, head), STUB_MANGLE="1")
     assert done.returncode == 1 and "does not hold the body that was sent" in done.stderr
 
 
@@ -532,7 +684,7 @@ def test_verdict_refuses_a_merge_of_a_branch_that_is_not_the_default(w: World, t
     w.git(w.repo, "merge", "-q", "--no-edit", "side")
     w.push()
     done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
-                 "--reviewed", reviewed, "--file", review_file(tmp_path))
+                 "--reviewed", reviewed, "--file", review_file(tmp_path, reviewed))
     assert done.returncode == 2 and "not on main" in done.stderr
     assert w.comments() == []
 
@@ -548,7 +700,7 @@ def test_verdict_refuses_an_octopus_merge(w: World, tmp_path: Path) -> None:
     w.git(w.repo, "merge", "-q", "--no-edit", "origin/main", "side")
     w.push()
     done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
-                 "--reviewed", reviewed, "--file", review_file(tmp_path))
+                 "--reviewed", reviewed, "--file", review_file(tmp_path, reviewed))
     assert done.returncode == 2 and "nobody reviewed" in done.stderr
 
 
@@ -559,7 +711,7 @@ def test_verdict_refuses_more_than_twenty_merges(w: World, tmp_path: Path) -> No
         w.git(w.repo, "merge", "-q", "--no-edit", "origin/main")
     w.push()
     done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
-                 "--reviewed", reviewed, "--file", review_file(tmp_path))
+                 "--reviewed", reviewed, "--file", review_file(tmp_path, reviewed))
     assert done.returncode == 2 and "nobody reviewed" in done.stderr
 
 
@@ -570,7 +722,7 @@ def test_verdict_accepts_twenty_merges(w: World, tmp_path: Path) -> None:
         w.git(w.repo, "merge", "-q", "--no-edit", "origin/main")
     w.push()
     done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
-                 "--reviewed", reviewed, "--file", review_file(tmp_path))
+                 "--reviewed", reviewed, "--file", review_file(tmp_path, reviewed))
     assert done.returncode == 0, done.stderr
 
 

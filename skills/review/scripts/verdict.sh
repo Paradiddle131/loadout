@@ -2,13 +2,16 @@
 # Posts a review verdict on a PR as a marker comment, with the reviewers' raw output, so a merge can be checked
 # against a posted verdict instead of one the author retells (cloud/hooks/merge-guard.py reads it).
 #
-# Usage: verdict.sh <pr> --tier routine|standard|sensitive --result pass|fail \
-#          --reviewers "<names>" --reviewed <sha> --file <reviewer output> [--dry-run]
+# Usage: verdict.sh <pr> --tier routine|standard|sensitive [--result pass|fail] \
+#          --reviewers "<names>" --reviewed <sha> --file <verifier output> [--dry-run]
 #   Run it from a clone of the PR's repo (git 2.38 or later): it reads the tier from the PR head's paths.
 #   --tier may be higher than tier.sh gives for the PR head's paths, never lower.
 #   --reviewed is the commit the reviewers read (required for standard and sensitive): the PR's head must be it,
 #   or differ from it only by clean merges of the default branch (each merge's tree is what
 #   `git merge-tree --write-tree` gives for its parents), so a commit nobody reviewed refuses the verdict.
+#   --file (standard and sensitive) is finding-verifier's output: its first `VERDICT: PASS|FAIL <sha>` line and
+#   its first `Reviewed: <sha>` line (agents/finding-verifier.md § Output; a sha may be abbreviated to 7 or more
+#   characters) must both name --reviewed, and the result is that VERDICT; a --result that differs is refused.
 #   --tier routine needs no reviewer: --reviewers, --reviewed and --file are optional, --result defaults to pass,
 #   the comment says the tier needs gates only, and the session that wrote the change may run it, since the
 #   paths decide the tier.
@@ -23,7 +26,7 @@
 # keep the output beside the verdict where the owner can read it.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-usage='usage: verdict.sh <pr> --tier routine|standard|sensitive --result pass|fail --reviewers "<names>" --reviewed <sha> --file <reviewer output> [--dry-run]'
+usage='usage: verdict.sh <pr> --tier routine|standard|sensitive [--result pass|fail] --reviewers "<names>" --reviewed <sha> --file <verifier output> [--dry-run]'
 pr='' tier='' result='' reviewers='' reviewed='' file=''
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -44,11 +47,32 @@ rank() { case "$1" in routine) echo 0 ;; standard) echo 1 ;; sensitive) echo 2 ;
 [[ "$pr" =~ ^[0-9]+$ ]] || die "the first argument is the PR number. $usage"
 case "$tier" in routine | standard | sensitive) ;; *) die "--tier is routine, standard or sensitive. $usage" ;; esac
 [ "$tier" != routine ] || result=${result:-pass}
-case "$result" in pass | fail) ;; *) die "--result is pass or fail. $usage" ;; esac
+case "$result" in '' | pass | fail) ;; *) die "--result is pass or fail. $usage" ;; esac
 if [ "$tier" != routine ]; then
   [ -n "$reviewers" ] || die "--reviewers names who reviewed (a $tier change needs a reviewer)."
   [ -n "$file" ] && [ -s "$file" ] || die "--file is the reviewers' raw output, and it must not be empty (a $tier change needs a reviewer)."
   [[ "$reviewed" =~ ^[0-9a-f]{40}$ ]] || die "--reviewed is the full sha of the commit the reviewers read (a $tier change needs it)."
+  # The verifier's own lines decide the result and the commit (agents/finding-verifier.md § Output).
+  # shellcheck disable=SC2016 # a literal backtick around the sha, not an expansion
+  sha_re='`?([0-9a-f]{7,40})`?'
+  verdict_re="^[[:space:]]*VERDICT: (PASS|FAIL) ${sha_re}[[:space:]]*\$"
+  reviewed_re="^[[:space:]]*Reviewed: ${sha_re}[[:space:]]*\$"
+  # -a: a NUL byte in the output can make grep call the file binary and print no line.
+  verdict_line=$(grep -a -m 1 -E '^[[:space:]]*VERDICT:' "$file" || true)
+  reviewed_line=$(grep -a -m 1 -E '^[[:space:]]*Reviewed:' "$file" || true)
+  shape="--file is not finding-verifier's output: it needs a \`VERDICT: PASS|FAIL <sha>\` line and a \`Reviewed: <sha>\` line"
+  [[ "$verdict_line" =~ $verdict_re ]] ||
+    die "$shape (its verdict line: '${verdict_line:-none}')."
+  said=$(tr '[:upper:]' '[:lower:]' <<<"${BASH_REMATCH[1]}") verdict_sha=${BASH_REMATCH[2]}
+  [[ "$reviewed_line" =~ $reviewed_re ]] ||
+    die "$shape (its reviewed line: '${reviewed_line:-none}')."
+  for s in "$verdict_sha" "${BASH_REMATCH[1]}"; do
+    [[ "$reviewed" == "$s"* ]] ||
+      die "the verifier's output names commit $s, but --reviewed is $reviewed: record the verdict of the commit the verifier read."
+  done
+  [ -z "$result" ] || [ "$result" = "$said" ] ||
+    die "--result $result contradicts the verifier's VERDICT line, which says $said: the record carries the verifier's verdict."
+  result=$said
 else
   [ -z "$file" ] || [ -r "$file" ] || die "cannot read --file $file"
   [ -z "$reviewed" ] || [[ "$reviewed" =~ ^[0-9a-f]{40}$ ]] || die "--reviewed is a full sha"

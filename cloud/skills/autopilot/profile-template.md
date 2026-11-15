@@ -6,7 +6,7 @@ Unattended cloud wakes on this repo follow the `cloud:autopilot` skill (if missi
 A wake with no `~/.claude/cloud-target` (the environment's setup didn't run) first runs `bash <clone>/cloud/setup.sh <repo>`.
 The routine prompt: "Follow `docs/agents/autopilot.md` in <repo> and do one wake." (optionally "on #n").
 Standing permission (owner, <date>): <what wakes may do without asking>.
-Every item is one branch `claude/<n>-<slug>` and one PR, reviewed by the `review` skill and merged by the wake once its gates and review records pass, unless the merge policy holds it.
+Every new item is one branch `claude/<n>-<slug>` and one PR (a wake resuming an open agent PR pushes that PR's branch, whatever its name), reviewed by the `review` skill and merged by the wake once its gates and review records pass, unless the merge policy holds it.
 
 <!-- A profile written for the retired train delivery (`Delivery: train …`, `in-train`, `AUTOPILOT_TRAIN`): set `Mode: paused`; have the open train PR reviewed and merged, or closed (then swap `in-train` back to `agent:ready` on its issues); delete the label, the Delivery slot and `AUTOPILOT_TRAIN`; move the train body's owner decisions to `needs-owner` issues and its steering lines to the Digest issue; then unpause. -->
 

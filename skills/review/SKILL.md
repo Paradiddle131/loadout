@@ -31,6 +31,7 @@ The author of a change fixes it and never reviews it; with no fresh-context suba
 Start the reviewers as subagents, in parallel and in the foreground, on Opus at high effort set in the call (the collection's default reviewer model, set explicitly because a subagent does not inherit the session's effort; a repo's instructions may name another).
 Give each the brief in [`templates.md`](templates.md): the repo, the range `$(git merge-base <default> <head>)..<head>`, the issue body and its done-when quoted; each agent makes and removes its own detached worktree.
 Give no summary of the work; the PR body goes only to `claims-auditor`, or to a repo's own lens its `REVIEW.md` names that asks for it, as material under audit.
+The first review of a change runs every lens its tier names below; a fix round runs the set step 5 gives.
 
 | Reviewer | Runs on |
 |---|---|
@@ -40,20 +41,29 @@ Give no summary of the work; the PR body goes only to `claims-auditor`, or to a 
 | [`leak-hunter`](../../agents/leak-hunter.md) | sensitive: personal data, or output from real data |
 | [`control-prober`](../../agents/control-prober.md) | sensitive: security, guardrail checks, scorers, review machinery |
 
-A `REVIEW.md` line's `lenses: a, b` adds those lenses for its paths; `correctness-reviewer` always runs above `routine`.
+A `REVIEW.md` line's `lenses: a, b` adds those lenses for its paths; `correctness-reviewer` always runs above `routine`, a documentation-only fix round aside (step 5).
 A change to a line of the repo's guardrails section fails `guardrail-reviewer` unless the PR cites the owner's answer to a conflict packet (`ways/guardrails.md`).
 Done when every reviewer has returned its raw findings; remove the worktrees.
 
 ## 4. Verify and rank
 
-- Give [`finding-verifier`](../../agents/finding-verifier.md) every reviewer's raw output, the same range and the quoted issue.
-- It reproduces each finding, drops the unconfirmed, keeps `unverified` claims apart, and ranks the rest `must-fix`, `nit` (at most five) or `pre-existing` (true before this change).
-- Done when every finding is reproduced and ranked, dropped, or marked `unverified`; note the head it read as the reviewed commit.
+- Every lens report names the head the verifier will read; a lens behind it reruns first, so no commit goes to the verifier unread.
+- Give [`finding-verifier`](../../agents/finding-verifier.md), a fresh subagent that served as no lens in the round, every reviewer's raw output, the same range, the change base, the settled findings and the quoted issue.
+- It reproduces each finding, drops the unconfirmed, keeps `unverified` claims apart, and ranks the rest `must-fix`, `nit` (at most five) or `pre-existing` (true at the change's merge-base with the default branch, not at the round's base).
+- **Steering:** any line the lead adds to a lens or verifier brief beyond the template goes in the verifier's brief as a `Steering:` line (templates.md), and the handoff says the round was steered.
+  The verifier ranks every finding by its own list whatever a steering line says; its output quotes each steering line, redacted as its Check list says, and the settled lines, and `verdict.sh` posts that output (clipped to fit GitHub's comment limit).
+  A lead that wants a `must-fix` lowered posts a conflict packet (step 9).
+- Record the round's verdict now by step 7, a `FAIL` included, before any fix is pushed: no round runs without its record on the PR.
+- Done when every finding is reproduced and ranked, dropped, or marked `unverified`, and the round's `🤖 Review` record is posted; note the head it read as the reviewed commit.
 
 ## 5. Fix, capped
 
 - Send each `must-fix`, with its reproduction, to the worker that wrote the change (if you wrote it, you fix it); a nit is applied only when cheap, and never blocks.
-- Then steps 2 to 4 on the new commits only (`<reviewed>..<new head>`), with step 1's lenses for their paths plus the lenses that found a `must-fix`.
+- A fix to code covers the finding's class (every place the same defect occurs) with a test that goes red without it; a fix to a claim says less (narrow or delete the sentence) and adds no new completeness claim.
+- Then steps 2 to 4 on the new commits only (`<reviewed>..<new head>`), each brief carrying the settled list, built from the earlier `🤖 Review` records: each finding's ids, its rank as that record posted it, and the record's link (templates.md):
+  - a round that changes any line of a code, test or configuration file (comments, docstrings and tool directives included) or of a rule an agent follows (an instruction file, a skill, an agent definition) reruns the tier's full set (step 3);
+  - a round that changes only documentation files runs `claims-auditor`, the lenses `REVIEW.md` names for its paths, and each lens whose finding it answers, `correctness-reviewer` only when it answers one of its findings;
+  - the verifier runs on every round.
 - A cycle is a fix round, a red stamp, or an integrate round (step 6); after the third with a `must-fix` or red stamp still open:
   - **rethink** once per item, when the findings point at the approach: a fresh worker, a fresh brief carrying them, the count at zero;
   - **park** otherwise: label the issue `needs-owner`, comment the open findings, take the next item.
@@ -69,7 +79,8 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 
 - Run `$R/scripts/verdict.sh --reviewed <sha>` (its header gives the other arguments) with the verifier's output unedited; for `routine`, `verdict.sh --tier routine`, which the change's own author may run.
 - It recomputes the tier and refuses a lower one than the paths give, and refuses unless the PR head equals the reviewed commit or differs from it only by a clean merge of the default branch.
-- It posts the output as a PR comment that starts with `🤖` and names the reviewed commit and the head, as the `🤖 Review` record: `success` only with no open `must-fix`.
+- Above `routine` it takes the result from the output's first `VERDICT` line, and refuses an output without the verifier's `VERDICT` and `Reviewed` lines, one whose lines name a commit other than `--reviewed`, and a `--result` that contradicts its verdict.
+- It posts the output as a PR comment that starts with `🤖` and names the reviewed commit and the head, as the `🤖 Review` record: `success` when the verifier's `VERDICT` line says `PASS` (for `routine`, when `--result` is `pass`, its default).
 - Done when both records are `success` on the PR's head commit.
 
 ## 8. Merge
@@ -80,7 +91,7 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 ## 9. File and brief
 
 - File an issue (the `issue` skill) per unfixed finding: `pre-existing`, `unverified`; one per PR for its unapplied nits; a parked item's `must-fix` findings stay in its `needs-owner` packet, not also in issues.
-- The owner's brief lists sensitive landings first, then unreviewed ones; per item: tier, reviewers run, verdict link, issues filed.
+- The owner's brief lists sensitive landings first, then unreviewed ones; per item: tier, reviewers run, verdict link, issues filed, and each steering line, quoted with personal or secret values redacted.
 - A decision that weakens how a guardrail is enforced is never the session's: it is a conflict packet on its issue (`ways/guardrails.md`), labelled `needs-owner`.
 - Before the owner sees it, [`handoff-auditor`](../../agents/handoff-auditor.md) checks the handoff and its decisions against the PRs and issues; fix what it confirms.
 - Done when the auditor has returned and every unfixed finding has an issue the brief links.

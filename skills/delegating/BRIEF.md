@@ -33,7 +33,7 @@ Reply with:
 1. What you did, file by file.
 2. Each check's command and output.
 3. Every deviation from this brief, stated as a decision with its reason.
-4. The lines the shared files need, verbatim.
+4. The lines the shared files need, verbatim, each with the `file:line` of the code that makes it true.
 5. Problems you met and did not fix (out of scope, or in another worker's files), each with where and how to reproduce it.
 6. What you could not verify, and why.
 7. Your head commit.
