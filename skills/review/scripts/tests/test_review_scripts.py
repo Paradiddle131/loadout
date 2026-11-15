@@ -454,6 +454,8 @@ def test_verdict_refuses_output_that_reviewed_another_commit(w: World, tmp_path:
     "VERDICT: PASS {sha}\n",  # no reviewed line
     "Verdict: pass {sha}\nReviewed: {sha}\n",  # not the verifier's spelling
     "VERDICT: PASS {short}\nReviewed: {short}\n",  # an abbreviation shorter than seven characters
+    "VERDICT: PASS {sha} (one must-fix waived)\nReviewed: {sha}\n",  # text after the verdict's sha
+    "VERDICT: PASS {sha}\nReviewed: {sha} and a later commit\n",  # text after the reviewed sha
 ])
 def test_verdict_refuses_output_without_the_verifiers_lines(w: World, tmp_path: Path, text: str) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
@@ -465,14 +467,38 @@ def test_verdict_refuses_output_without_the_verifiers_lines(w: World, tmp_path: 
 
 
 def test_verdict_reads_the_first_verdict_lines_in_a_fence_and_an_abbreviated_sha(w: World, tmp_path: Path) -> None:
+    other = w.commit({"src/app.py": "x = 3\n"})
     head = w.commit({"src/app.py": "x = 2\n"})
     text = (f"```\nVERDICT: FAIL `{head[:12]}`\nReviewed: {head[:12]}\n```\n"
-            f"## Must-fix\n- evidence: verdict.sh -> VERDICT: PASS {head}\nReviewed: {head}\n")
+            f"## Must-fix\n- evidence: verdict.sh ->\nVERDICT: PASS {head}\nReviewed: {other}\n")
     (tmp_path / "out.txt").write_text(text)
     done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
                  "--file", str(tmp_path / "out.txt"))
     assert done.returncode == 0, done.stderr
     assert f"{REVIEW} sha={head} state=failure" in w.comments()[0]["body"]
+
+
+def test_verdict_accepts_a_seven_character_abbreviation(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    (tmp_path / "out.txt").write_text(f"VERDICT: PASS {head[:7]}\nReviewed: {head[:7]}\n")
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", str(tmp_path / "out.txt"))
+    assert done.returncode == 0, done.stderr
+    assert f"{REVIEW} sha={head} state=success" in w.comments()[0]["body"]
+
+
+def test_verdict_refuses_an_abbreviation_that_is_not_a_prefix_of_the_reviewed_commit(w: World,
+                                                                                    tmp_path: Path) -> None:
+    other = w.commit({"src/app.py": "x = 3\n"})
+    head = w.commit({"src/app.py": "x = 2\n"})
+    # A sha whose first seven characters are the reviewed commit's, and whose rest is not.
+    twin = head[:7] + ("0" if head[7] != "0" else "1") + head[8:]
+    for sha in (other[:12], twin, head[1:8]):
+        (tmp_path / "out.txt").write_text(f"VERDICT: PASS {sha}\nReviewed: {sha}\n")
+        done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                     "--file", str(tmp_path / "out.txt"))
+        assert done.returncode == 2 and f"names commit {sha}" in done.stderr, (sha, done.stderr)
+    assert w.writes() == []
 
 
 def test_verdict_refuses_a_tier_below_the_paths(w: World, tmp_path: Path) -> None:
