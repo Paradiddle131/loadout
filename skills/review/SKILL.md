@@ -41,7 +41,7 @@ The first review of a change runs every lens its tier names below; a fix round r
 | [`leak-hunter`](../../agents/leak-hunter.md) | sensitive: personal data, or output from real data |
 | [`control-prober`](../../agents/control-prober.md) | sensitive: security, guardrail checks, scorers, review machinery |
 
-A `REVIEW.md` line's `lenses: a, b` adds those lenses for its paths; `correctness-reviewer` always runs above `routine`.
+A `REVIEW.md` line's `lenses: a, b` adds those lenses for its paths; `correctness-reviewer` always runs above `routine`, a documentation-only fix round aside (step 5).
 A change to a line of the repo's guardrails section fails `guardrail-reviewer` unless the PR cites the owner's answer to a conflict packet (`ways/guardrails.md`).
 Done when every reviewer has returned its raw findings; remove the worktrees.
 
@@ -58,9 +58,9 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 
 - Send each `must-fix`, with its reproduction, to the worker that wrote the change (if you wrote it, you fix it); a nit is applied only when cheap, and never blocks.
 - A fix to code covers the finding's class (every place the same defect occurs) with a test that goes red without it; a fix to a claim says less (narrow or delete the sentence) and adds no new completeness claim.
-- Then steps 2 to 4 on the new commits only (`<reviewed>..<new head>`), each brief listing the findings earlier rounds settled (fixed, nit, pre-existing or dropped, with their ids):
-  - a round that touches code, a test of a control, configuration, or a rule an agent follows (an instruction file, a skill, an agent definition) reruns the tier's full set (step 3);
-  - a round that changes only prose (docs, docstrings, comments, descriptions) runs `claims-auditor` and each lens whose finding it answers;
+- Then steps 2 to 4 on the new commits only (`<reviewed>..<new head>`), each brief carrying the settled list, built from the earlier `🤖 Review` records: each finding's ids, its rank as that record posted it, and the record's link (templates.md):
+  - a round that changes any line of a code, test or configuration file (comments, docstrings and tool directives included) or of a rule an agent follows (an instruction file, a skill, an agent definition) reruns the tier's full set (step 3);
+  - a round that changes only documentation files runs `claims-auditor`, the lenses `REVIEW.md` names for its paths, and each lens whose finding it answers, `correctness-reviewer` only when it answers one of its findings;
   - the verifier runs on every round.
 - A cycle is a fix round, a red stamp, or an integrate round (step 6); after the third with a `must-fix` or red stamp still open:
   - **rethink** once per item, when the findings point at the approach: a fresh worker, a fresh brief carrying them, the count at zero;
@@ -78,7 +78,7 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 - Run `$R/scripts/verdict.sh --reviewed <sha>` (its header gives the other arguments) with the verifier's output unedited; for `routine`, `verdict.sh --tier routine`, which the change's own author may run.
 - It recomputes the tier and refuses a lower one than the paths give, and refuses unless the PR head equals the reviewed commit or differs from it only by a clean merge of the default branch.
 - Above `routine` it takes the result from the output's first `VERDICT` line, and refuses an output without the verifier's `VERDICT` and `Reviewed` lines, one whose lines name a commit other than `--reviewed`, and a `--result` that contradicts its verdict.
-- It posts the output as a PR comment that starts with `🤖` and names the reviewed commit and the head, as the `🤖 Review` record: `success` only with no open `must-fix`.
+- It posts the output as a PR comment that starts with `🤖` and names the reviewed commit and the head, as the `🤖 Review` record: `success` when the verifier's `VERDICT` line says `PASS` (for `routine`, when `--result` is `pass`, its default).
 - Done when both records are `success` on the PR's head commit.
 
 ## 8. Merge

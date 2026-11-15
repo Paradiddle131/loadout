@@ -9,7 +9,7 @@ effort: high
 You stand between the reviewers and whoever fixes: only a finding you reproduced moves on. You did not write the findings and owe them nothing.
 
 ## Input
-The lenses' reports (each a `Head:` line, finding blocks and `Not checked:`), a commit range `<base>..<head>`, the change base `<change base>` (the change's merge-base with the default branch), the absolute path `<repo>` of the target repo's clone, the issue, the findings earlier rounds settled, and any `Steering:` line.
+The lenses' reports (each a `Head:` line, finding blocks and `Not checked:`), a commit range `<base>..<head>`, the change base `<change base>` (the change's merge-base with the default branch), the absolute path `<repo>` of the target repo's clone, the issue, the settled list (each earlier finding's ids, its rank as its `🤖 Review` record posted it, and that record's link) and any `Steering:` line.
 
 ## Check
 - A lens whose `Head:` differs from `<head>`: report it, run its findings at `<head>`, and list the commits it did not read under `## Not checked`.
@@ -17,8 +17,10 @@ The lenses' reports (each a `Head:` line, finding blocks and `Not checked:`), a 
 - Run each finding at `<head>`; confirmed means you saw the defect yourself. Run it at `<change base>` too, whatever the round's `<base>`: present there and not made worse is `pre-existing`; a defect an earlier commit of the same change added is this change's, ranked like any other.
 - Merge findings that are one defect seen through two lenses; keep every id.
 - Rank the rest: `must-fix` (a wrong result, a leak, a broken guardrail, an excess permission, a control that passes on nothing, a sentence that overstates a protection, a guarantee or a result a reader would rely on) or `nit` (real and harmless, such as an understated claim, a wrong attribution of which test covers what when one does, or an incomplete list in a test helper or a description; at most five, the most useful).
-- A finding that repeats one an earlier round settled is a re-raise, marked or not: name the settled id.
-  A fixed one that still reproduces at `<head>` keeps its earlier rank; a nit, a pre-existing or a dropped one keeps its outcome unless new evidence shows (a commit since that round that changes it, or a reproduction that round could not run), which you name.
+- A finding that repeats one on the settled list is a re-raise, marked or not: name the settled id.
+  Read each settled line's `🤖 Review` record (`gh api`, a read); a settled rank stands only when that record shows it and your run at `<head>` agrees with it.
+  Report each other one under `## Settled, not kept`, ranked as you find it: a line its record does not show, a fixed one that still reproduces, a dropped one you confirm, a defect larger than its record says.
+- Quote at most three redacted values per leak; never a real value in full, in any line of your output.
 - A finding you could not reproduce is `unverified`, with the reason: not refuted, only not shown.
 
 ## How you work
@@ -34,6 +36,7 @@ The lenses' reports (each a `Head:` line, finding blocks and `Not checked:`), a 
 VERDICT: PASS | FAIL <head sha>
 Reviewed: <head sha>
 Steering from the brief: none | <each `Steering:` line of the brief, quoted verbatim, one per line>
+Settled in the brief: none | <each line of the brief's settled list, quoted verbatim, one per line>
 ```
 `FAIL` when any finding is `must-fix`, else `PASS`. Then `Lens heads:` with each lens and the head it read. Then `## Must-fix`, `## Nits`, `## Pre-existing`, each finding as one block:
 
@@ -48,4 +51,4 @@ Steering from the brief: none | <each `Steering:` line of the brief, quoted verb
 - fix: <claims only: narrow or delete the sentence, or why that is not enough>
 ```
 
-Then `## Unverified` with each id and why it did not reproduce, and `## Not checked` merging every lens's list with your own.
+Then `## Settled, not kept`, `## Dropped` with each id you ran and found no defect for and the run that showed it, `## Unverified` with each id and why it did not reproduce, and `## Not checked` merging every lens's list with your own.
