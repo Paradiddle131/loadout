@@ -50,8 +50,9 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 - Every lens report names the head the verifier will read; a lens behind it reruns first, so no commit goes to the verifier unread.
 - Give [`finding-verifier`](../../agents/finding-verifier.md), a fresh subagent that served as no lens in the round, every reviewer's raw output, the same range, the change base, the settled findings and the quoted issue.
 - It reproduces each finding, drops the unconfirmed, keeps `unverified` claims apart, and ranks the rest `must-fix`, `nit` (at most five) or `pre-existing` (true at the change's merge-base with the default branch, not at the round's base).
-- **Steering:** a lead that has read the reviews and the code may add a ranking or scope line to a lens or verifier brief, raising a rank or lowering or narrowing one; it never lowers a finding that is a broken guardrail, a leak or an excess permission, and never takes a guarded path out of a lens's scope: that decision is the owner's (the conflict packet of step 9).
-  The line goes in the verifier's brief as a `Steering:` line (templates.md); the verifier's output quotes the steering and settled lines, `verdict.sh` posts that output (clipped only to fit GitHub's comment limit), and the handoff says the round was steered.
+- **Steering:** any line the lead adds to a lens or verifier brief beyond the template goes in the verifier's brief as a `Steering:` line (templates.md), and the handoff says the round was steered.
+  The verifier ranks every finding by its own list whatever a steering line says; its output quotes each steering line, redacted as its Check list says, and the settled lines, and `verdict.sh` posts that output (clipped to fit GitHub's comment limit).
+  A lead that wants a `must-fix` lowered posts a conflict packet (step 9).
 - Record the round's verdict now by step 7, a `FAIL` included, before any fix is pushed: no round runs without its record on the PR.
 - Done when every finding is reproduced and ranked, dropped, or marked `unverified`, and the round's `🤖 Review` record is posted; note the head it read as the reviewed commit.
 
@@ -90,7 +91,7 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 ## 9. File and brief
 
 - File an issue (the `issue` skill) per unfixed finding: `pre-existing`, `unverified`; one per PR for its unapplied nits; a parked item's `must-fix` findings stay in its `needs-owner` packet, not also in issues.
-- The owner's brief lists sensitive landings first, then unreviewed ones; per item: tier, reviewers run, verdict link, issues filed, and each steering line, quoted.
+- The owner's brief lists sensitive landings first, then unreviewed ones; per item: tier, reviewers run, verdict link, issues filed, and each steering line, quoted with personal or secret values redacted.
 - A decision that weakens how a guardrail is enforced is never the session's: it is a conflict packet on its issue (`ways/guardrails.md`), labelled `needs-owner`.
 - Before the owner sees it, [`handoff-auditor`](../../agents/handoff-auditor.md) checks the handoff and its decisions against the PRs and issues; fix what it confirms.
 - Done when the auditor has returned and every unfixed finding has an issue the brief links.

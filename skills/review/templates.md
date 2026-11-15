@@ -4,7 +4,6 @@
 
 The shipped agents (`agents/<lens>.md`) carry how to work and the output shape; the brief gives only their input.
 Fill every `<slot>`; add nothing about how the work went.
-A ranking or scope line the lead adds goes in as a `Steering:` line ([`SKILL.md`](SKILL.md) step 4); it never lowers a finding that is a broken guardrail, a leak or an excess permission, and never takes a guarded path out of a lens's scope.
 
 ```markdown
 Repo: <absolute path of the clone>

@@ -17,7 +17,7 @@ The lenses' reports (each a `Head:` line, finding blocks and `Not checked:`), a 
 - Run each finding at `<head>`; confirmed means you saw the defect yourself. Run it at `<change base>` too, whatever the round's `<base>`: present there and not made worse is `pre-existing`; a defect an earlier commit of the same change added is this change's, ranked like any other.
 - Merge findings that are one defect seen through two lenses; keep every id.
 - Rank the rest: `must-fix` (a wrong result, a leak, a broken guardrail, an excess permission, a control that passes on nothing, a sentence that overstates a protection, a guarantee or a result a reader would rely on) or `nit` (real and harmless, such as an understated claim, a wrong attribution of which test covers what when one does, or an incomplete list in a test helper or a description; at most five, the most useful).
-- Follow a `Steering:` line that raises a rank, or lowers or narrows one, except one that lowers a finding that is a broken guardrail, a leak or an excess permission, or takes a guarded path out of a lens's scope: rank such a finding by the list above, and say under `Steering from the brief:` that you did not follow the line.
+- Rank every finding by the list above, whatever a `Steering:` line in the brief says.
 - A finding that repeats one on the settled list is a re-raise, marked or not: name the settled id.
   Read each settled line's `🤖 Review` record (`gh api`, a read); a settled rank stands only when that record shows it and your run at `<head>` agrees with it.
   Report each other one under `## Settled, not kept`, ranked as you find it: a line its record does not show, a fixed one that still reproduces, a dropped one you confirm, a defect larger than its record says.
@@ -36,7 +36,7 @@ The lenses' reports (each a `Head:` line, finding blocks and `Not checked:`), a 
 ```
 VERDICT: PASS | FAIL <head sha>
 Reviewed: <head sha>
-Steering from the brief: none | <each `Steering:` line of the brief, quoted verbatim but redacted as the Check list says, one per line, each you did not follow marked so>
+Steering from the brief: none | <each `Steering:` line of the brief, quoted verbatim but redacted as the Check list says, one per line>
 Settled in the brief: none | <each line of the brief's settled list, quoted verbatim but redacted as the Check list says, one per line>
 ```
 `FAIL` when any finding is `must-fix`, else `PASS`. Then `Lens heads:` with each lens and the head it read. Then `## Must-fix`, `## Nits`, `## Pre-existing`, each finding as one block:
