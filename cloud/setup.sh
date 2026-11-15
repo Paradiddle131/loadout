@@ -80,11 +80,10 @@ else
   echo "plugins: claude CLI not found; read skills from the clone by path"
 fi
 
-# 3. Settings: Claude Code's own attribution defaults apply, so drop the `attribution` block when it equals the
-#    blank one an older setup wrote (any other value is left alone). Drop hook entries whose script no longer
-#    exists (a hook from a repo that left the environment would fail every turn), and entries that run this
-#    collection's own hook scripts from any clone (an older setup wrote them here; the cloud plugin registers them
-#    now, so they would run twice).
+# 3. Settings: set no `attribution`, and drop that key when it equals the blank block an older setup wrote.
+#    Drop hook entries whose script no longer exists (a hook from a repo that left the environment would fail
+#    every turn), and entries that run this collection's own hook scripts from any clone (an older setup wrote
+#    them here; the cloud plugin registers them now, so they would run twice).
 python3 - <<'EOF'
 import json, os, pathlib, shlex
 OWN = ("/cloud/hooks/session-start.sh", "/cloud/hooks/save-work.sh", "/cloud/gcp/guard.py")

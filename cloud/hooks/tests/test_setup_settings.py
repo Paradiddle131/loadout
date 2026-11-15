@@ -34,7 +34,7 @@ def test_drops_the_blank_attribution_block_an_older_setup_wrote(tmp_path: Path) 
     assert run(tmp_path, {"attribution": BLANK, "model": "x"}) == {"model": "x"}
 
 
-def test_keeps_an_attribution_value_other_than_the_blank_block(tmp_path: Path) -> None:
+def test_keeps_an_attribution_block_with_a_commit_line(tmp_path: Path) -> None:
     mine = {"commit": "Made by hand"}
     assert run(tmp_path, {"attribution": mine}) == {"attribution": mine}
 
