@@ -89,8 +89,8 @@ A guardrail conflict uses the packet in `ways/guardrails.md`.
 ## Handoff comment
 
 One `🤖 Handoff` comment per PR, edited in place after every push; outside `<details>` only what needs the owner, five lines at most, the `Edited` lines aside.
-An in-place rewrite of a handoff, a packet or another comment that records state adds a last line `Edited <UTC from date -u +%FT%H:%MZ>: <what changed and why>`, one per rewrite, never removed, so the comment's creation time cannot mislead; a correction names the wrong statement it replaces, and a rewrite that removes personal or secret data says only that data was removed, never the data.
-An `Edited` line that itself holds personal or secret data is rewritten to say data was removed; the comment's earlier text stays readable in its edit history, so ask the owner to delete that revision and rotate a secret.
+An in-place rewrite of a handoff, a packet or another comment that records state adds a last line `Edited <UTC from date -u +%FT%H:%MZ>: <what changed and why>`, one per rewrite, never removed, so the comment's creation time cannot mislead; a correction names the wrong statement it replaces, and a rewrite that removes personal or secret data says only that data was removed, never the data, and leaves the comment's earlier text readable in its edit history, so ask the owner to delete that revision and rotate a secret.
+An `Edited` line that itself holds personal or secret data is rewritten the same way, to say data was removed.
 A `🤖 Gates` or `🤖 Review` record is never edited (the merge guard counts only unedited ones): post a new one.
 
 ```markdown

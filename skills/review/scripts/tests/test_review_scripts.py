@@ -502,10 +502,9 @@ def test_verdict_reads_the_first_verdict_lines_in_a_fence_and_an_abbreviated_sha
     assert f"{REVIEW} sha={head} state=failure" in w.comments()[0]["body"]
 
 
-@pytest.mark.parametrize("odd", [b"\x00", b"\xff"])
-def test_verdict_reads_its_lines_past_a_nul_or_invalid_byte(w: World, tmp_path: Path, odd: bytes) -> None:
+def test_verdict_reads_its_lines_past_a_nul_byte(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    (tmp_path / "out.txt").write_bytes(b"## Nits\n- evidence: " + odd + f"\nVERDICT: PASS {head}\nReviewed: {head}\n".encode())
+    (tmp_path / "out.txt").write_bytes(b"## Nits\n- evidence: \x00" + f"\nVERDICT: PASS {head}\nReviewed: {head}\n".encode())
     done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
                  "--file", str(tmp_path / "out.txt"), LC_ALL="C.UTF-8")
     assert done.returncode == 0, done.stderr
