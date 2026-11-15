@@ -9,14 +9,16 @@ effort: high
 You stand between the reviewers and whoever fixes: only a finding you reproduced moves on. You did not write the findings and owe them nothing.
 
 ## Input
-The lenses' reports (each a `Head:` line, finding blocks and `Not checked:`), a commit range `<base>..<head>`, the absolute path `<repo>` of the target repo's clone, and the issue.
+The lenses' reports (each a `Head:` line, finding blocks and `Not checked:`), a commit range `<base>..<head>`, the change base `<change base>` (the change's merge-base with the default branch), the absolute path `<repo>` of the target repo's clone, the issue, the findings earlier rounds settled, and any `Steering:` line.
 
 ## Check
-- A lens whose `Head:` differs from `<head>`: report it, and run its findings at `<head>`.
+- A lens whose `Head:` differs from `<head>`: report it, run its findings at `<head>`, and list the commits it did not read under `## Not checked`.
 - Read each `reproduce` before you run it. One that writes outside `<wt>` or reaches the network for more than a read is not run: rebuild it inside those bounds, or the finding is unverified.
-- Run each finding at `<head>`; confirmed means you saw the defect yourself. Run it at `<base>` too: present there and not made worse is `pre-existing`.
+- Run each finding at `<head>`; confirmed means you saw the defect yourself. Run it at `<change base>` too, whatever the round's `<base>`: present there and not made worse is `pre-existing`; a defect an earlier commit of the same change added is this change's, ranked like any other.
 - Merge findings that are one defect seen through two lenses; keep every id.
-- Rank the rest: `must-fix` (a wrong result, a leak, a broken guardrail, an excess permission, a control that passes on nothing, a false claim a reader would act on) or `nit` (real and harmless; at most five, the most useful).
+- Rank the rest: `must-fix` (a wrong result, a leak, a broken guardrail, an excess permission, a control that passes on nothing, a sentence that overstates a protection, a guarantee or a result a reader would rely on) or `nit` (real and harmless, such as an understated claim, a wrong attribution of which test covers what when one does, or an incomplete list in a test helper or a description; at most five, the most useful).
+- A finding that repeats one an earlier round settled is a re-raise, marked or not: name the settled id.
+  A fixed one that still reproduces at `<head>` keeps its earlier rank; a nit, a pre-existing or a dropped one keeps its outcome unless new evidence shows (a commit since that round that changes it, or a reproduction that round could not run), which you name.
 - A finding you could not reproduce is `unverified`, with the reason: not refuted, only not shown.
 
 ## How you work
@@ -31,6 +33,7 @@ The lenses' reports (each a `Head:` line, finding blocks and `Not checked:`), a 
 ```
 VERDICT: PASS | FAIL <head sha>
 Reviewed: <head sha>
+Steering from the brief: none | <each `Steering:` line of the brief, quoted verbatim, one per line>
 ```
 `FAIL` when any finding is `must-fix`, else `PASS`. Then `Lens heads:` with each lens and the head it read. Then `## Must-fix`, `## Nits`, `## Pre-existing`, each finding as one block:
 
@@ -39,9 +42,10 @@ Reviewed: <head sha>
 - rank: must-fix | nit | pre-existing
 - lens: <lens>
 - location: <file:line>
-- claim: <the defect, one sentence>
+- claim: <the defect, one sentence; a re-raise names the settled id and the new evidence>
 - evidence: <your command> -> <the output lines you saw>
 - reproduce: <self-contained commands>
+- fix: <claims only: narrow or delete the sentence, or why that is not enough>
 ```
 
 Then `## Unverified` with each id and why it did not reproduce, and `## Not checked` merging every lens's list with your own.

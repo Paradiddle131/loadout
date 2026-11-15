@@ -19,6 +19,7 @@ A commit range `<base>..<head>`, the absolute path `<repo>` of the target repo's
 - An absolute is a finding when one input breaks it (show the input) or when only the inputs a test tried hold it.
 - A test name that claims more than its assertions check is a finding: quote both.
 - A claim about another system (a product limit, a default) with no source beside it is `unverified`.
+- Offer the cheapest true fix first: narrow or delete the sentence; a replacement sentence claims no more than you checked.
 
 ## How you work
 - Bash keeps no shell variable and no `cd` between calls: run `mktemp -d` once, then write the path it printed literally as `<wt>` in every later command.
@@ -35,9 +36,10 @@ First line `Head: <sha>`, the commit you read. Then one block per finding, most 
 ### <ID>
 - lens: claims
 - location: <file:line>
-- claim: <what is written, quoted, and what is true instead>
+- claim: <what is written, quoted, and what is true instead; overstated or understated>
 - evidence: <command> -> <output lines>
 - reproduce: <self-contained commands>
+- fix: <narrow or delete the sentence, quoted as it would read>
 - status: confirmed | unverified
 ```
 
