@@ -17,6 +17,7 @@ A repo's own instructions win where they set a different default.
 
 - The lead plans, briefs, integrates and judges; when it delegates an item's implementation, it does not also write that code.
 - The lead owns the shared files (README, architecture document, dependency manifests, any central registry): workers return the lines those need in their report, and the lead writes them.
+- Each such sentence is a claim like any other in the report: the lead checks it against the code that makes it true before writing it in.
 - Where a registry forces every item into one file, split it per item (a file per entry, a generated section) before the parallel work starts.
 - A skill that ships its own briefs and steps uses those, and its steps win where they assign the work differently; isolation, model and effort, and checking reports still apply.
 
@@ -44,6 +45,7 @@ Set both on every delegation and in every agent definition (`model` and `effort`
 - The lead checks every claim by running the repo's gates itself on the merged result, not on the worker's branch and not from its quoted output.
 - The lead resolves mechanical conflicts in the shared files it owns; a conflict inside a worker's code goes back to that worker.
 - A fix round goes back to the same worker, resumed or messaged (it keeps its context), with the verified findings verbatim; when it cannot be resumed, a fresh worker gets the original brief plus those findings.
+- The fix round's brief restates the `review` skill's fix rule: a code fix covers the finding's class with a test that goes red without it, and a claim's fix says less, adding no new completeness claim.
 - After three review-and-fix cycles on one item, stop: rethink the approach from a fresh brief, or park it for the owner (the `needs-owner` label, the findings as its last comment, as the `autopilot` skill does) and take the next item.
 
 ## Review
