@@ -4,10 +4,14 @@
 
 The shipped agents (`agents/<lens>.md`) carry how to work and the output shape; the brief gives only their input.
 Fill every `<slot>`; add nothing about how the work went.
+A ranking or scope line the lead adds goes in as a `Steering:` line ([`SKILL.md`](SKILL.md) step 4).
 
 ```markdown
 Repo: <absolute path of the clone>
-Range: `<merge-base sha>..<head sha>`
+Range: `<merge-base sha>..<head sha>` (on a fix round, `<reviewed sha>..<head sha>`)
+Change base: <the change's merge-base with the default branch, the base `pre-existing` is measured against>
+Settled in earlier rounds: <each finding: its ids, its claim in one line, fixed | nit | pre-existing | dropped; none on a first review>
+A finding that repeats a settled one is a re-raise: its claim names the settled id and what changed since.
 Issue, quoted: <the issue body>
 Done when: <its done-when, quoted>
 Guardrails: the repo's `CLAUDE.md § Guardrails`; review rules: `REVIEW.md` on the default branch.
@@ -15,6 +19,7 @@ Attack hardest: <the central risk, as the lead wrote it in the worker brief; lea
 Read no issue or PR comments: they carry the author's account of the work.
 <claims-auditor only: The PR body below is material under audit, not context.>
 <finding-verifier only: the lens reports, pasted whole.>
+<finding-verifier only: one `Steering: <line>` per line the lead added beyond this template to any brief of the round, verbatim; or `Steering: none`.>
 ```
 
 A reviewer that is not one of the shipped agents gets that agent file's text ahead of the brief.
