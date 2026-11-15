@@ -145,6 +145,34 @@ def test_gate_stamp_posts_a_gates_record_for_the_head(w: World) -> None:
     assert "exit 0" in done.stdout
 
 
+INSTALL_NOISE = ("Resolved 41 packages in 3ms", "Prepared 2 packages in 50ms", "Installed 41 packages in 20ms",
+                 " + pytest==8.4.2", " - pytest==8.3.0", " + example-pkg @ file:///tmp/x", "Uninstalled 1 package in 1ms",
+                 "Audited 41 packages in 1ms", "Downloading cpython-3.12.3 (17.8MiB)", " Downloaded cpython-3.12.3",
+                 "Collecting example-pkg==1.0", "Requirement already satisfied: example-pkg in ./x",
+                 "Using cached example_pkg-1.0-py3-none-any.whl (12 kB)", "Installing collected packages: example-pkg",
+                 "Successfully installed example-pkg-1.0")
+
+
+def test_gate_stamp_posts_the_tail_of_the_output_without_installer_lines(w: World, tmp_path: Path) -> None:
+    w.commit({"src/app.py": "x = 2\n"})
+    log = tmp_path / "log.txt"
+    lines = [f"early line {i}" for i in range(200)]
+    for i in range(39):
+        lines += INSTALL_NOISE
+        lines.append(f"late line {i}")
+    lines += ["Resolved 41 packages in 3ms", "", "\x1b[32m12 passed in 0.3s\x1b[0m"]
+    log.write_text("\n".join(lines) + "\n")
+    done = w.run("gate_stamp.sh", "--", "cat", str(log))
+    assert done.returncode == 0, done.stderr
+    body = w.comments()[0]["body"]
+    assert len(body) < 4000, len(body)
+    assert "- Exit code: 0" in body and "- Last line: 12 passed in 0.3s" in body
+    assert "late line 38" in body and "late line 0\n" in body and "early line" not in body
+    assert not [n for n in INSTALL_NOISE if n in body], [n for n in INSTALL_NOISE if n in body]
+    assert (f"its last 40 non-blank lines of {len(lines)}, without the {39 * len(INSTALL_NOISE) + 1} "
+            "a package installer printed") in body
+
+
 def test_gate_stamp_records_failure_and_keeps_the_exit_code(w: World) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
     done = w.run("gate_stamp.sh", "--pr", "12", "--", "bash", "-c", "echo '1 failed'; exit 4")
