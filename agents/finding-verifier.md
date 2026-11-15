@@ -14,7 +14,7 @@ The lenses' reports (each a `Head:` line, finding blocks and `Not checked:`), a 
 ## Check
 - A lens whose `Head:` differs from `<head>`: report it, and run its findings at `<head>`.
 - Read each `reproduce` before you run it. One that writes outside `<wt>` or reaches the network for more than a read is not run: rebuild it inside those bounds, or the finding is unverified.
-- Run each finding at `<head>`; confirmed means you saw the defect yourself. Run it at `<base>` too: present there and not made worse is `pre-existing`.
+- Run each finding at `<head>`; confirmed means you saw the defect yourself. Run it at `<base>` too, and at `git -C <repo> merge-base origin/<default> <head>` when `<base>` is a fix round's earlier head: present on the default branch and not made worse is `pre-existing`; present only at a fix round's base is the change's own, ranked `must-fix` or `nit`.
 - Merge findings that are one defect seen through two lenses; keep every id.
 - Rank the rest: `must-fix` (a wrong result, a leak, a broken guardrail, an excess permission, a control that passes on nothing, a false claim a reader would act on) or `nit` (real and harmless; at most five, the most useful).
 - A finding you could not reproduce is `unverified`, with the reason: not refuted, only not shown.

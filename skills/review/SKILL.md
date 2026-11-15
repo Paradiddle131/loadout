@@ -47,7 +47,7 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 ## 4. Verify and rank
 
 - Give [`finding-verifier`](../../agents/finding-verifier.md) every reviewer's raw output, the same range and the quoted issue.
-- It reproduces each finding, drops the unconfirmed, keeps `unverified` claims apart, and ranks the rest `must-fix`, `nit` (at most five) or `pre-existing` (true before this change).
+- It reproduces each finding, drops the unconfirmed, keeps `unverified` claims apart, and ranks the rest `must-fix`, `nit` (at most five) or `pre-existing` (true on the default branch before this change, not only at a fix round's base).
 - Done when every finding is reproduced and ranked, dropped, or marked `unverified`; note the head it read as the reviewed commit.
 
 ## 5. Fix, capped
