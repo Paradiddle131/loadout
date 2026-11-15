@@ -90,6 +90,7 @@ A guardrail conflict uses the packet in `ways/guardrails.md`.
 
 One `🤖 Handoff` comment per PR, edited in place after every push; outside `<details>` only what needs the owner, five lines at most, the `Edited` lines aside.
 An in-place rewrite of a handoff, a packet or another comment that records state adds a last line `Edited <UTC from date -u +%FT%H:%MZ>: <what changed and why>`, one per rewrite, never removed, so the comment's creation time cannot mislead; a correction names the wrong statement it replaces, and a rewrite that removes personal or secret data says only that data was removed, never the data.
+An `Edited` line that itself holds personal or secret data is rewritten to say data was removed; the comment's earlier text stays readable in its edit history, so ask the owner to delete that revision and rotate a secret.
 A `🤖 Gates` or `🤖 Review` record is never edited (the merge guard counts only unedited ones): post a new one.
 
 ```markdown
@@ -97,7 +98,7 @@ A `🤖 Gates` or `🤖 Review` record is never edited (the merge guard counts o
 
 **You:** <the one thing the owner must do or decide; omit when none>
 **Result:** <one line: what this does, verified how far>
-**Review:** <tier> — <reviewers> — <n> cycles — <n> fixed — steered: none | <each steering line> — filed #<a>, #<b> | not run: <why>
+**Review:** <tier> — <reviewers> — <n> cycles — <n> fixed — steered: none | <each steering line, personal or secret values redacted> — filed #<a>, #<b> | not run: <why>
 
 <details><summary>Local verification</summary>
 

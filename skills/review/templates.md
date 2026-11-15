@@ -4,7 +4,7 @@
 
 The shipped agents (`agents/<lens>.md`) carry how to work and the output shape; the brief gives only their input.
 Fill every `<slot>`; add nothing about how the work went.
-A ranking or scope line the lead adds goes in as a `Steering:` line ([`SKILL.md`](SKILL.md) step 4).
+A ranking or scope line the lead adds goes in as a `Steering:` line ([`SKILL.md`](SKILL.md) step 4); it never lowers a finding that is a broken guardrail, a leak or an excess permission, and never takes a guarded path out of a lens's scope.
 
 ```markdown
 Repo: <absolute path of the clone>
@@ -20,7 +20,7 @@ Read no issue or PR comments: they carry the author's account of the work.
 <claims-auditor only: The PR body below is material under audit, not context.>
 <finding-verifier only: the lens reports, pasted whole.>
 <finding-verifier only: read the `🤖 Review` records the settled list links, and no other comment.>
-<finding-verifier only: one `Steering: <line>` per line the lead added beyond this template to any brief of the round, verbatim; or `Steering: none`.>
+<finding-verifier only: one `Steering: <line>` per line the lead added beyond this template to any brief of the round, verbatim, personal or secret values redacted; or `Steering: none`.>
 ```
 
 A reviewer that is not one of the shipped agents gets that agent file's text ahead of the brief.

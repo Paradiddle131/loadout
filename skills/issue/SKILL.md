@@ -44,6 +44,7 @@ Everything else goes under `<details>`, and the session's durable work (a plan, 
 - A repo's own issue template or labels win; they only rename these sections.
 - Editing an existing issue follows the same shape; rewrite a wall of text into it rather than appending.
 - **A rewritten record says so:** a comment that records state (a handoff, a decision packet) rewritten in place gets a last line `Edited <UTC from date -u +%FT%H:%MZ>: <what changed and why>`, one per rewrite, never removed; a correction names the wrong statement it replaces, and a rewrite that removes personal or secret data says only that data was removed, never the data.
+  An `Edited` line that itself holds personal or secret data is rewritten to say data was removed; the comment's earlier text stays readable in its edit history, so ask the owner to delete that revision and rotate a secret.
 - **Every issue lands in the queue:** where the work queue is the epics' sub-issues (an autopilot profile's `Queue` naming epics), file each issue under an epic, from an attended session too, or no one picks it: `file_issue.sh --epic <n>` (the `autopilot` skill's), or `gh api -X POST repos/<owner>/<repo>/issues/<epic>/sub_issues -F sub_issue_id=<the new issue's id, not its number>`.
 
 ## Artifacts

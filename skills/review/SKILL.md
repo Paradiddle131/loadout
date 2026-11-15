@@ -50,7 +50,8 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 - Every lens report names the head the verifier will read; a lens behind it reruns first, so no commit goes to the verifier unread.
 - Give [`finding-verifier`](../../agents/finding-verifier.md), a fresh subagent that served as no lens in the round, every reviewer's raw output, the same range, the change base, the settled findings and the quoted issue.
 - It reproduces each finding, drops the unconfirmed, keeps `unverified` claims apart, and ranks the rest `must-fix`, `nit` (at most five) or `pre-existing` (true at the change's merge-base with the default branch, not at the round's base).
-- **Steering:** a lead that has read the reviews and the code may add a ranking or scope line to a lens or verifier brief; it goes in the verifier's brief as a `Steering:` line (templates.md), the verifier quotes it under `Steering from the brief:`, so the record carries it, and the handoff says the round was steered.
+- **Steering:** a lead that has read the reviews and the code may add a ranking or scope line to a lens or verifier brief, raising a rank or lowering or narrowing one; it never lowers a finding that is a broken guardrail, a leak or an excess permission, and never takes a guarded path out of a lens's scope: that decision is the owner's (the conflict packet of step 9).
+  The line goes in the verifier's brief as a `Steering:` line (templates.md); the verifier's output quotes the steering and settled lines, `verdict.sh` posts that output (clipped only to fit GitHub's comment limit), and the handoff says the round was steered.
 - Record the round's verdict now by step 7, a `FAIL` included, before any fix is pushed: no round runs without its record on the PR.
 - Done when every finding is reproduced and ranked, dropped, or marked `unverified`, and the round's `🤖 Review` record is posted; note the head it read as the reviewed commit.
 
