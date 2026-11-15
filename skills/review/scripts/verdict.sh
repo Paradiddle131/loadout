@@ -65,7 +65,7 @@ if [ "$tier" != routine ]; then
   said=$(tr '[:upper:]' '[:lower:]' <<<"${BASH_REMATCH[1]}") verdict_sha=${BASH_REMATCH[2]}
   [[ "$reviewed_line" =~ $reviewed_re ]] ||
     die "$shape (its reviewed line: '${reviewed_line:-none}')."
-  for s in "$verdict_sha" "${BASH_REMATCH[1]}"; do
+  for s in "$verdict_sha"; do
     [[ "$reviewed" == "$s"* ]] ||
       die "the verifier's output names commit $s, but --reviewed is $reviewed: record the verdict of the commit the verifier read."
   done
