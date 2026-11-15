@@ -64,7 +64,13 @@ $changed"
 
 # The record keeps the summary: the last non-blank lines without colour codes, past the installer's lines.
 tail_lines=40
-installer='^[[:space:]]*([+-] [A-Za-z0-9_.-]+(\[[^]]*\])?( ?==| @ )|(Resolved|Prepared|Installed|Uninstalled|Audited) [0-9]+ packages? in |Downloading [^[:space:]]+ \([0-9.]+ ?[kKMG]i?B\)$|Downloaded [^[:space:]]+$|(Collecting|Using cached|Installing collected packages:|Successfully installed|Requirement already satisfied:) )'
+installer_lines=(
+  '[+-] [A-Za-z0-9_.-]+(\[[^]]*\])?( ?==| @ )'                            # uv: ` + pkg==1.0`, ` + pkg @ file://…`
+  '(Resolved|Prepared|Installed|Uninstalled|Audited) [0-9]+ packages? in ' # uv's step summaries
+  'Downloading [^[:space:]]+ \([0-9.]+ ?[kKMG]i?B\)$' 'Downloaded [^[:space:]]+$'
+  '(Collecting|Using cached|Installing collected packages:|Successfully installed|Requirement already satisfied:) ' # pip
+)
+installer="^[[:space:]]*($(IFS='|'; echo "${installer_lines[*]}"))"
 sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g; s/[[:space:]]+$//' "$out" >"$tmp/plain"
 total=$(grep -c '' "$tmp/plain" || true)
 noise=$(grep -cE "$installer" "$tmp/plain" || true)
@@ -76,7 +82,8 @@ state=failure
 build_record --kind gates --sha "$head" --state "$state" --title "🤖 Gates: $state" \
   --line "- Head commit: \`$head\`" --line "- Command: \`$shown\`" --line "- Exit code: $code" \
   --line "- Last line: ${summary:-no output}" --file "$tmp/tail" --tail \
-  --details "Output: its last $kept non-blank lines of $total, without the $noise a package installer printed" >"$tmp/body.md"
+  --details "Output: its last $kept non-blank lines of $total, without the $noise a package installer printed" \
+  >"$tmp/body.md"
 
 rc=$code
 recorded="recorded on PR $pr"

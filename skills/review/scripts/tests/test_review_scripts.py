@@ -146,9 +146,10 @@ def test_gate_stamp_posts_a_gates_record_for_the_head(w: World) -> None:
 
 
 INSTALL_NOISE = ("Resolved 41 packages in 3ms", "Prepared 2 packages in 50ms", "Installed 41 packages in 20ms",
-                 " + pytest==8.4.2", " - pytest==8.3.0", " + example-pkg @ file:///tmp/x", "Uninstalled 1 package in 1ms",
-                 "Audited 41 packages in 1ms", "Downloading cpython-3.12.3 (17.8MiB)", " Downloaded cpython-3.12.3",
-                 "Collecting example-pkg==1.0", "Requirement already satisfied: example-pkg in ./x",
+                 " + pytest==8.4.2", " - pytest==8.3.0", " + example-pkg @ file:///tmp/x",
+                 "Uninstalled 1 package in 1ms", "Audited 41 packages in 1ms", "Downloading cpython-3.12.3 (17.8MiB)",
+                 " Downloaded cpython-3.12.3", "Collecting example-pkg==1.0",
+                 "Requirement already satisfied: example-pkg in ./x",
                  "Using cached example_pkg-1.0-py3-none-any.whl (12 kB)", "Installing collected packages: example-pkg",
                  "Successfully installed example-pkg-1.0")
 
