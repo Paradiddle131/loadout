@@ -148,7 +148,7 @@ def test_gate_stamp_posts_a_gates_record_for_the_head(w: World) -> None:
 def test_gate_stamp_posts_the_last_40_non_blank_lines_whatever_they_say(w: World, tmp_path: Path) -> None:
     w.commit({"src/app.py": "x = 2\n"})
     log = tmp_path / "log.txt"
-    # Lines of every shape stay, installer-like ones included: the record leaves out only what is above the tail.
+    # Installer-shaped lines stay like any other line.
     shapes = ["lockfile drift:", " - numpy==1.26.0", " + numpy==2.0.0", "- total == 3", "Downloaded report.csv",
               "Collecting garbage failed hard", "Installed 3 packages in 2ms", "Resolved 41 packages in 3ms"]
     lines = [f"early line {i}" for i in range(200)] + [f"late line {i}" for i in range(31)] + shapes
@@ -165,16 +165,40 @@ def test_gate_stamp_posts_the_last_40_non_blank_lines_whatever_they_say(w: World
 
 
 @pytest.mark.parametrize("odd", [b"\x00", b"\xff"])
-def test_gate_stamp_keeps_the_tail_of_output_holding_a_byte_grep_calls_binary(w: World, tmp_path: Path,
-                                                                             odd: bytes) -> None:
+@pytest.mark.parametrize("on_last", [False, True])
+def test_gate_stamp_records_output_holding_a_nul_or_invalid_byte(w: World, tmp_path: Path, odd: bytes,
+                                                                on_last: bool) -> None:
     w.commit({"src/app.py": "x = 2\n"})
     log = tmp_path / "log.txt"
-    log.write_bytes(b"line one\nbinary " + odd + b" here\n1 failed, 11 passed in 0.3s\n")
-    done = w.run("gate_stamp.sh", "--", "bash", "-c", f"cat {log}; exit 1")
-    assert done.returncode == 1, done.stderr
+    middle, last = b"middle line", b"12 passed in 0.3s"
+    if on_last:
+        last += b" " + odd
+    else:
+        middle += b" " + odd
+    log.write_bytes(b"line one\n" + middle + b"\n" + last + b"\n")
+    done = w.run("gate_stamp.sh", "--", "cat", str(log), LC_ALL="C.UTF-8")
+    assert done.returncode == 0, done.stderr
+    [c] = w.comments()
+    body = c["body"]
+    assert "- Last line: 12 passed in 0.3s" in body and "line one\nmiddle line" in body
+    assert "its last 3 non-blank lines of 3</summary>" in body and "\x00" not in body
+
+
+def test_gate_stamp_gives_whitespace_only_lines_no_tail_slot(w: World, tmp_path: Path) -> None:
+    w.commit({"src/app.py": "x = 2\n"})
+    log = tmp_path / "log.txt"
+    log.write_text("".join(f"line {i}\n" for i in range(60)) + "   \n\t\n" * 5 + "done\n")
+    done = w.run("gate_stamp.sh", "--", "cat", str(log))
+    assert done.returncode == 0, done.stderr
     body = w.comments()[0]["body"]
-    assert "- Last line: 1 failed, 11 passed in 0.3s" in body and "<details>" in body
-    assert "line one\nbinary " in body and "of 3</summary>" in body and "\x00" not in body
+    assert "```text\nline 21\n" in body and "line 20\n" not in body and "line 59\ndone\n" in body
+
+
+def test_gate_stamp_counts_a_short_output_as_it_is(w: World) -> None:
+    w.commit({"src/app.py": "x = 2\n"})
+    done = w.run("gate_stamp.sh", "--", "printf", "a\\nb\\nc\\n")
+    assert done.returncode == 0, done.stderr
+    assert "<summary>Output: its last 3 non-blank lines of 3</summary>" in w.comments()[0]["body"]
 
 
 def test_gate_stamp_records_failure_and_keeps_the_exit_code(w: World) -> None:
@@ -476,6 +500,16 @@ def test_verdict_reads_the_first_verdict_lines_in_a_fence_and_an_abbreviated_sha
                  "--file", str(tmp_path / "out.txt"))
     assert done.returncode == 0, done.stderr
     assert f"{REVIEW} sha={head} state=failure" in w.comments()[0]["body"]
+
+
+@pytest.mark.parametrize("odd", [b"\x00", b"\xff"])
+def test_verdict_reads_its_lines_past_a_nul_or_invalid_byte(w: World, tmp_path: Path, odd: bytes) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    (tmp_path / "out.txt").write_bytes(b"## Nits\n- evidence: " + odd + f"\nVERDICT: PASS {head}\nReviewed: {head}\n".encode())
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", str(tmp_path / "out.txt"), LC_ALL="C.UTF-8")
+    assert done.returncode == 0, done.stderr
+    assert f"{REVIEW} sha={head} state=success" in w.comments()[0]["body"]
 
 
 def test_verdict_accepts_a_seven_character_abbreviation(w: World, tmp_path: Path) -> None:
