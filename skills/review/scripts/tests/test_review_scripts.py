@@ -749,3 +749,45 @@ def test_read_back_accepts_only_the_relay_footer(tmp_path: Path) -> None:
     assert same(body.rstrip("\n") + footer + "\nmore") == 1
     assert same("changed " + body) == 1
     assert same(body.rstrip("\n") + footer.lstrip("\n")) == 1  # glued to the body's last line
+
+
+# verdict.sh: a must-fix blocks only by the harm it names
+
+def _block(fid: str, harm: str | None) -> str:
+    lines = [f"### {fid}", "- rank: must-fix", "- lens: claims-auditor", "- claim: a sentence is wrong"]
+    if harm is not None:
+        lines.append(f"- harm: {harm}")
+    return "\n".join(lines) + "\n"
+
+
+@pytest.mark.parametrize("must_fix", [
+    _block("CLM-1", None),  # no harm line
+    _block("CLM-1", ""),  # an empty one
+    _block("CLM-1", "   "),  # blanks only
+    _block("CLM-1", None) + _block("COR-2", "an operator trusts the wrong total"),  # the next block's harm
+])
+def test_verdict_refuses_a_must_fix_that_names_no_harm(w: World, tmp_path: Path, must_fix: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    text = f"## Must-fix\n{must_fix}\n## Nits\n### CLM-9\n- rank: nit\n- harm: a nit's harm line\n"
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", review_file(tmp_path, head, "FAIL", text))
+    assert done.returncode == 2 and "CLM-1 name no harm" in done.stderr, done.stderr
+    assert w.writes() == []
+
+
+def test_verdict_posts_a_must_fix_that_names_its_harm(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    text = ("## Must-fix\n" + _block("COR-1, GRD-2", "a reader trusts a total that drops rows")
+            + "## Nits\n### CLM-3\n- rank: nit\n- claim: a test name says more than it checks\n")
+    done = w.run("verdict.sh", "12", "--tier", "sensitive", "--reviewers", "x", "--reviewed", head,
+                 "--file", review_file(tmp_path, head, "FAIL", text))
+    assert done.returncode == 0, done.stderr
+    assert f"state=failure tier=sensitive reviewed={head}" in w.comments()[0]["body"]
+
+
+def test_verdict_reads_harm_only_under_the_must_fix_heading(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    text = "## Must-fix\nnone\n## Nits\n### CLM-3\n- rank: nit\n- claim: no harm line, as a nit has none\n"
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", review_file(tmp_path, head, "PASS", text))
+    assert done.returncode == 0, done.stderr

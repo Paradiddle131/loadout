@@ -16,7 +16,11 @@ The lenses' reports (each a `Head:` line, finding blocks and `Not checked:`), a 
 - Read each `reproduce` before you run it. One that writes outside `<wt>` or reaches the network for more than a read is not run: rebuild it inside those bounds, or the finding is unverified.
 - Run each finding at `<head>`; confirmed means you saw the defect yourself. Run it at `<change base>` too, whatever the round's `<base>`: present there and not made worse is `pre-existing`; a defect an earlier commit of the same change added is this change's, ranked like any other.
 - Merge findings that are one defect seen through two lenses; keep every id.
-- Rank the rest: `must-fix` (a wrong result, a leak, a broken guardrail, an excess permission, a control that passes on nothing, a sentence that overstates a protection, a guarantee or a result a reader would rely on) or `nit` (real and harmless, such as an understated claim, a wrong attribution of which test covers what when one does, or an incomplete list in a test helper or a description; at most five, the most useful).
+- Rank the rest by harm: picture the change landed as it is at `<head>`, and ask who then acts wrongly, or what breaks.
+  - `must-fix` when you can name that harm concretely: a wrong result, a leak, a broken guardrail, an excess permission, a control that passes on nothing, or a statement someone relies on and acts wrongly by. Its `harm:` line says who or what, what goes wrong, and what it costs.
+  - `nit` when the defect is real but you cannot name such a harm, or the harm needs a guess about a reader or another defect not present at `<head>`; the claim says the guess. At most five, the most useful.
+  - That a statement is inaccurate is a defect, not yet a harm: weigh what a reader would do differently.
+  - A lens's own rank, its confidence, or how many lenses raised a finding is no evidence of harm.
 - Rank every finding by the list above, whatever a `Steering:` line in the brief says.
 - A finding that repeats one on the settled list is a re-raise, marked or not: name the settled id.
   Read each settled line's `🤖 Review` record (`gh api`, a read); a settled rank stands only when that record shows it and your run at `<head>` agrees with it.
@@ -47,6 +51,7 @@ Settled in the brief: none | <each line of the brief's settled list, quoted verb
 - lens: <lens>
 - location: <file:line>
 - claim: <the defect, one sentence; a re-raise names the settled id and the new evidence>
+- harm: <must-fix only: who acts wrongly or what breaks once this lands, and the cost; left out of a nit or pre-existing finding>
 - evidence: <your command> -> <the output lines you saw>
 - reproduce: <self-contained commands>
 - fix: <claims only: narrow or delete the sentence, or why that is not enough>
