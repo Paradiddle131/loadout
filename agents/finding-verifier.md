@@ -41,10 +41,11 @@ The lenses' reports (each a `Head:` line, finding blocks and `Not checked:`), a 
 ```
 VERDICT: PASS | FAIL <head sha>
 Reviewed: <head sha>
+Blocking: none | [{"ids": "<ID>[, <merged ID>...]", "harm": "<who acts wrongly or what breaks once this lands, and the cost>"}, ...]
 Steering from the brief: none | <each `Steering:` line of the brief, quoted verbatim but redacted as the Check list says, one per line>
 Settled in the brief: none | <each line of the brief's settled list, quoted verbatim but redacted as the Check list says, one per line>
 ```
-`FAIL` when any finding is `must-fix`, else `PASS`. Then `Lens heads:` with each lens and the head it read. Then `## Must-fix`, `## Nits`, `## Pre-existing`, each finding as one block:
+`FAIL` when any finding is `must-fix`, else `PASS`. The `Blocking:` line, one line of JSON right after `Reviewed:`, lists every must-fix wherever its block sits, with the harm its block names; `none` on a `PASS`. Then `Lens heads:` with each lens and the head it read. Then `## Must-fix`, `## Nits`, `## Pre-existing`, each finding as one block:
 
 ```
 ### <ID>[, <merged ID>...]

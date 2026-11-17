@@ -80,7 +80,7 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 
 - Run `$R/scripts/verdict.sh --reviewed <sha>` (its header gives the other arguments) with the verifier's output unedited; for `routine`, `verdict.sh --tier routine`, which the change's own author may run.
 - It recomputes the tier and refuses a lower one than the paths give, and refuses unless the PR head equals the reviewed commit or differs from it only by a clean merge of the default branch.
-- Above `routine` it takes the result from the output's first `VERDICT` line, and refuses an output without the verifier's `VERDICT` and `Reviewed` lines, one whose lines name a commit other than `--reviewed`, one with a `must-fix` finding whose `harm:` line is missing, blank or a placeholder such as `none`, and a `--result` that contradicts its verdict.
+- Above `routine` it takes the result from the output's first `VERDICT` line, and refuses an output without the verifier's `VERDICT` and `Reviewed` lines, one whose lines name a commit other than `--reviewed`, one whose `Blocking:` line (right after `Reviewed:`) is missing, names a must-fix without a harm, lists none on a `FAIL` or any on a `PASS`, and a `--result` that contradicts its verdict.
 - It posts the output as a PR comment that starts with `🤖` and names the reviewed commit and the head, as the `🤖 Review` record: `success` when the verifier's `VERDICT` line says `PASS` (for `routine`, when `--result` is `pass`, its default).
 - Done when both records are `success` on the PR's head commit.
 
