@@ -12,8 +12,9 @@
 #   --file (standard and sensitive) is finding-verifier's output: its first `VERDICT: PASS|FAIL <sha>` line and
 #   its first `Reviewed: <sha>` line (agents/finding-verifier.md § Output; a sha may be abbreviated to 7 or more
 #   characters) must both name --reviewed, and the result is that VERDICT; a --result that differs is refused.
-#   The line after `Reviewed:` must be the verifier's `Blocking:` line (blocking.py has the shape): `none` for a
-#   PASS, and for a FAIL each must-fix with the harm it names, so a finding blocks only by a harm it states.
+#   The line after `Reviewed:` must be the verifier's `Blocking:` line (blocking.py has the shape and its limits):
+#   `none` for a PASS; for a FAIL the must-fix findings it lists, each with a harm that is not filler. The script
+#   does not compare the line with the finding blocks below it: the lead acts on the line (the review skill).
 #   --tier routine needs no reviewer: --reviewers, --reviewed and --file are optional, --result defaults to pass,
 #   the comment says the tier needs gates only, and the session that wrote the change may run it, since the
 #   paths decide the tier.
