@@ -50,7 +50,7 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 - Every lens report names the head the verifier will read; a lens behind it reruns first, so no commit goes to the verifier unread.
 - Give [`finding-verifier`](../../agents/finding-verifier.md), a fresh subagent that served as no lens in the round, every reviewer's raw output, the same range, the change base, the settled findings and the quoted issue.
 - It reproduces each finding, drops the unconfirmed, keeps `unverified` claims apart, and ranks the rest `must-fix`, `nit` (at most five) or `pre-existing` (true at the change's merge-base with the default branch, not at the round's base).
-- A finding blocks by the harm it names: a `must-fix` carries a `harm:` line saying who acts wrongly or what breaks once the change lands; a real defect this change adds with no such harm is a `nit`.
+- A finding blocks by the harm it names: a `must-fix` carries a `harm:` line saying who acts wrongly or what breaks once the change lands, and the verifier's one-line `Blocking:` list repeats each with its harm; a real defect this change adds with no such harm is a `nit`.
 - **Steering:** any line the lead adds to a lens or verifier brief beyond the template goes in the verifier's brief as a `Steering:` line (templates.md), and the handoff says the round was steered.
   The verifier ranks every finding by its own list whatever a steering line says; its output quotes each steering line, redacted as its Check list says, and the settled lines, and `verdict.sh` posts that output (clipped to fit GitHub's comment limit).
   A lead that wants a `must-fix` lowered posts a conflict packet (step 9).
@@ -80,7 +80,7 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 
 - Run `$R/scripts/verdict.sh --reviewed <sha>` (its header gives the other arguments) with the verifier's output unedited; for `routine`, `verdict.sh --tier routine`, which the change's own author may run.
 - It recomputes the tier and refuses a lower one than the paths give, and refuses unless the PR head equals the reviewed commit or differs from it only by a clean merge of the default branch.
-- Above `routine` it takes the result from the output's first `VERDICT` line, and refuses an output without the verifier's `VERDICT` and `Reviewed` lines, one whose lines name a commit other than `--reviewed`, one with a `must-fix` finding whose `harm:` line is missing, blank or a placeholder such as `none`, and a `--result` that contradicts its verdict.
+- Above `routine` it takes the result from the output's first `VERDICT` line, and refuses an output without the verifier's `VERDICT` and `Reviewed` lines, one whose lines name a commit other than `--reviewed`, one whose `Blocking:` line (right after `Reviewed:`) is missing, names a must-fix without a harm, lists none on a `FAIL` or any on a `PASS`, and a `--result` that contradicts its verdict.
 - It posts the output as a PR comment that starts with `🤖` and names the reviewed commit and the head, as the `🤖 Review` record: `success` when the verifier's `VERDICT` line says `PASS` (for `routine`, when `--result` is `pass`, its default).
 - Done when both records are `success` on the PR's head commit.
 

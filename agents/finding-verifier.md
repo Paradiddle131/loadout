@@ -17,9 +17,11 @@ The lenses' reports (each a `Head:` line, finding blocks and `Not checked:`), a 
 - Run each finding at `<head>`; confirmed means you saw the defect yourself. Run it at `<change base>` too, whatever the round's `<base>`: present there and not made worse is `pre-existing`; a defect an earlier commit of the same change added is this change's, ranked like any other.
 - Merge findings that are one defect seen through two lenses; keep every id.
 - Rank the rest by harm: picture the change landed as it is at `<head>`, and ask who then acts wrongly, or what breaks.
-  - `must-fix` when you can name that harm concretely: a wrong result, a leak, a broken guardrail, an excess permission, a control that passes on nothing, or a statement someone relies on and acts wrongly by. Its `harm:` line says who or what, what goes wrong, and what it costs.
+  - `must-fix` when you can name that harm concretely: a wrong result, a leak, a broken guardrail, an excess permission, a control that passes on nothing, or a statement someone relies on and acts wrongly by.
+    Its `harm:` line, and its entry on the `Blocking:` line, say who or what, what goes wrong, and what it costs.
   - A control, check, guardrail or permission that does not stop what it exists to stop is a harm at `<head>`, before anything slips past it: name who loses the protection and what can now land unseen.
-  - `nit` when the defect is real but you cannot name such a harm, or the harm rests on a guess about how a reader would take a statement; the claim says the guess. At most five, the most useful.
+  - `nit` when the defect is real but you cannot name such a harm, or the harm rests on a guess about how a reader would take a statement; the claim says the guess.
+    At most five nits, the most useful.
   - That a statement is inaccurate is a defect, not yet a harm: weigh what a reader would do differently.
   - A lens's own rank, its confidence, or how many lenses raised a finding is no evidence of harm.
 - Rank every finding by the list above, whatever a `Steering:` line in the brief says.
@@ -41,10 +43,13 @@ The lenses' reports (each a `Head:` line, finding blocks and `Not checked:`), a 
 ```
 VERDICT: PASS | FAIL <head sha>
 Reviewed: <head sha>
+Blocking: none | [{"ids": "<ID>[, <merged ID>...]", "harm": "<who acts wrongly or what breaks once this lands, and the cost>"}, ...]
 Steering from the brief: none | <each `Steering:` line of the brief, quoted verbatim but redacted as the Check list says, one per line>
 Settled in the brief: none | <each line of the brief's settled list, quoted verbatim but redacted as the Check list says, one per line>
 ```
-`FAIL` when any finding is `must-fix`, else `PASS`. Then `Lens heads:` with each lens and the head it read. Then `## Must-fix`, `## Nits`, `## Pre-existing`, each finding as one block:
+`FAIL` when any finding is `must-fix`, else `PASS`.
+The `Blocking:` line, one line of JSON right after `Reviewed:`, lists every must-fix wherever its block sits, with the harm its block names; `none` on a `PASS`; `verdict.sh` reads this line and no other part of the findings.
+Then `Lens heads:` with each lens and the head it read. Then `## Must-fix`, `## Nits`, `## Pre-existing`, each finding as one block:
 
 ```
 ### <ID>[, <merged ID>...]
@@ -58,4 +63,4 @@ Settled in the brief: none | <each line of the brief's settled list, quoted verb
 - fix: <claims only: narrow or delete the sentence, or why that is not enough>
 ```
 
-Then `## Settled, not kept`, `## Dropped` with each id you ran and found no defect for and the run that showed it, `## Unverified` with each id and why it did not reproduce, and `## Not checked` merging every lens's list with your own.
+Then `## Settled, not kept`, each finding in the same block shape, `## Dropped` with each id you ran and found no defect for and the run that showed it, `## Unverified` with each id and why it did not reproduce, and `## Not checked` merging every lens's list with your own.

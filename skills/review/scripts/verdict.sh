@@ -12,9 +12,8 @@
 #   --file (standard and sensitive) is finding-verifier's output: its first `VERDICT: PASS|FAIL <sha>` line and
 #   its first `Reviewed: <sha>` line (agents/finding-verifier.md § Output; a sha may be abbreviated to 7 or more
 #   characters) must both name --reviewed, and the result is that VERDICT; a --result that differs is refused.
-#   Each must-fix finding (a `### <id>` block whose `rank:` says must-fix, or with no rank line under the
-#   `## Must-fix` heading) must carry a `- harm:` line with a real value: a finding blocks only by the harm it
-#   names (agents/finding-verifier.md § Check; findings.py reads the blocks). A FAIL needs at least one such block.
+#   The line after `Reviewed:` must be the verifier's `Blocking:` line (blocking.py has the shape): `none` for a
+#   PASS, and for a FAIL each must-fix with the harm it names, so a finding blocks only by a harm it states.
 #   --tier routine needs no reviewer: --reviewers, --reviewed and --file are optional, --result defaults to pass,
 #   the comment says the tier needs gates only, and the session that wrote the change may run it, since the
 #   paths decide the tier.
@@ -76,15 +75,19 @@ if [ "$tier" != routine ]; then
   [ -z "$result" ] || [ "$result" = "$said" ] ||
     die "--result $result contradicts the verifier's VERDICT line, which says $said: the record carries the verifier's verdict."
   result=$said
-  # A must-fix finding blocks only by the harm it names (findings.py reads the blocks outside code fences).
-  no_harm=$(python3 "$here/findings.py" missing-harm "$file") || die "cannot read the must-fix findings in --file $file"
-  [ -z "$no_harm" ] ||
-    die "the verifier's must-fix finding(s) $no_harm name no harm: each needs a \`- harm:\` line saying who acts wrongly or what breaks once the change lands, or it is a nit (agents/finding-verifier.md § Check); rerun the verifier."
-  if [ "$said" = fail ]; then
-    blocking=$(python3 "$here/findings.py" must-fix "$file") || die "cannot read the must-fix findings in --file $file"
-    [ "$blocking" -gt 0 ] ||
-      die "the verifier says FAIL but its output holds no must-fix finding in its \`### <id>\` block shape: a FAIL rests on a must-fix that names its harm (agents/finding-verifier.md § Output); rerun the verifier."
-  fi
+  # A must-fix blocks only by the harm it names: the verifier's `Blocking:` line lists each with its harm.
+  why=$(mktemp)
+  blocking=$(python3 "$here/blocking.py" "$file" 2>"$why") || {
+    reason=$(cat "$why"); rm -f "$why"
+    die "the verifier's output is refused: ${reason:-blocking.py failed} (agents/finding-verifier.md § Output); rerun the verifier."
+  }
+  rm -f "$why"
+  [[ "$blocking" =~ ^[0-9]+$ ]] || die "blocking.py printed no count for --file $file"
+  case "$said:$blocking" in
+    fail:0) die "the verifier says FAIL but its \`Blocking:\` line lists no must-fix: a FAIL rests on a must-fix that names its harm; rerun the verifier." ;;
+    pass:0 | fail:*) ;;
+    *) die "the verifier says PASS but its \`Blocking:\` line lists $blocking must-fix finding(s); rerun the verifier." ;;
+  esac
 else
   [ -z "$file" ] || [ -r "$file" ] || die "cannot read --file $file"
   [ -z "$reviewed" ] || [[ "$reviewed" =~ ^[0-9a-f]{40}$ ]] || die "--reviewed is a full sha"
