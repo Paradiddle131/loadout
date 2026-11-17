@@ -36,7 +36,7 @@ FAIL_OUT = (f"VERDICT: FAIL {H1}\nReviewed: {H1}\nSteering from the brief: none\
             "- claim: the total drops rows\n- harm: an operator trusts a short total\n"
             "- evidence: run ->\n```\n### NOT-1\n## Nits\n```\n"
             "## Nits\n### CLM-3\n- rank: nit\n- lens: claims\n- claim: a test name says more\n")
-PASS_OUT = f"VERDICT: PASS {H2}\nReviewed: {H2}\nSteering from the brief: keep it short\n## Must-fix\nnone\n"
+PASS_OUT = f"VERDICT: PASS {H2}\nReviewed: {H2}\nBlocking: none\nSteering from the brief: keep it short\n## Must-fix\nnone\n"
 
 
 @pytest.fixture
@@ -89,6 +89,7 @@ def test_harvest_reads_trusted_records_into_rows(github: dict, tmp_path: Path) -
     assert [(r["comment"], r["state"], r["must_fix"], r["nits"], r["steered"]) for r in rounds] == [
         (2, "failure", 1, 1, False), (3, "success", 0, 0, True)]  # comment 4 is not a trusted author
     assert rounds[0]["reviewers"] == "correctness-reviewer, claims-auditor"
+    assert [r["blocking_line"] for r in rounds] == [None, 0]  # a record from before the line, then one with it
     f = rows(d, "findings")
     assert [(x["ids"], x["must_fix"], x["harm"], x["lens"]) for x in f] == [
         (["COR-1", "CLM-2"], True, "an operator trusts a short total", "correctness, claims"),

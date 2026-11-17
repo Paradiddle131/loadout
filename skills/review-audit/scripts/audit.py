@@ -34,8 +34,10 @@ import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "review" / "scripts"))
-import findings as verifier_output  # noqa: E402  (the review skill's parser of the verifier's output)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(1, str(Path(__file__).resolve().parents[2] / "review" / "scripts"))
+import blocking  # noqa: E402  (the review skill's reader of the verifier's `Blocking:` line)
+import findings as verifier_output  # noqa: E402  (a lenient reader of the verifier's prose, for counting only)
 
 TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
 MARKER = re.compile(r"<!-- loadout:(gates|review|audit)((?: [a-z_]+=[^\s=]+)+) -->")
@@ -128,9 +130,14 @@ def harvest(a: argparse.Namespace) -> int:
                     reviewers = next((ln.split(":", 1)[1].strip() for ln in lines
                                       if ln.startswith("- Reviewers:")), "")
                     fs = parsed["findings"]
+                    try:
+                        harms = len(blocking.read(raw_output(c["body"])))
+                    except ValueError:
+                        harms = None  # a record made before the `Blocking:` line, or a malformed one
                     rows["rounds"].append({
                         **base, "sha": f.get("sha"), "reviewed": f.get("reviewed"), "state": f.get("state"),
                         "tier": f.get("tier"), "reviewers": reviewers, "verdict": parsed["verdict"],
+                        "blocking_line": harms,
                         "steered": any(s.strip().lower() not in ("", "none") for s in parsed["steering"]),
                         "must_fix": sum(b["must_fix"] for b in fs),
                         "nits": sum((b["rank"] or "").startswith("nit") for b in fs),
