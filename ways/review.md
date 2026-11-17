@@ -12,7 +12,7 @@ Every change takes it, an urgent one included; the [`review` skill](../skills/re
 2. **Work in a worktree:** one item, one PR off the default branch; long work lands in slices, each its own PR, with no long-lived collecting branch.
 3. **Gate stamp** (step 2): a record on the PR for a clean pushed head, because a typed test count is not evidence.
 4. **Find** (steps 1 and 3): the changed paths set the tier, never the author or the size of the change; fresh reviewers, one lens each, get the diff and the quoted issue, never the author's summary, and verify by running things.
-5. **Verify and rank** (step 4): a reviewer asked to find problems always finds something, so only a reproduced `must-fix` that names its harm is acted on.
+5. **Verify and rank** (step 4): a reviewer asked to find problems always finds something, so only a reproduced `must-fix` the verifier lists with the harm it names is acted on.
 6. **Fix, capped** (step 5): one cap counts fix rounds, red stamps and integrate rounds alike, so no item loops forever, and a cap ends an item, never the session.
 7. **Integrate and re-gate** (step 6): the review reads the head with the default branch merged in, so the verdict covers what will land.
 8. **Verdict on record** (step 7): the verifier's raw output on the PR, naming the reviewed commit and the head, as a second record; the author never reviews its own change, and records only a `routine` verdict, which the script's tier decides.

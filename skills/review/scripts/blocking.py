@@ -2,14 +2,17 @@
 """Reads the verifier's `Blocking:` line: the must-fix findings of its output and the harm each names.
 
   blocking.py <file>   prints how many must-fix findings the line lists; exits 2 with the reason when the line
-                       is missing or malformed, or a finding names no harm
+                       is missing or malformed, names an id the output holds nowhere else, or a listed finding
+                       names no harm
 
 The line is the one right after the output's first `Reviewed:` line (agents/finding-verifier.md § Output):
   Blocking: none
   Blocking: [{"ids": "COR-1, CLM-2", "harm": "an operator trusts a total that drops rows"}, ...]
-Only that line is read, so quoted text anywhere else in the output cannot change it. A harm is a sentence: at least
-three words, not a placeholder such as `none` or the template's `<...>` slot. The check guards against a
-forgotten harm, not against a verifier that writes a false one.
+Lines are split on newlines only, as `verdict.sh`'s grep splits them, so both read the same `Reviewed:` line.
+A harm has at least two words, is not the template's bare `<...>` slot, and is not made only of filler words
+such as `none`, `no harm` or `TBD`.
+The check refuses a listed must-fix with no harm; it does not compare the line with the finding blocks below it,
+and it cannot tell a real harm from a false one.
 """
 
 from __future__ import annotations
@@ -20,15 +23,27 @@ import sys
 
 REVIEWED = re.compile(r"^\s*Reviewed:")
 LINE = re.compile(r"^\s*Blocking:\s*(.*?)\s*$")
-PLACEHOLDER = re.compile(r"(none|n/?a|tbd|todo|unknown|nothing|no harm|-+|—)", re.I)
+FILLER = {"none", "n/a", "na", "tbd", "todo", "unknown", "nothing", "no", "harm", "at", "all", "yet", "identified",
+          "stated", "concrete", "named", "-", "—", "see", "above", "below"}
+
+
+def no_harm(harm: object) -> bool:
+    if not isinstance(harm, str):
+        return True
+    text = harm.strip().strip("`*_ ").strip()
+    if text.startswith("<") and text.endswith(">"):
+        return True
+    words = [w.strip("`*_.,;:()[]").lower() for w in text.split()]
+    words = [w for w in words if w]
+    return len(words) < 2 or all(w in FILLER for w in words)
 
 
 def read(text: str) -> list[dict]:
-    lines = text.splitlines()
+    lines = text.split("\n")
     at = next((i for i, ln in enumerate(lines) if REVIEWED.match(ln)), None)
     if at is None or at + 1 >= len(lines) or not (m := LINE.match(lines[at + 1])):
         raise ValueError("the line after `Reviewed:` is not a `Blocking:` line")
-    value = m.group(1)
+    value = m.group(1).strip("`").strip()
     if value.lower() == "none":
         return []
     try:
@@ -37,16 +52,17 @@ def read(text: str) -> list[dict]:
         raise ValueError(f"the `Blocking:` line is neither `none` nor a JSON list ({e.msg})") from None
     if not isinstance(items, list) or not items:
         raise ValueError("the `Blocking:` line is neither `none` nor a non-empty JSON list")
+    rest = "\n".join(lines[at + 2:])
     for i, b in enumerate(items):
         ids = b.get("ids") if isinstance(b, dict) else None
-        if not isinstance(ids, str) or not ids.strip():
+        names = [x.strip() for x in ids.split(",") if x.strip()] if isinstance(ids, str) else []
+        if not names:
             raise ValueError(f"blocking finding {i + 1} has no `ids`")
-        harm = b.get("harm")
-        words = harm.strip(" `*_.()").split() if isinstance(harm, str) else []
-        if (len(words) < 3 or harm.strip().startswith("<")
-                or PLACEHOLDER.fullmatch(harm.strip(" `*_.()"))):
-            raise ValueError(f"must-fix {ids.strip()} names no harm: its `harm` says who acts wrongly or what "
-                             "breaks once the change lands, in a sentence")
+        if missing := [x for x in names if x not in rest]:
+            raise ValueError(f"the `Blocking:` line names {', '.join(missing)}, which the output holds nowhere else")
+        if no_harm(b.get("harm")):
+            raise ValueError(f"must-fix {', '.join(names)} names no harm: its `harm` says who acts wrongly or what "
+                             "breaks once the change lands")
     return items
 
 

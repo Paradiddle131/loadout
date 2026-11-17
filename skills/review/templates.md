@@ -9,7 +9,7 @@ Fill every `<slot>`; add nothing about how the work went.
 Repo: <absolute path of the clone>
 Range: `<merge-base sha>..<head sha>` (on a fix round, `<reviewed sha>..<head sha>`)
 Change base: <the change's merge-base with the default branch, the base `pre-existing` is measured against>
-Settled in earlier rounds: <each finding an earlier `🤖 Review` record ranked or dropped: its ids, its rank as that record posted it (a fixed must-fix with its fixing commit), the record's link; none on a first review>
+Settled in earlier rounds: <each finding an earlier `🤖 Review` record ranked or dropped: its ids, its rank as that record posted it, a must-fix being one its `Blocking:` line lists (a fixed must-fix with its fixing commit), the record's link; none on a first review>
 A finding that repeats a settled one is a re-raise: its claim names the settled id and what changed since.
 Issue, quoted: <the issue body>
 Done when: <its done-when, quoted>

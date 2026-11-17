@@ -20,7 +20,7 @@ The lenses' reports (each a `Head:` line, finding blocks and `Not checked:`), a 
   - `must-fix` when you can name that harm concretely: a wrong result, a leak, a broken guardrail, an excess permission, a control that passes on nothing, or a statement someone relies on and acts wrongly by.
     Its `harm:` line, and its entry on the `Blocking:` line, say who or what, what goes wrong, and what it costs.
   - A control, check, guardrail or permission that does not stop what it exists to stop is a harm at `<head>`, before anything slips past it: name who loses the protection and what can now land unseen.
-  - `nit` when the defect is real but you cannot name such a harm, or the harm rests on a guess about how a reader would take a statement; the claim says the guess.
+  - `nit` when the defect is real but you cannot name such a harm; for a statement, when you cannot name who relies on it and what they would then do wrong, and the claim says so.
     At most five nits, the most useful.
   - That a statement is inaccurate is a defect, not yet a harm: weigh what a reader would do differently.
   - A lens's own rank, its confidence, or how many lenses raised a finding is no evidence of harm.

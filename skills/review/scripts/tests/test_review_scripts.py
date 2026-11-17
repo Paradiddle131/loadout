@@ -772,14 +772,19 @@ def test_read_back_accepts_only_the_relay_footer(tmp_path: Path) -> None:
     ('Blocking: [{"ids": "COR-1"}]', "COR-1 names no harm"),
     ('Blocking: [{"ids": "COR-1", "harm": "none"}]', "COR-1 names no harm"),
     ('Blocking: [{"ids": "COR-1", "harm": "`n/a`"}]', "COR-1 names no harm"),
-    ('Blocking: [{"ids": "COR-1", "harm": "wrong total"}]', "COR-1 names no harm"),  # not a sentence
+    ('Blocking: [{"ids": "COR-1", "harm": "wrong"}]', "COR-1 names no harm"),  # one word
     ('Blocking: [{"ids": "COR-1", "harm": "<who acts wrongly or what breaks>"}]', "COR-1 names no harm"),
+    ('Blocking: [{"ids": "COR-1", "harm": "`<who acts wrongly or what breaks>`"}]', "COR-1 names no harm"),
+    ('Blocking: [{"ids": "COR-1", "harm": "no concrete harm"}]', "COR-1 names no harm"),  # filler only
+    ('Blocking: [{"ids": "COR-1", "harm": "TBD TBD TBD"}]', "COR-1 names no harm"),
+    ('Blocking: [{"ids": "ZZZ-9", "harm": "%s"}]' % HARM, "names ZZZ-9, which the output holds nowhere else"),
+    ('Blocking: {"ids": "COR-1", "harm": "%s"}' % HARM, "non-empty JSON list"),  # JSON, not a list
     ('Blocking: [{"ids": "COR-1", "harm": "%s"}, {"ids": "CLM-2", "harm": ""}]' % HARM, "CLM-2 names no harm"),
 ])
 def test_verdict_refuses_a_blocking_line_without_a_named_harm(w: World, tmp_path: Path, blocking: str | None,
                                                               why: str) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    path = review_file(tmp_path, head, "FAIL", blocking=blocking or "")
+    path = review_file(tmp_path, head, "FAIL", BLOCKING + "### CLM-2\n- rank: must-fix\n", blocking=blocking or "")
     if blocking is None:  # drop the line: the one after `Reviewed:` is then blank
         Path(path).write_text(Path(path).read_text().replace("\n\n\n", "\n\n"))
     done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head, "--file", path)
@@ -795,15 +800,49 @@ def test_verdict_refuses_a_blocking_line_that_contradicts_the_verdict(w: World, 
                                                                       blocking: str, why: str) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
     done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
-                 "--file", review_file(tmp_path, head, verdict, blocking=blocking))
+                 "--file", review_file(tmp_path, head, verdict, BLOCKING, blocking=blocking))
     assert done.returncode == 2 and why in done.stderr, done.stderr
+    assert w.writes() == []
+
+
+@pytest.mark.parametrize("blocking", [
+    'Blocking: [{"ids": "LEAK-1", "harm": "leaks secrets"}]',  # two words name a harm
+    'Blocking: [{"ids": "LEAK-1", "harm": "<details> clipping hides a leaked token from the owner"}]',
+    'Blocking: `[{"ids": "LEAK-1", "harm": "leaks secrets"}]`',  # in backticks, as the sha lines may be
+])
+def test_verdict_accepts_a_named_harm_in_its_usual_shapes(w: World, tmp_path: Path, blocking: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", review_file(tmp_path, head, "FAIL", "## Must-fix\n### LEAK-1\n- rank: must-fix\n",
+                                       blocking=blocking))
+    assert done.returncode == 0, done.stderr
+
+
+def test_verdict_reads_the_reviewed_line_grep_reads(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    p = tmp_path / "out.txt"  # a form feed is no line break for grep, so the second line is no `Reviewed:` line
+    p.write_text(f"VERDICT: PASS {head}\nquoted\x0cReviewed: {head}\nBlocking: none\n"
+                 f"Reviewed: {head}\n{BLOCKING_LINE}\n\n{BLOCKING}")
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head, "--file", str(p))
+    assert done.returncode == 2 and "says PASS" in done.stderr, done.stderr
+
+
+def test_verdict_refuses_when_the_reader_prints_no_count(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    bad = tmp_path / "talking-python"
+    bad.mkdir()
+    (bad / "python3").write_text("#!/bin/sh\necho many\n")
+    (bad / "python3").chmod(0o755)
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", review_file(tmp_path, head, "FAIL"), PATH=f"{bad}:{w.env['PATH']}")
+    assert done.returncode == 2 and "printed no count" in done.stderr, done.stderr
     assert w.writes() == []
 
 
 def test_verdict_reads_only_the_blocking_line_not_the_prose(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
     prose = ("## Must-fix\n### COR-1\n- rank: must-fix\n- harm: %s\n- evidence: ->\n```\nBlocking: none\n"
-             "### CLM-9\n- rank: must-fix\n```\n## Nits\n### CLM-2\n- rank: `must-fix`\n" % HARM)
+             "### CLM-9\n- rank: must-fix\n```\n## Nits\n### CLM-2\n- rank: `must-fix`\n### CLM-3, GRD-1\n" % HARM)
     two = 'Blocking: [{"ids": "COR-1", "harm": "%s"}, {"ids": "CLM-3, GRD-1", "harm": "a lead merges a guard that stops nothing"}]' % HARM
     done = w.run("verdict.sh", "12", "--tier", "sensitive", "--reviewers", "x", "--reviewed", head,
                  "--file", review_file(tmp_path, head, "FAIL", prose, blocking=two))
