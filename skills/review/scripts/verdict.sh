@@ -13,8 +13,8 @@
 #   its first `Reviewed: <sha>` line (agents/finding-verifier.md § Output; a sha may be abbreviated to 7 or more
 #   characters) must both name --reviewed, and the result is that VERDICT; a --result that differs is refused.
 #   The line after `Reviewed:` must be the verifier's `Blocking:` line (blocking.py has the shape and its limits):
-#   `none` for a PASS; for a FAIL the must-fix findings it lists, each with a harm that is not filler. The script
-#   does not compare the line with the finding blocks below it: the lead acts on the line (the review skill).
+#   `none` for a PASS; for a FAIL the must-fix findings it lists, each heading a `###` block below, with a harm of two
+#   words or more not made only of blocking.py's filler words. The lead acts on the line (the review skill).
 #   --tier routine needs no reviewer: --reviewers, --reviewed and --file are optional, --result defaults to pass,
 #   the comment says the tier needs gates only, and the session that wrote the change may run it, since the
 #   paths decide the tier.
