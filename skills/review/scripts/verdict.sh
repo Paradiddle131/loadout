@@ -12,8 +12,9 @@
 #   --file (standard and sensitive) is finding-verifier's output: its first `VERDICT: PASS|FAIL <sha>` line and
 #   its first `Reviewed: <sha>` line (agents/finding-verifier.md § Output; a sha may be abbreviated to 7 or more
 #   characters) must both name --reviewed, and the result is that VERDICT; a --result that differs is refused.
-#   Each finding block under its `## Must-fix` heading must carry a non-empty `- harm:` line: a finding blocks
-#   only by the harm it names (agents/finding-verifier.md § Check).
+#   Each must-fix finding (a `### <id>` block whose `rank:` says must-fix, or with no rank line under the
+#   `## Must-fix` heading) must carry a `- harm:` line with a real value: a finding blocks only by the harm it
+#   names (agents/finding-verifier.md § Check; findings.py reads the blocks). A FAIL needs at least one such block.
 #   --tier routine needs no reviewer: --reviewers, --reviewed and --file are optional, --result defaults to pass,
 #   the comment says the tier needs gates only, and the session that wrote the change may run it, since the
 #   paths decide the tier.
@@ -75,28 +76,15 @@ if [ "$tier" != routine ]; then
   [ -z "$result" ] || [ "$result" = "$said" ] ||
     die "--result $result contradicts the verifier's VERDICT line, which says $said: the record carries the verifier's verdict."
   result=$said
-  # A must-fix finding blocks only by the harm it names; list each one without a `- harm:` line.
-  no_harm=$(python3 - "$file" <<'PY'
-import re, sys
-text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
-section, block, missing = False, None, []
-def close():
-    if block is not None and not block[1]:
-        missing.append(block[0])
-for line in text.splitlines():
-    if re.match(r"\s*##\s+\S", line) and not re.match(r"\s*###", line):
-        close(); block = None
-        section = re.match(r"\s*##\s+must-fix\b", line, re.I) is not None
-    elif section and re.match(r"\s*###\s+\S", line):
-        close(); block = [line.strip().lstrip("#").strip(), False]
-    elif block is not None and re.match(r"\s*-\s*harm:\s*\S", line, re.I):
-        block[1] = True
-close()
-print(", ".join(missing))
-PY
-) || die "cannot read the must-fix findings in --file $file"
+  # A must-fix finding blocks only by the harm it names (findings.py reads the blocks outside code fences).
+  no_harm=$(python3 "$here/findings.py" missing-harm "$file") || die "cannot read the must-fix findings in --file $file"
   [ -z "$no_harm" ] ||
     die "the verifier's must-fix finding(s) $no_harm name no harm: each needs a \`- harm:\` line saying who acts wrongly or what breaks once the change lands, or it is a nit (agents/finding-verifier.md § Check); rerun the verifier."
+  if [ "$said" = fail ]; then
+    blocking=$(python3 "$here/findings.py" must-fix "$file") || die "cannot read the must-fix findings in --file $file"
+    [ "$blocking" -gt 0 ] ||
+      die "the verifier says FAIL but its output holds no must-fix finding in its \`### <id>\` block shape: a FAIL rests on a must-fix that names its harm (agents/finding-verifier.md § Output); rerun the verifier."
+  fi
 else
   [ -z "$file" ] || [ -r "$file" ] || die "cannot read --file $file"
   [ -z "$reviewed" ] || [[ "$reviewed" =~ ^[0-9a-f]{40}$ ]] || die "--reviewed is a full sha"

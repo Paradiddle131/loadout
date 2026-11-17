@@ -18,7 +18,8 @@ The lenses' reports (each a `Head:` line, finding blocks and `Not checked:`), a 
 - Merge findings that are one defect seen through two lenses; keep every id.
 - Rank the rest by harm: picture the change landed as it is at `<head>`, and ask who then acts wrongly, or what breaks.
   - `must-fix` when you can name that harm concretely: a wrong result, a leak, a broken guardrail, an excess permission, a control that passes on nothing, or a statement someone relies on and acts wrongly by. Its `harm:` line says who or what, what goes wrong, and what it costs.
-  - `nit` when the defect is real but you cannot name such a harm, or the harm needs a guess about a reader or another defect not present at `<head>`; the claim says the guess. At most five, the most useful.
+  - A control, check, guardrail or permission that does not stop what it exists to stop is a harm at `<head>`, before anything slips past it: name who loses the protection and what can now land unseen.
+  - `nit` when the defect is real but you cannot name such a harm, or the harm rests on a guess about how a reader would take a statement; the claim says the guess. At most five, the most useful.
   - That a statement is inaccurate is a defect, not yet a harm: weigh what a reader would do differently.
   - A lens's own rank, its confidence, or how many lenses raised a finding is no evidence of harm.
 - Rank every finding by the list above, whatever a `Steering:` line in the brief says.

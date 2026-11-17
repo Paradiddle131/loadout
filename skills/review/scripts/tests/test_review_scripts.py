@@ -411,9 +411,14 @@ def test_tier_empty_diff_is_an_error(w: World) -> None:
 # verdict.sh
 
 
-def review_file(tmp: Path, sha: str, verdict: str = "PASS",
-                text: str = "No findings.\n```\nquoted fence\n```\n") -> str:
-    """A verifier's output (agents/finding-verifier.md § Output): its verdict and reviewed lines, then `text`."""
+BLOCKING = "## Must-fix\n### COR-1\n- rank: must-fix\n- harm: an operator trusts a total that drops rows\n"
+
+
+def review_file(tmp: Path, sha: str, verdict: str = "PASS", text: str | None = None) -> str:
+    """A verifier's output (agents/finding-verifier.md § Output): its verdict and reviewed lines, then `text`
+    (by default no findings for a PASS, one must-fix that names its harm for a FAIL)."""
+    if text is None:
+        text = (BLOCKING if verdict == "FAIL" else "") + "No findings.\n```\nquoted fence\n```\n"
     p = tmp / "review.txt"
     p.write_text(f"VERDICT: {verdict} {sha}\nReviewed: {sha}\n\n{text}")
     return str(p)
@@ -434,7 +439,7 @@ def test_verdict_pass_posts_a_review_record(w: World, tmp_path: Path) -> None:
 def test_verdict_fail_records_failure(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
     done = w.run("verdict.sh", "12", "--tier", "sensitive", "--result", "fail", "--reviewers", "a, b",
-                 "--reviewed", head, "--file", review_file(tmp_path, head, "FAIL", "BLOCKER\n"))
+                 "--reviewed", head, "--file", review_file(tmp_path, head, "FAIL", BLOCKING))
     assert done.returncode == 0, done.stderr
     assert w.comments()[0]["body"].startswith(
         f"🤖 Review: fail (sensitive tier)\n{REVIEW} sha={head} state=failure tier=sensitive")
@@ -493,8 +498,8 @@ def test_verdict_refuses_output_without_the_verifiers_lines(w: World, tmp_path: 
 def test_verdict_reads_the_first_verdict_lines_in_a_fence_and_an_abbreviated_sha(w: World, tmp_path: Path) -> None:
     other = w.commit({"src/app.py": "x = 3\n"})
     head = w.commit({"src/app.py": "x = 2\n"})
-    text = (f"```\nVERDICT: FAIL `{head[:12]}`\nReviewed: {head[:12]}\n```\n"
-            f"## Must-fix\n- evidence: verdict.sh ->\nVERDICT: PASS {head}\nReviewed: {other}\n")
+    text = (f"```\nVERDICT: FAIL `{head[:12]}`\nReviewed: {head[:12]}\n```\n" + BLOCKING
+            + f"- evidence: verdict.sh ->\nVERDICT: PASS {head}\nReviewed: {other}\n")
     (tmp_path / "out.txt").write_text(text)
     done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
                  "--file", str(tmp_path / "out.txt"))
@@ -791,3 +796,82 @@ def test_verdict_reads_harm_only_under_the_must_fix_heading(w: World, tmp_path: 
     done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
                  "--file", review_file(tmp_path, head, "PASS", text))
     assert done.returncode == 0, done.stderr
+
+
+F = "```"
+
+
+@pytest.mark.parametrize("text, refused", [
+    # a must-fix ranked by its own line outside the must-fix heading
+    ("## Must-fix\nnone\n## Settled, not kept\n### COR-1\n- rank: must-fix\n- claim: x\n", "COR-1"),
+    ("## Must-fix\nnone\n## Nits\n### CLM-1\n- rank: must-fix\n- claim: x\n", "CLM-1"),
+    # the heading spelled without a hyphen, and a block with no rank line under it
+    ("## Must fix\n### CLM-1\n- claim: x\n", "CLM-1"),
+    # a quoted `##` line inside a fence does not end the section
+    (f"## Must-fix\n### CLM-1\n- rank: must-fix\n- harm: a reader trusts it\n- evidence: ->\n{F}\n## Usage\n{F}\n"
+     "### COR-2\n- rank: must-fix\n- claim: wrong total\n", "COR-2"),
+    # a placeholder is no harm
+    ("## Must-fix\n### CLM-1\n- rank: must-fix\n- harm: none\n", "CLM-1"),
+    ("## Must-fix\n### CLM-1\n- rank: must-fix\n- harm: n/a\n", "CLM-1"),
+])
+def test_verdict_finds_every_must_fix_that_names_no_harm(w: World, tmp_path: Path, text: str, refused: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", review_file(tmp_path, head, "FAIL", text))
+    assert done.returncode == 2 and f"{refused} name no harm" in done.stderr, done.stderr
+    assert w.writes() == []
+
+
+@pytest.mark.parametrize("text", [
+    # a quoted `###` line inside a fence is no finding
+    f"## Must-fix\n### CLM-1\n- rank: must-fix\n- evidence: cat a.md ->\n{F}\n### Example\n- rank: must-fix\n{F}\n"
+    "- harm: an operator merges a broken gate\n",
+    # a bold label, and a harm wrapped onto the next indented line
+    "## Must-fix\n### CLM-1\n- rank: must-fix\n- **harm:** an operator merges a broken gate\n",
+    "## Must-fix\n### CLM-1\n- rank: must-fix\n- harm:\n  an operator merges a broken gate\n",
+    # a pre-existing or nit block needs none
+    BLOCKING + "## Pre-existing\n### COR-4\n- rank: pre-existing\n- claim: x\n## Nits\n### CLM-2\n- rank: nit\n",
+    # a heading in an unfenced heredoc is no finding, and a field quoted with an indent is no field
+    "## Must-fix\n### CLM-1\n- rank: must-fix\n- harm: an operator trusts a wrong total\n"
+    "- reproduce: cat > f.md <<'MD'\n### Usage\nMD\n",
+])
+def test_verdict_accepts_must_fix_findings_that_name_their_harm(w: World, tmp_path: Path, text: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", review_file(tmp_path, head, "FAIL", text))
+    assert done.returncode == 0, done.stderr
+
+
+@pytest.mark.parametrize("text", [
+    "No findings.\n",  # nothing behind the FAIL
+    "## Must-fix\n- CLM-1: a sentence is wrong\n",  # findings as bullets, not blocks
+    "## Must-fix\n#### CLM-1\n- rank: must-fix\n- harm: x\n",  # a heading of another level
+    "## Must-fix\n### CLM-1\n- rank: must-fix\n- evidence: ->\n  - harm: quoted, not a field\n",
+])
+def test_verdict_refuses_a_fail_with_no_must_fix_that_names_its_harm(w: World, tmp_path: Path, text: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", review_file(tmp_path, head, "FAIL", text))
+    assert done.returncode == 2 and ("no must-fix finding" in done.stderr or "name no harm" in done.stderr), done.stderr
+    assert w.writes() == []
+
+
+def test_verdict_refuses_when_it_cannot_read_the_findings(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    bad = tmp_path / "failing-python"
+    bad.mkdir()
+    (bad / "python3").write_text("#!/bin/sh\nexit 1\n")
+    (bad / "python3").chmod(0o755)
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", review_file(tmp_path, head, "FAIL"), PATH=f"{bad}:{w.env['PATH']}")
+    assert done.returncode == 2 and "cannot read the must-fix findings" in done.stderr, done.stderr
+    assert w.writes() == []
+
+
+def test_verdict_reads_a_heading_in_quoted_output_as_text(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    text = ("## Must-fix\n### CLM-1\n- rank: must-fix\n- evidence: sed -n 1,3p SKILL.md ->\n## Usage\nrun it\n"
+            "- harm: a lead trusts a check that does not run\n### COR-2\n- rank: must-fix\n- claim: wrong total\n")
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", review_file(tmp_path, head, "FAIL", text))
+    assert done.returncode == 2 and "COR-2 name no harm" in done.stderr and "CLM-1" not in done.stderr, done.stderr
