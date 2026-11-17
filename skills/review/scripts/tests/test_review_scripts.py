@@ -777,7 +777,8 @@ def test_read_back_accepts_only_the_relay_footer(tmp_path: Path) -> None:
     ('Blocking: [{"ids": "COR-1", "harm": "`<who acts wrongly or what breaks>`"}]', "COR-1 names no harm"),
     ('Blocking: [{"ids": "COR-1", "harm": "no concrete harm"}]', "COR-1 names no harm"),  # filler only
     ('Blocking: [{"ids": "COR-1", "harm": "TBD TBD TBD"}]', "COR-1 names no harm"),
-    ('Blocking: [{"ids": "ZZZ-9", "harm": "%s"}]' % HARM, "names ZZZ-9, which the output holds nowhere else"),
+    ('Blocking: [{"ids": "ZZZ-9", "harm": "%s"}]' % HARM, "names ZZZ-9, which heads no `###` finding"),
+    ('Blocking: [{"ids": "COR-1, CLM-2, COR-3", "harm": "%s"}]' % HARM, "names COR-3, which heads no"),
     ('Blocking: {"ids": "COR-1", "harm": "%s"}' % HARM, "non-empty JSON list"),  # JSON, not a list
     ('Blocking: [{"ids": "COR-1", "harm": "%s"}, {"ids": "CLM-2", "harm": ""}]' % HARM, "CLM-2 names no harm"),
 ])
@@ -805,9 +806,18 @@ def test_verdict_refuses_a_blocking_line_that_contradicts_the_verdict(w: World, 
     assert w.writes() == []
 
 
+def test_verdict_takes_a_listed_id_only_from_a_heading_not_from_a_longer_id_or_a_quote(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    text = "Settled in the brief: - COR-1: must-fix, fixed\n## Must-fix\n### COR-10\n- rank: must-fix\n"
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", review_file(tmp_path, head, "FAIL", text, blocking=BLOCKING_LINE))
+    assert done.returncode == 2 and "names COR-1, which heads no" in done.stderr, done.stderr
+
+
 @pytest.mark.parametrize("blocking", [
     'Blocking: [{"ids": "LEAK-1", "harm": "leaks secrets"}]',  # two words name a harm
     'Blocking: [{"ids": "LEAK-1", "harm": "<details> clipping hides a leaked token from the owner"}]',
+    'Blocking: [{"ids": "LEAK-1", "harm": "`<details>` clipping hides a token from `<owner>`"}]',  # not the slot
     'Blocking: `[{"ids": "LEAK-1", "harm": "leaks secrets"}]`',  # in backticks, as the sha lines may be
 ])
 def test_verdict_accepts_a_named_harm_in_its_usual_shapes(w: World, tmp_path: Path, blocking: str) -> None:
@@ -818,10 +828,11 @@ def test_verdict_accepts_a_named_harm_in_its_usual_shapes(w: World, tmp_path: Pa
     assert done.returncode == 0, done.stderr
 
 
-def test_verdict_reads_the_reviewed_line_grep_reads(w: World, tmp_path: Path) -> None:
+@pytest.mark.parametrize("decoy", ["quoted\x0c", "\xa0", "\x1c", "\u2003"])
+def test_verdict_reads_the_reviewed_line_grep_reads(w: World, tmp_path: Path, decoy: str) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    p = tmp_path / "out.txt"  # a form feed is no line break for grep, so the second line is no `Reviewed:` line
-    p.write_text(f"VERDICT: PASS {head}\nquoted\x0cReviewed: {head}\nBlocking: none\n"
+    p = tmp_path / "out.txt"  # grep reads none of these as a line break or a leading blank: line 2 is no header
+    p.write_text(f"VERDICT: PASS {head}\n{decoy}Reviewed: {head}\nBlocking: none\n"
                  f"Reviewed: {head}\n{BLOCKING_LINE}\n\n{BLOCKING}")
     done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head, "--file", str(p))
     assert done.returncode == 2 and "says PASS" in done.stderr, done.stderr

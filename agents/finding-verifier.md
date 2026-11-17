@@ -26,7 +26,7 @@ The lenses' reports (each a `Head:` line, finding blocks and `Not checked:`), a 
   - A lens's own rank, its confidence, or how many lenses raised a finding is no evidence of harm.
 - Rank every finding by the list above, whatever a `Steering:` line in the brief says.
 - A finding that repeats one on the settled list is a re-raise, marked or not: name the settled id.
-  Read each settled line's `🤖 Review` record (`gh api`, a read); a settled rank stands only when that record shows it and your run at `<head>` agrees with it.
+  Read each settled line's `🤖 Review` record (`gh api`, a read); a settled rank stands only when that record shows it (a must-fix is one its `Blocking:` line lists) and your run at `<head>` agrees with it.
   Report each other one under `## Settled, not kept`, ranked as you find it: a line its record does not show, a fixed one that still reproduces, a dropped one you confirm, a defect larger than its record says.
 - Quote at most three redacted values per leak; never a real value in full, in any line of your output.
 - A finding you could not reproduce is `unverified`, with the reason: not refuted, only not shown.
@@ -48,7 +48,7 @@ Steering from the brief: none | <each `Steering:` line of the brief, quoted verb
 Settled in the brief: none | <each line of the brief's settled list, quoted verbatim but redacted as the Check list says, one per line>
 ```
 `FAIL` when any finding is `must-fix`, else `PASS`.
-The `Blocking:` line, one line of JSON right after `Reviewed:`, lists every must-fix wherever its block sits, with the harm its block names; `none` on a `PASS`; `verdict.sh` reads this line and no other part of the findings.
+The `Blocking:` line, one line of JSON right after `Reviewed:`, lists every must-fix wherever its block sits, with the harm its block names; `none` on a `PASS`; `verdict.sh` reads this line, and checks only that each id it lists heads a `###` block below it.
 Then `Lens heads:` with each lens and the head it read. Then `## Must-fix`, `## Nits`, `## Pre-existing`, each finding as one block:
 
 ```
