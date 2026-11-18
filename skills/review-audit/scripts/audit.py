@@ -4,11 +4,12 @@ back on the PRs, and sums both up. GitHub holds every record; the JSONL files ar
 
   audit.py harvest --repo <owner/name> [--repo ...] --since <ISO time> [--until <ISO time>] --out <dir>
       reads, never writes: PRs updated since --since, their `🤖 Gates` and `🤖 Review` records posted from
-      --since up to --until, and their `🤖 Audit` records posted up to --until, counting only records the merge guard would trust (author, unedited, exact title and
-      marker), into <dir>/prs.jsonl, gates.jsonl, rounds.jsonl, findings.jsonl and audits.jsonl.
+      --since up to --until, and every `🤖 Audit` record they hold, whenever posted; only records the merge
+      guard would trust count (author, unedited, exact title and marker, the two agreeing); writes
+      <dir>/prs.jsonl, gates.jsonl, rounds.jsonl, findings.jsonl and audits.jsonl.
   audit.py sample --dir <dir> --n <count> [--seed <n>]
-      picks findings to audit, must-fix first and then the rest, spread over each finding's first lens, leaving
-      out pre-existing ones and those an earlier audit judged;
+      picks findings to audit in turns: each turn takes one from every group of must-fix or other findings by
+      first lens, must-fix groups first; it leaves out pre-existing ones and those an earlier audit judged;
       writes <dir>/sample.jsonl and prints one line per pick.
   audit.py record --repo <owner/name> --pr <n> --session <id> --file <judgments.json> [--backfill] [--dry-run]
       posts one `🤖 Audit` record on the PR: a table for people and the judgments as a JSON block.
@@ -97,16 +98,21 @@ def trusted_record(c: dict) -> tuple[str, dict] | None:
         return None
     lines = (c.get("body") or "").split("\n")
     m = MARKER.fullmatch(lines[1].strip()) if len(lines) > 1 else None
-    if not m or not TITLE[m.group(1)].fullmatch(lines[0].strip()):
+    title = TITLE[m.group(1)].fullmatch(lines[0].strip()) if m else None
+    if not title:
         return None
     kind, f = m.group(1), fields(m.group(2))
-    if not set(f) <= FIELDS[kind] or (kind != "audit" and not {"sha", "state"} <= set(f)):
+    if len(f) != len(m.group(2).split()) or not set(f) <= FIELDS[kind]:
+        return None  # a repeated or unknown key
+    if kind != "audit" and not {"sha", "state"} <= set(f):
         return None
-    if kind != "audit" and (not SHA.fullmatch(f["sha"]) or f["state"] not in ("success", "failure")
-                            or ("reviewed" in f and not SHA.fullmatch(f["reviewed"]))):
-        return None
-    if kind == "review" and f.get("tier") not in ("routine", "standard", "sensitive"):
-        return None
+    if kind == "audit":
+        return (kind, f) if re.search(rf"\(session {re.escape(f.get('session', ''))}\)$", lines[0].strip()) else None
+    said = {"pass": "success", "fail": "failure"}.get(title.group(1), title.group(1))
+    if f["state"] != said or (kind == "review" and title.group(2) != f.get("tier")):
+        return None  # the title and the marker disagree
+    if kind != "audit" and (not SHA.fullmatch(f["sha"]) or ("reviewed" in f and not SHA.fullmatch(f["reviewed"]))):
+        return None  # state and tier need no check of their own: they must equal the title's, which TITLE limits
     return kind, f
 
 
@@ -137,15 +143,21 @@ def harvest(a: argparse.Namespace) -> int:
             if pr["updated_at"] < a.since:
                 break
             n = pr["number"]
-            rows["prs"].append({"repo": repo, "pr": n, "title": pr["title"], "state": pr["state"],
-                                "created_at": pr["created_at"], "merged_at": pr.get("merged_at"),
-                                "head": pr["head"]["sha"], "branch": pr["head"]["ref"]})
+            row = {"repo": repo, "pr": n, "title": pr["title"], "state": pr["state"],
+                   "created_at": pr["created_at"], "merged_at": pr.get("merged_at"),
+                   "head": pr["head"]["sha"], "branch": pr["head"]["ref"]}
+            rows["prs"].append(row)
+            newest = None  # the newest review-marked comment by a trusted author, as the merge guard reads it
             for c in pages(f"repos/{repo}/issues/{n}/comments"):
-                if a.until and c["created_at"] > a.until or not (rec := trusted_record(c)):
+                lines2 = (c.get("body") or "").split("\n")
+                if (c.get("author_association") in TRUSTED and len(lines2) > 1
+                        and lines2[1].lstrip().startswith("<!-- loadout" ":review")):
+                    newest = c
+                if not (rec := trusted_record(c)):
                     continue
                 kind, f = rec
-                if kind != "audit" and c["created_at"] < a.since:  # rounds and gates of the period only;
-                    continue  # audit records are read whenever posted, so any past session can be chosen
+                if kind != "audit" and not (a.since <= c["created_at"] <= (a.until or c["created_at"])):
+                    continue  # rounds and gates of the window only; audit records are read whenever posted
                 lines = c["body"].split("\n")
                 base = {"repo": repo, "pr": n, "comment": c["id"], "url": c.get("html_url"),
                         "created_at": c["created_at"]}
@@ -153,7 +165,8 @@ def harvest(a: argparse.Namespace) -> int:
                     rows["gates"].append({**base, "sha": f.get("sha"), "state": f.get("state")})
                 elif kind == "audit":
                     for j in audit_json(c["body"]):
-                        if isinstance(j, dict):  # the record's own repo, PR and session win over the block's keys
+                        if isinstance(j, dict) and type(j.get("round")) is int and isinstance(j.get("ids"), list):
+                            # the record's own repo, PR and session win over the block's keys
                             rows["audits"].append({**{k: j.get(k) for k in JUDGMENT_KEYS}, **base,
                                                    "session": f.get("session"), "backfill": f.get("backfill") == "1"})
                 else:
@@ -186,6 +199,11 @@ def harvest(a: argparse.Namespace) -> int:
                             "repo": repo, "pr": n, "round": c["id"], "ids": b["ids"], "section": b["section"],
                             "rank": b["kind_rank"], "must_fix": b["must_fix"], "harm": b["harm"],
                             **{k: b["fields"].get(k) for k in ("lens", "location", "claim")}})
+            # what the merge guard reads: the newest review-marked record, or "refused" when it would not count
+            nrec = trusted_record(newest) if newest else None
+            row["guard_review"] = (None if newest is None else
+                                   {"state": nrec[1]["state"], "sha": nrec[1]["sha"]} if nrec and nrec[0] == "review"
+                                   else "refused")
     for name in ("prs", "gates", "rounds", "findings", "audits"):
         with open(out / f"{name}.jsonl", "w", encoding="utf-8") as fh:
             for r in rows[name]:
@@ -205,6 +223,8 @@ def key(r: dict) -> tuple:
 
 def sample(a: argparse.Namespace) -> int:
     d = Path(a.dir)
+    if not (d / "findings.jsonl").exists():
+        sys.exit(f"audit.py: {a.dir} holds no harvest; run `audit.py harvest --out {a.dir}` first")
     judged = {key(j) for j in load(d, "audits") if "round" in j and "ids" in j}
     pool = [f for f in load(d, "findings") if key(f) not in judged and f["rank"] != "pre-existing"]
     rng = random.Random(a.seed)
@@ -243,8 +263,8 @@ def check_judgments(items: object) -> list[dict]:
         for k, allowed in KINDS.items():
             if j.get(k) not in allowed:
                 sys.exit(f"audit.py: judgment {i}: `{k}` is one of {sorted(allowed)}, got {j.get(k)!r}")
-        if "\n" in str(j.get("note", "")):
-            sys.exit(f"audit.py: judgment {i}: the note is one line")
+        if not isinstance(j.get("note"), str) or not j["note"].strip() or "\n" in j["note"]:
+            sys.exit(f"audit.py: judgment {i}: `note` is one line of text")
     return items
 
 
@@ -305,8 +325,9 @@ def summarize(d: Path, session: str | None) -> dict:
     for k, rs in by_pr.items():
         p = prs.get(k, {})
         series = [r["must_fix"] for r in rs]
-        last = rs[-1]
-        passed_head = last["state"] == "success" and p.get("head") in (last.get("sha"), None)
+        g = p.get("guard_review", rs[-1])  # the merge guard's own reading when the harvest recorded it
+        passed_head = (isinstance(g, dict) and g.get("state") == "success"
+                       and p.get("head") in (g.get("sha"), None))
         changes.append({"repo": k[0], "pr": k[1], "rounds": len(rs), "series": series,
                         "first_pass": rs[0]["state"] == "success", "merged": bool(p.get("merged_at")),
                         "grew": any(b > a for a, b in zip(series, series[1:])),
@@ -347,6 +368,8 @@ def summarize(d: Path, session: str | None) -> dict:
 def summary(a: argparse.Namespace) -> int:
     if not (Path(a.dir) / "rounds.jsonl").exists():
         sys.exit(f"audit.py: {a.dir} holds no harvest; run `audit.py harvest --out {a.dir}` first")
+    if a.session and not any(j.get("session") == a.session for j in load(Path(a.dir), "audits")):
+        sys.exit(f"audit.py: no audit record in {a.dir} carries session {a.session}")
     s = summarize(Path(a.dir), a.session)
     if a.json:
         json.dump(s, sys.stdout, indent=1)

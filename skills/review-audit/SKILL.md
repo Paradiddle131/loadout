@@ -17,12 +17,12 @@ GitHub holds every record, so any past audit session can be read again; the JSON
 ## 2. Harvest
 
 - `python3 $A/scripts/audit.py harvest --repo <o/r> [--repo ...] --since <ISO> --out <dir>`: reads only, writes `prs`, `gates`, `rounds`, `findings` and `audits` JSONL files in `<dir>` (the session's scratchpad).
-- Only records the merge guard would trust count: by the repo's owner, a member or a collaborator, unedited, with the exact title and marker; a review round's must-fix findings are the ones its `Blocking:` line lists, where the record has one.
+- Only records the merge guard would trust count: by the repo's owner, a member or a collaborator, unedited, with the exact title and marker and the two agreeing; a review round's must-fix findings are the ones its `Blocking:` line lists, where the record has one.
 - Done when the counts it prints are in the notes.
 
 ## 3. Sample
 
-- `python3 $A/scripts/audit.py sample --dir <dir> --n <count>`: takes must-fix findings first, then the rest, spread over each finding's first lens, and leaves out pre-existing findings and those an earlier audit judged.
+- `python3 $A/scripts/audit.py sample --dir <dir> --n <count>`: takes one finding in turn from each group of must-fix or other findings by first lens, must-fix groups first in each turn, and leaves out pre-existing findings and those an earlier audit judged.
 - Thirty is a working default; `summary` prints each rate with its 95% interval, so a smaller batch shows a wider one.
 - Done when `sample.jsonl` exists.
 

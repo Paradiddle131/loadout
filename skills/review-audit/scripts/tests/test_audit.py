@@ -143,7 +143,7 @@ def test_record_dry_run_holds_a_table_and_the_judgments(github: dict, tmp_path: 
 @pytest.mark.parametrize("bad", [
     [], [judgment(correct="maybe")], [judgment(rank="fine")], [judgment(round="2")], [judgment(ids=[])],
     [judgment(note="two\nlines")], [judgment(round=True)], [judgment(ids="COR-1")], [judgment(ids=["COR-1\n| x"])],
-    [judgment(repo="other/repo")], [judgment(session="old")]])
+    [judgment(repo="other/repo")], [judgment(session="old")], [judgment(note=None)], [judgment(note="")]])
 def test_record_refuses_a_malformed_judgment(github: dict, tmp_path: Path, bad: list) -> None:
     f = tmp_path / "j.json"
     f.write_text(json.dumps(bad))
@@ -152,15 +152,15 @@ def test_record_refuses_a_malformed_judgment(github: dict, tmp_path: Path, bad: 
         audit.record(ns)
 
 
-def test_record_refuses_a_session_id_that_would_break_the_marker(tmp_path: Path) -> None:
+def test_record_refuses_a_session_id_that_would_break_the_marker(github: dict, tmp_path: Path) -> None:
     f = tmp_path / "j.json"
     f.write_text(json.dumps([judgment()]))
     ns = audit.argparse.Namespace(repo=REPO, pr=7, session="a b -->", file=str(f), backfill=False, dry_run=True)
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit, match="--session"):
         audit.record(ns)
 
 
-def test_sample_takes_must_fix_first_and_skips_judged(github: dict, tmp_path: Path) -> None:
+def test_sample_opens_with_a_must_fix_and_skips_judged(github: dict, tmp_path: Path) -> None:
     d = harvest(tmp_path)
     ns = audit.argparse.Namespace(dir=str(d), n=1, seed=0, session=None)
     audit.sample(ns)
@@ -224,9 +224,17 @@ def test_harvest_skips_records_the_merge_guard_would_not_trust(github: dict, tmp
              "body": "🤖 just a note\nsee <!-- loadout" ":review sha=zz state=success --> here\n"}
     bad_sha = dict(review_comment(9, H2, "success", PASS_OUT, "2030-01-02T07:00:00Z"))
     bad_sha["body"] = bad_sha["body"].replace(f"sha={H2}", "sha=zz", 1)
-    comments += [edited, loose, bad_sha]
+    disagree = dict(review_comment(11, H2, "success", PASS_OUT, "2030-01-02T08:00:00Z"))
+    disagree["body"] = disagree["body"].replace("Review: pass", "Review: fail", 1)  # title fail, marker success
+    twice = dict(review_comment(12, H2, "success", PASS_OUT, "2030-01-02T09:00:00Z"))
+    twice["body"] = twice["body"].replace("state=success", "state=failure state=success", 1)
+    gates = {"id": 13, "author_association": "OWNER", "created_at": "2030-01-02T10:00:00Z",
+             "updated_at": "2030-01-02T10:00:00Z",
+             "body": f"🤖 Gates: failure\n<!-- loadout" f":gates sha={H2} state=success -->\n"}
+    comments += [edited, loose, bad_sha, disagree, twice, gates]
     d = harvest(tmp_path)
     assert [r["comment"] for r in rows(d, "rounds")] == [2, 3]
+    assert [g["comment"] for g in rows(d, "gates")] == [1]
 
 
 def test_harvest_counts_must_fix_from_the_blocking_line(github: dict, tmp_path: Path) -> None:
@@ -332,3 +340,110 @@ def test_sample_leaves_out_pre_existing_findings(github: dict, tmp_path: Path) -
     (d / "findings.jsonl").write_text("".join(json.dumps(f) + "\n" for f in found))
     audit.sample(audit.argparse.Namespace(dir=str(d), n=5, seed=0))
     assert rows(d, "sample") == []
+
+
+GOOD = (f"🤖 Review: pass (standard tier)\n<!-- loadout" f":review sha={H2} state=success tier=standard reviewed={H2} -->\n")
+
+
+@pytest.mark.parametrize("body", [
+    GOOD.replace("Review: pass", "Review: fail"),  # the title disagrees with the state
+    GOOD.replace("(standard tier)", "(routine tier)"),  # ... or with the tier
+    GOOD.replace("state=success", "state=failure state=success"),  # a repeated key
+    GOOD.replace(" -->", " extra=1 -->"),  # an unknown key
+    GOOD.replace("state=success", "state=maybe"),
+    GOOD.replace(f"reviewed={H2}", "reviewed=zz"),
+    GOOD.replace("tier=standard", "tier=huge").replace("(standard tier)", "(huge tier)"),
+    GOOD.replace("<!-- loadout", "see <!-- loadout"),  # the marker inside other text
+    GOOD.replace("🤖 Review: pass (standard tier)", "🤖 Review: pass (standard tier) and more"),
+    f"🤖 Gates: failure\n<!-- loadout" f":gates sha={H2} state=success -->\n",
+    f"🤖 Audit: 1 finding re-checked (session s-one)\n<!-- loadout" ":audit session=s-two -->\n",
+])
+def test_trusted_record_refuses_what_the_merge_guard_refuses(body: str) -> None:
+    c = {"id": 1, "body": body, "author_association": "OWNER", "created_at": "t", "updated_at": "t"}
+    assert audit.trusted_record(c) is None
+    assert audit.trusted_record(dict(c, body=GOOD)) == ("review", {"sha": H2, "state": "success", "tier": "standard",
+                                                                    "reviewed": H2})
+
+
+def test_record_refuses_a_round_by_an_untrusted_or_edited_author_or_of_another_kind(github: dict, tmp_path: Path) -> None:
+    comments = github["data"][f"repos/{REPO}/issues/7/comments"]
+    url = f"https://api.github.com/repos/{REPO}/issues/7"
+    comments[0]["issue_url"] = url  # a gates record on the right PR
+    comments.append(dict(review_comment(14, H2, "success", PASS_OUT, "2030-01-02T05:00:00Z"),
+                         updated_at="2030-01-09T00:00:00Z"))  # edited
+    comments.append(dict(review_comment(15, H2, "success", PASS_OUT, "2030-01-02T06:00:00Z"),
+                         issue_url=url + "7"))  # PR 77
+    for rnd in (1, 4, 14, 15):  # gates, a NONE author, edited, another PR
+        ns = audit.argparse.Namespace(repo=REPO, pr=7, session="s1", file=judge_file(tmp_path, [judgment(round=rnd)]),
+                                      backfill=False, dry_run=True)
+        with pytest.raises(SystemExit, match="no trusted review record"):
+            audit.record(ns)
+
+
+def test_harvest_reads_audit_records_outside_the_window_with_their_backfill_flag(github: dict, tmp_path: Path,
+                                                                                capsys: pytest.CaptureFixture) -> None:
+    audit.record(audit.argparse.Namespace(repo=REPO, pr=7, session="early", file=judge_file(tmp_path, [judgment()]),
+                                          backfill=True, dry_run=True))
+    body = capsys.readouterr().out
+    github["data"][f"repos/{REPO}/issues/7/comments"] += [
+        {"id": 20, "body": body, "author_association": "OWNER", "created_at": "2029-01-01T00:00:00Z",
+         "updated_at": "2029-01-01T00:00:00Z"},
+        {"id": 21, "body": body, "author_association": "OWNER", "created_at": "2031-01-01T00:00:00Z",
+         "updated_at": "2031-01-01T00:00:00Z"}]
+    out = tmp_path / "snap"
+    audit.harvest(audit.argparse.Namespace(repo=[REPO], since="2030-01-01T00:00:00Z", until="2030-12-31T00:00:00Z",
+                                           out=str(out)))
+    assert [(a["comment"], a["backfill"]) for a in rows(out, "audits")] == [(20, True), (21, True)]
+
+
+def test_harvest_counts_a_round_s_must_fix_by_blocking_entries(github: dict, tmp_path: Path) -> None:
+    out = (f"VERDICT: FAIL {H2}\nReviewed: {H2}\n"
+           'Blocking: [{"ids": "COR-1, CLM-2", "harm": "an operator trusts a total that drops rows"}]\n'
+           "## Must-fix\n### COR-1\n- rank: must-fix\n### CLM-2\n- rank: must-fix\n### GRD-3\n- rank: must-fix\n")
+    github["data"][f"repos/{REPO}/issues/7/comments"].append(review_comment(6, H2, "failure", out, "2030-01-02T05:00:00Z"))
+    d = harvest(tmp_path)
+    assert rows(d, "rounds")[-1]["must_fix"] == 1  # one listed entry, though two blocks say must-fix
+    assert [f["must_fix"] for f in rows(d, "findings") if f["round"] == 6] == [True, True, False]
+
+
+def test_summary_leaves_unverifiable_judgments_out_of_the_rates(github: dict, tmp_path: Path) -> None:
+    d = harvest(tmp_path)
+    (d / "audits.jsonl").write_text("\n".join(json.dumps({"repo": REPO, "pr": 7, "session": "s1", **j}) for j in [
+        judgment(correct="no"), judgment(ids=["CLM-3"], correct="unverifiable")]) + "\n")
+    assert audit.summarize(d, None)["wrong"][0] == 1
+
+
+def test_summary_reads_a_merge_the_way_the_merge_guard_does(github: dict, tmp_path: Path) -> None:
+    comments = github["data"][f"repos/{REPO}/issues/7/comments"]
+    comments.append(dict(review_comment(16, H2, "failure", FAIL_OUT.replace(H1, H2), "2030-01-02T09:00:00Z"),
+                         updated_at="2030-01-02T10:00:00Z"))  # the newest record, edited: the guard refuses it
+    [c] = audit.summarize(harvest(tmp_path), None)["series"]
+    assert c["merged_without_pass"]
+
+
+def test_summary_flags_a_merge_whose_newest_review_failed(github: dict, tmp_path: Path) -> None:
+    github["data"][f"repos/{REPO}/issues/7/comments"].append(
+        review_comment(17, H2, "failure", FAIL_OUT.replace(H1, H2), "2030-01-02T09:00:00Z"))
+    [c] = audit.summarize(harvest(tmp_path), None)["series"]
+    assert c["merged_without_pass"]
+
+
+def test_sample_and_summary_refuse_a_folder_or_session_with_nothing_in_it(github: dict, tmp_path: Path) -> None:
+    with pytest.raises(SystemExit, match="holds no harvest"):
+        audit.sample(audit.argparse.Namespace(dir=str(tmp_path / "missing"), n=5, seed=0))
+    d = harvest(tmp_path)
+    with pytest.raises(SystemExit, match="carries session nope"):
+        audit.summary(audit.argparse.Namespace(dir=str(d), session="nope", json=False))
+
+
+def test_record_refuses_a_failed_post(github: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(audit.subprocess, "run", lambda cmd, **_: subprocess.CompletedProcess(cmd, 1, "", "HTTP 422"))
+    ns = audit.argparse.Namespace(repo=REPO, pr=7, session="s1", file=judge_file(tmp_path, [judgment()]),
+                                  backfill=False, dry_run=False)
+    with pytest.raises(SystemExit, match="posting the audit record failed"):
+        audit.record(ns)
+
+
+def test_audit_json_reads_only_a_list() -> None:
+    assert audit.audit_json('```json\n{"round": 2}\n```') == []
+    assert audit.audit_json('```json\n[{"round": 2}]\n```') == [{"round": 2}]
