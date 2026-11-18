@@ -3,10 +3,12 @@
 back on the PRs, and sums both up. GitHub holds every record; the JSONL files are a snapshot, rebuilt at will.
 
   audit.py harvest --repo <owner/name> [--repo ...] --since <ISO time> [--until <ISO time>] --out <dir>
-      reads, never writes: PRs updated in the window and their trusted `🤖 Gates`, `🤖 Review` and `🤖 Audit`
-      comments, into <dir>/prs.jsonl, gates.jsonl, rounds.jsonl, findings.jsonl and audits.jsonl.
-  audit.py sample --dir <dir> --n <count> [--seed <n>] [--session <id>]
-      picks findings to audit, spread over rank and lens, leaving out those an earlier audit judged;
+      reads, never writes: PRs updated since --since, their `🤖 Gates` and `🤖 Review` records posted from
+      --since up to --until, and their `🤖 Audit` records posted up to --until, counting only records the merge guard would trust (author, unedited, exact title and
+      marker), into <dir>/prs.jsonl, gates.jsonl, rounds.jsonl, findings.jsonl and audits.jsonl.
+  audit.py sample --dir <dir> --n <count> [--seed <n>]
+      picks findings to audit, must-fix first and then the rest, spread over each finding's first lens, leaving
+      out pre-existing ones and those an earlier audit judged;
       writes <dir>/sample.jsonl and prints one line per pick.
   audit.py record --repo <owner/name> --pr <n> --session <id> --file <judgments.json> [--backfill] [--dry-run]
       posts one `🤖 Audit` record on the PR: a table for people and the judgments as a JSON block.
@@ -41,6 +43,16 @@ import findings as verifier_output  # noqa: E402  (a lenient reader of the verif
 
 TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
 MARKER = re.compile(r"<!-- loadout:(gates|review|audit)((?: [a-z_]+=[^\s=]+)+) -->")
+# A record counts only in the shape the merge guard (cloud/hooks/merge-guard.py) trusts: an unedited comment by the
+# owner, a member or a collaborator, its first line the record's title, its second line exactly one marker.
+TITLE = {"gates": re.compile(r"🤖 Gates: (success|failure)"),
+         "review": re.compile(r"🤖 Review: (pass|fail) \((routine|standard|sensitive) tier\)"),
+         "audit": re.compile(r"🤖 Audit: \d+ findings? re-checked \(session [A-Za-z0-9._-]{1,64}\)")}
+FIELDS = {"gates": {"sha", "state"}, "review": {"sha", "state", "tier", "reviewed"}, "audit": {"session", "backfill"}}
+SHA = re.compile(r"[0-9a-f]{40}")
+SKIPPED = re.compile(r"(dropped|unverified|not checked)\b", re.I)  # verifier sections that hold no ranked finding
+FINDING_ID = re.compile(r"[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d+")
+JUDGMENT_KEYS = {"round", "ids", "correct", "matters", "rank", "kind", "method", "note"}
 KINDS = {"correct": {"yes", "no", "unverifiable"}, "matters": {"yes", "no"},
          "rank": {"right", "too-high", "too-low"},
          "kind": {"code", "test", "wording", "config", "data", "process"},
@@ -79,6 +91,25 @@ def fields(marker: str) -> dict:
     return dict(kv.split("=", 1) for kv in marker.split())
 
 
+def trusted_record(c: dict) -> tuple[str, dict] | None:
+    """The record's kind and marker fields when `c` is a record the merge guard would trust, else None."""
+    if c.get("author_association") not in TRUSTED or c.get("updated_at") != c.get("created_at"):
+        return None
+    lines = (c.get("body") or "").split("\n")
+    m = MARKER.fullmatch(lines[1].strip()) if len(lines) > 1 else None
+    if not m or not TITLE[m.group(1)].fullmatch(lines[0].strip()):
+        return None
+    kind, f = m.group(1), fields(m.group(2))
+    if not set(f) <= FIELDS[kind] or (kind != "audit" and not {"sha", "state"} <= set(f)):
+        return None
+    if kind != "audit" and (not SHA.fullmatch(f["sha"]) or f["state"] not in ("success", "failure")
+                            or ("reviewed" in f and not SHA.fullmatch(f["reviewed"]))):
+        return None
+    if kind == "review" and f.get("tier") not in ("routine", "standard", "sensitive"):
+        return None
+    return kind, f
+
+
 def raw_output(body: str) -> str:
     """The verifier's output that verdict.sh put under <details>, in a fence of three or more backticks."""
     m = re.search(r"<details><summary>[^<]*</summary>\s*\n(?:Clipped[^\n]*\n\s*\n)?(`{3,})[a-z]*\n", body)
@@ -110,42 +141,50 @@ def harvest(a: argparse.Namespace) -> int:
                                 "created_at": pr["created_at"], "merged_at": pr.get("merged_at"),
                                 "head": pr["head"]["sha"], "branch": pr["head"]["ref"]})
             for c in pages(f"repos/{repo}/issues/{n}/comments"):
-                if c.get("author_association") not in TRUSTED or a.until and c["created_at"] > a.until:
+                if a.until and c["created_at"] > a.until or not (rec := trusted_record(c)):
                     continue
-                lines = (c.get("body") or "").split("\n")
-                m = MARKER.search(lines[1]) if len(lines) > 1 and lines[0].startswith("🤖") else None
-                if not m:
-                    continue
-                kind, f = m.group(1), fields(m.group(2))
+                kind, f = rec
+                if kind != "audit" and c["created_at"] < a.since:  # rounds and gates of the period only;
+                    continue  # audit records are read whenever posted, so any past session can be chosen
+                lines = c["body"].split("\n")
                 base = {"repo": repo, "pr": n, "comment": c["id"], "url": c.get("html_url"),
-                        "created_at": c["created_at"], "edited": c.get("updated_at") != c["created_at"]}
+                        "created_at": c["created_at"]}
                 if kind == "gates":
                     rows["gates"].append({**base, "sha": f.get("sha"), "state": f.get("state")})
                 elif kind == "audit":
                     for j in audit_json(c["body"]):
-                        rows["audits"].append({**base, "session": f.get("session"),
-                                               "backfill": f.get("backfill") == "1", **j})
+                        if isinstance(j, dict):  # the record's own repo, PR and session win over the block's keys
+                            rows["audits"].append({**{k: j.get(k) for k in JUDGMENT_KEYS}, **base,
+                                                   "session": f.get("session"), "backfill": f.get("backfill") == "1"})
                 else:
-                    parsed = verifier_output.parse(raw_output(c["body"]))
+                    raw = raw_output(c["body"])
+                    parsed = verifier_output.parse(raw)
                     reviewers = next((ln.split(":", 1)[1].strip() for ln in lines
                                       if ln.startswith("- Reviewers:")), "")
-                    fs = parsed["findings"]
-                    try:
-                        harms = len(blocking.read(raw_output(c["body"])))
+                    fs = [b for b in parsed["findings"] if not SKIPPED.match(b["section"])]
+                    try:  # the verifier's own list of must-fix findings, when the record has one
+                        listed = {i.strip() for e in blocking.read(raw) for i in e["ids"].split(",")}
                     except ValueError:
-                        harms = None  # a record made before the `Blocking:` line, or a malformed one
+                        listed = None  # a record made before the `Blocking:` line, or a malformed one
+                    for b in fs:
+                        if listed is not None:
+                            b["must_fix"] = bool(set(b["ids"]) & listed)
+                        rank = (b["rank"] or b["section"]).lower()
+                        b["kind_rank"] = ("must-fix" if b["must_fix"] else "nit" if rank.startswith("nit")
+                                          else "pre-existing" if rank.startswith("pre") else "other")
+                    harms = None if listed is None else len(blocking.read(raw))
                     rows["rounds"].append({
                         **base, "sha": f.get("sha"), "reviewed": f.get("reviewed"), "state": f.get("state"),
                         "tier": f.get("tier"), "reviewers": reviewers, "verdict": parsed["verdict"],
                         "blocking_line": harms,
                         "steered": any(s.strip().lower() not in ("", "none") for s in parsed["steering"]),
-                        "must_fix": sum(b["must_fix"] for b in fs),
-                        "nits": sum((b["rank"] or "").startswith("nit") for b in fs),
-                        "pre_existing": sum((b["rank"] or "").startswith("pre") for b in fs)})
+                        "must_fix": harms if harms is not None else sum(b["must_fix"] for b in fs),
+                        "nits": sum(b["kind_rank"] == "nit" for b in fs),
+                        "pre_existing": sum(b["kind_rank"] == "pre-existing" for b in fs)})
                     for b in fs:
                         rows["findings"].append({
                             "repo": repo, "pr": n, "round": c["id"], "ids": b["ids"], "section": b["section"],
-                            "rank": b["rank"], "must_fix": b["must_fix"], "harm": b["harm"],
+                            "rank": b["kind_rank"], "must_fix": b["must_fix"], "harm": b["harm"],
                             **{k: b["fields"].get(k) for k in ("lens", "location", "claim")}})
     for name in ("prs", "gates", "rounds", "findings", "audits"):
         with open(out / f"{name}.jsonl", "w", encoding="utf-8") as fh:
@@ -193,8 +232,14 @@ def check_judgments(items: object) -> list[dict]:
     if not isinstance(items, list) or not items:
         sys.exit("audit.py: the judgments file is a non-empty JSON list")
     for i, j in enumerate(items):
-        if not isinstance(j, dict) or not isinstance(j.get("round"), int) or not j.get("ids"):
-            sys.exit(f"audit.py: judgment {i} needs an integer `round` and its `ids`")
+        if not isinstance(j, dict) or type(j.get("round")) is not int:
+            sys.exit(f"audit.py: judgment {i} needs an integer `round`")
+        if extra := set(j) - JUDGMENT_KEYS:
+            sys.exit(f"audit.py: judgment {i} has keys a judgment does not carry: {sorted(extra)}")
+        ids = j.get("ids")
+        if not isinstance(ids, list) or not ids or not all(isinstance(x, str) and FINDING_ID.fullmatch(x)
+                                                           for x in ids):
+            sys.exit(f"audit.py: judgment {i}: `ids` is a list of finding ids such as COR-1")
         for k, allowed in KINDS.items():
             if j.get(k) not in allowed:
                 sys.exit(f"audit.py: judgment {i}: `{k}` is one of {sorted(allowed)}, got {j.get(k)!r}")
@@ -207,6 +252,11 @@ def record(a: argparse.Namespace) -> int:
     if not SESSION.fullmatch(a.session):
         sys.exit("audit.py: --session is letters, digits, '.', '_' or '-', at most 64")
     items = check_judgments(json.loads(Path(a.file).read_text(encoding="utf-8")))
+    for rnd in sorted({j["round"] for j in items}):  # each judged round is a trusted review record on this PR
+        c = gh_json(f"repos/{a.repo}/issues/comments/{rnd}") or {}
+        rec = trusted_record(c) if isinstance(c, dict) else None
+        if not rec or rec[0] != "review" or not str(c.get("issue_url", "")).endswith(f"/issues/{a.pr}"):
+            sys.exit(f"audit.py: comment {rnd} is no trusted review record on {a.repo}#{a.pr}")
     cell = lambda s: str(s).replace("|", "\\|")  # noqa: E731
     marker = "<!-- loadout" + f":audit session={a.session}" + (" backfill=1" if a.backfill else "") + " -->"
     body = "\n".join([
@@ -295,6 +345,8 @@ def summarize(d: Path, session: str | None) -> dict:
 
 
 def summary(a: argparse.Namespace) -> int:
+    if not (Path(a.dir) / "rounds.jsonl").exists():
+        sys.exit(f"audit.py: {a.dir} holds no harvest; run `audit.py harvest --out {a.dir}` first")
     s = summarize(Path(a.dir), a.session)
     if a.json:
         json.dump(s, sys.stdout, indent=1)
@@ -334,7 +386,6 @@ def main() -> int:
     s.add_argument("--dir", required=True)
     s.add_argument("--n", type=int, required=True)
     s.add_argument("--seed", type=int, default=0)
-    s.add_argument("--session")
     r = sub.add_parser("record")
     r.add_argument("--repo", required=True)
     r.add_argument("--pr", type=int, required=True)

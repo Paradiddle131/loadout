@@ -17,20 +17,21 @@ GitHub holds every record, so any past audit session can be read again; the JSON
 ## 2. Harvest
 
 - `python3 $A/scripts/audit.py harvest --repo <o/r> [--repo ...] --since <ISO> --out <dir>`: reads only, writes `prs`, `gates`, `rounds`, `findings` and `audits` JSONL files in `<dir>` (the session's scratchpad).
-- Only comments by the repo's owner, a member or a collaborator count, as for the merge guard.
+- Only records the merge guard would trust count: by the repo's owner, a member or a collaborator, unedited, with the exact title and marker; a review round's must-fix findings are the ones its `Blocking:` line lists, where the record has one.
 - Done when the counts it prints are in the notes.
 
 ## 3. Sample
 
-- `python3 $A/scripts/audit.py sample --dir <dir> --n <count>`: spreads the picks over must-fix and the other ranks and over the lenses, and skips findings an earlier audit judged.
-- Thirty is a working default: enough to see a rate move by about a third; a smaller batch says its size beside every rate.
+- `python3 $A/scripts/audit.py sample --dir <dir> --n <count>`: takes must-fix findings first, then the rest, spread over each finding's first lens, and leaves out pre-existing findings and those an earlier audit judged.
+- Thirty is a working default; `summary` prints each rate with its 95% interval, so a smaller batch shows a wider one.
 - Done when `sample.jsonl` exists.
 
 ## 4. Audit
 
 - Give each sampled finding to [`finding-auditor`](../../agents/finding-auditor.md), a fresh subagent per repo or per PR, on Opus at high effort set in the call: the finding's record link, its round's reviewed commit, the repo's clone and the change base.
   Give no view of yours on the finding: the auditor judges it cold.
-- Each judgment carries `round`, `ids`, `correct`, `matters`, `rank`, `kind`, `method` and a one-line `note` (the shape is in `audit.py`'s header).
+- Each judgment carries `round`, `ids`, `correct`, `matters`, `rank`, `kind`, `method` and a one-line `note`, and nothing else (the shape is in `audit.py`'s header).
+- `record` refuses a judgment whose `round` is not a trusted review record on that PR, or with keys or ids out of shape.
 - Check each judgment the way the `delegating` skill checks a report: rerun at least one `re-ran` judgment per auditor yourself.
 - Done when every sampled finding has a judgment, or is listed as not reached with the reason.
 

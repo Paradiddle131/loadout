@@ -18,6 +18,7 @@ For each finding: its `🤖 Review` record's link, its ids, the reviewed commit 
 - **rank:** `right`, `too-high` (ranked must-fix, yet nothing would go wrong) or `too-low` (ranked nit or pre-existing, yet it matters).
 - **kind:** what the defect sits in: `code`, `test`, `wording` (docs, comments, test names, a PR body), `config`, `data` or `process`.
 - **method:** `re-ran`, `re-read` (you read the code at `<head>` and it settles the question) or `record` (only the record speaks to it).
+- Where the shared block below says `unverified`, write `correct: unverifiable`; your one-line `note` takes the place of a `reproduce`.
 - Judge each finding on its own evidence; what other findings, the verdict or later commits did is no evidence.
 
 ## How you work
