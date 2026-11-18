@@ -413,7 +413,7 @@ def test_summary_leaves_unverifiable_judgments_out_of_the_rates(github: dict, tm
     assert audit.summarize(d, None)["wrong"][0] == 1
 
 
-def test_summary_reads_a_merge_the_way_the_merge_guard_does(github: dict, tmp_path: Path) -> None:
+def test_summary_flags_a_merge_whose_newest_review_record_was_edited(github: dict, tmp_path: Path) -> None:
     comments = github["data"][f"repos/{REPO}/issues/7/comments"]
     comments.append(dict(review_comment(16, H2, "failure", FAIL_OUT.replace(H1, H2), "2030-01-02T09:00:00Z"),
                          updated_at="2030-01-02T10:00:00Z"))  # the newest record, edited: the guard refuses it
@@ -447,3 +447,86 @@ def test_record_refuses_a_failed_post(github: dict, tmp_path: Path, monkeypatch:
 def test_audit_json_reads_only_a_list() -> None:
     assert audit.audit_json('```json\n{"round": 2}\n```') == []
     assert audit.audit_json('```json\n[{"round": 2}]\n```') == [{"round": 2}]
+
+
+def test_summary_takes_the_newest_review_record_as_the_merge_guard_does(github: dict, tmp_path: Path) -> None:
+    comments = github["data"][f"repos/{REPO}/issues/7/comments"]
+    comments += [  # newer trusted comments the guard does not read as review records
+        {"id": 40, "author_association": "OWNER", "created_at": "2030-01-02T09:00:00Z", "updated_at": "2030-01-02T09:00:00Z",
+         "body": "🤖 note\n<!-- loadout" ":reviewer-notes x -->\n"},
+        {"id": 41, "author_association": "OWNER", "created_at": "2030-01-02T10:00:00Z", "updated_at": "2030-01-02T10:00:00Z",
+         "body": f"🤖 Gates: success\n<!-- loadout" f":gates sha={H2} state=success -->\n"}]
+    d = harvest(tmp_path)
+    [c] = audit.summarize(d, None)["series"]
+    assert not c["merged_without_pass"] and rows(d, "prs")[0]["guard_review"] == {"state": "success", "sha": H2}
+
+
+def test_harvest_labels_a_refused_newest_review_record(github: dict, tmp_path: Path) -> None:
+    github["data"][f"repos/{REPO}/issues/7/comments"].append(
+        dict(review_comment(42, H2, "success", PASS_OUT, "2030-01-02T09:00:00Z"), updated_at="2030-01-03T00:00:00Z"))
+    assert rows(harvest(tmp_path), "prs")[0]["guard_review"] == "refused"
+
+
+@pytest.mark.parametrize("marker", ["<!-- loadout" ":review state=success tier=standard -->",
+                                    "<!-- loadout" f":gates sha={H2} -->"])
+def test_trusted_record_needs_sha_and_state(marker: str) -> None:
+    title = "🤖 Gates: success" if "gates" in marker else "🤖 Review: pass (standard tier)"
+    c = {"id": 1, "body": f"{title}\n{marker}\n", "author_association": "OWNER", "created_at": "t", "updated_at": "t"}
+    assert audit.trusted_record(c) is None
+
+
+def test_harvest_skips_audit_rows_out_of_shape(github: dict, tmp_path: Path) -> None:
+    body = ("🤖 Audit: 1 finding re-checked (session s1)\n<!-- loadout" ":audit session=s1 -->\n\n```json\n"
+            + json.dumps([{"round": "2", "ids": ["COR-1"]}, {"round": 2, "ids": "COR-1"}, {"round": 2},
+                          {"round": 2, "ids": ["COR-1", "CLM-2"]}]) + "\n```\n")
+    github["data"][f"repos/{REPO}/issues/7/comments"].append(
+        {"id": 43, "body": body, "author_association": "OWNER", "created_at": "2030-01-05T00:00:00Z",
+         "updated_at": "2030-01-05T00:00:00Z"})
+    assert [a["ids"] for a in rows(harvest(tmp_path), "audits")] == [["COR-1", "CLM-2"]]
+
+
+def test_summary_counts_a_re_posted_audit_record_once(github: dict, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    audit.record(audit.argparse.Namespace(repo=REPO, pr=7, session="s1", file=judge_file(tmp_path, [judgment()]),
+                                          backfill=False, dry_run=True))
+    body = capsys.readouterr().out
+    for cid in (44, 45):
+        github["data"][f"repos/{REPO}/issues/7/comments"].append(
+            {"id": cid, "body": body, "author_association": "OWNER", "created_at": "2030-01-05T00:00:00Z",
+             "updated_at": "2030-01-05T00:00:00Z"})
+    assert audit.summarize(harvest(tmp_path), "s1")["audited"] == 1
+
+
+def test_record_refuses_ids_that_are_no_finding_of_the_round(github: dict, tmp_path: Path) -> None:
+    for ids in (["COR-99"], ["COR-1"]):  # unknown, and only part of the block `COR-1, CLM-2`
+        ns = audit.argparse.Namespace(repo=REPO, pr=7, session="s1", file=judge_file(tmp_path, [judgment(ids=ids)]),
+                                      backfill=False, dry_run=True)
+        with pytest.raises(SystemExit, match="no finding of review record 2"):
+            audit.record(ns)
+
+
+def test_harvest_reads_a_plain_date_as_its_whole_day(github: dict, tmp_path: Path) -> None:
+    out = tmp_path / "snap"
+    audit.harvest(audit.argparse.Namespace(repo=[REPO], since="2030-01-01", until="2030-01-02", out=str(out)))
+    assert [r["comment"] for r in rows(out, "rounds")] == [2, 3]
+    with pytest.raises(SystemExit, match="window bound"):
+        audit.harvest(audit.argparse.Namespace(repo=[REPO], since="last week", until=None, out=str(out)))
+
+
+def test_sample_takes_one_finding_per_group_in_turn(tmp_path: Path) -> None:
+    rows_ = [{"repo": REPO, "pr": 1, "round": 1, "ids": [f"{lens[:3].upper()}-{i}"], "must_fix": False, "rank": "nit",
+              "lens": lens} for lens in ("correctness", "claims") for i in range(2)]
+    (tmp_path / "findings.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows_))
+    audit.sample(audit.argparse.Namespace(dir=str(tmp_path), n=2, seed=0))
+    assert sorted(r["lens"] for r in rows(tmp_path, "sample")) == ["claims", "correctness"]
+    with pytest.raises(SystemExit, match="at least 1"):
+        audit.sample(audit.argparse.Namespace(dir=str(tmp_path), n=0, seed=0))
+
+
+def test_harvest_reads_a_record_without_the_backfill_flag_as_live(github: dict, tmp_path: Path,
+                                                                  capsys: pytest.CaptureFixture) -> None:
+    audit.record(audit.argparse.Namespace(repo=REPO, pr=7, session="live", file=judge_file(tmp_path, [judgment()]),
+                                          backfill=False, dry_run=True))
+    github["data"][f"repos/{REPO}/issues/7/comments"].append(
+        {"id": 46, "body": capsys.readouterr().out, "author_association": "OWNER",
+         "created_at": "2030-01-05T00:00:00Z", "updated_at": "2030-01-05T00:00:00Z"})
+    assert [a["backfill"] for a in rows(harvest(tmp_path), "audits")] == [False]

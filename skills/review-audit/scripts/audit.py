@@ -51,6 +51,8 @@ TITLE = {"gates": re.compile(r"🤖 Gates: (success|failure)"),
          "audit": re.compile(r"🤖 Audit: \d+ findings? re-checked \(session [A-Za-z0-9._-]{1,64}\)")}
 FIELDS = {"gates": {"sha", "state"}, "review": {"sha", "state", "tier", "reviewed"}, "audit": {"session", "backfill"}}
 SHA = re.compile(r"[0-9a-f]{40}")
+GUARD_REVIEW = re.compile(r"\s*<!-- loadout" r":review\b")  # how the merge guard spots a review record's marker
+WHEN = re.compile(r"\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}Z)?")
 SKIPPED = re.compile(r"(dropped|unverified|not checked)\b", re.I)  # verifier sections that hold no ranked finding
 FINDING_ID = re.compile(r"[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d+")
 JUDGMENT_KEYS = {"round", "ids", "correct", "matters", "rank", "kind", "method", "note"}
@@ -134,7 +136,17 @@ def audit_json(body: str) -> list:
     return data if isinstance(data, list) else []
 
 
+def bound(value: str | None, end: bool) -> str | None:
+    """A window bound as GitHub writes times; a plain date covers its whole day."""
+    if value is None:
+        return None
+    if not WHEN.fullmatch(value):
+        sys.exit(f"audit.py: a window bound is YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ, got {value!r}")
+    return value if "T" in value else value + ("T23:59:59Z" if end else "T00:00:00Z")
+
+
 def harvest(a: argparse.Namespace) -> int:
+    a.since, a.until = bound(a.since, False), bound(a.until, True)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     rows: dict[str, list] = defaultdict(list)
@@ -147,11 +159,12 @@ def harvest(a: argparse.Namespace) -> int:
                    "created_at": pr["created_at"], "merged_at": pr.get("merged_at"),
                    "head": pr["head"]["sha"], "branch": pr["head"]["ref"]}
             rows["prs"].append(row)
-            newest = None  # the newest review-marked comment by a trusted author, as the merge guard reads it
+            newest = None  # the newest trusted comment with a review marker line, picked as the merge guard picks it
             for c in pages(f"repos/{repo}/issues/{n}/comments"):
                 lines2 = (c.get("body") or "").split("\n")
                 if (c.get("author_association") in TRUSTED and len(lines2) > 1
-                        and lines2[1].lstrip().startswith("<!-- loadout" ":review")):
+                        and GUARD_REVIEW.match(lines2[1])
+                        and (newest is None or (c["created_at"], c["id"]) > (newest["created_at"], newest["id"]))):
                     newest = c
                 if not (rec := trusted_record(c)):
                     continue
@@ -199,7 +212,8 @@ def harvest(a: argparse.Namespace) -> int:
                             "repo": repo, "pr": n, "round": c["id"], "ids": b["ids"], "section": b["section"],
                             "rank": b["kind_rank"], "must_fix": b["must_fix"], "harm": b["harm"],
                             **{k: b["fields"].get(k) for k in ("lens", "location", "claim")}})
-            # what the merge guard reads: the newest review-marked record, or "refused" when it would not count
+            # what the merge guard reads: the newest trusted comment whose marker line opens `<!-- loadout:review`
+            # (as the guard matches it), or "refused" when that record would not count
             nrec = trusted_record(newest) if newest else None
             row["guard_review"] = (None if newest is None else
                                    {"state": nrec[1]["state"], "sha": nrec[1]["sha"]} if nrec and nrec[0] == "review"
@@ -225,6 +239,8 @@ def sample(a: argparse.Namespace) -> int:
     d = Path(a.dir)
     if not (d / "findings.jsonl").exists():
         sys.exit(f"audit.py: {a.dir} holds no harvest; run `audit.py harvest --out {a.dir}` first")
+    if a.n < 1:
+        sys.exit("audit.py: --n is at least 1")
     judged = {key(j) for j in load(d, "audits") if "round" in j and "ids" in j}
     pool = [f for f in load(d, "findings") if key(f) not in judged and f["rank"] != "pre-existing"]
     rng = random.Random(a.seed)
@@ -277,6 +293,10 @@ def record(a: argparse.Namespace) -> int:
         rec = trusted_record(c) if isinstance(c, dict) else None
         if not rec or rec[0] != "review" or not str(c.get("issue_url", "")).endswith(f"/issues/{a.pr}"):
             sys.exit(f"audit.py: comment {rnd} is no trusted review record on {a.repo}#{a.pr}")
+        blocks = {tuple(b["ids"]) for b in verifier_output.parse(raw_output(c["body"]))["findings"]}
+        for j in items:
+            if j["round"] == rnd and tuple(j["ids"]) not in blocks:
+                sys.exit(f"audit.py: {', '.join(j['ids'])} is no finding of review record {rnd}; use a block's ids")
     cell = lambda s: str(s).replace("|", "\\|")  # noqa: E731
     marker = "<!-- loadout" + f":audit session={a.session}" + (" backfill=1" if a.backfill else "") + " -->"
     body = "\n".join([
@@ -317,7 +337,10 @@ def summarize(d: Path, session: str | None) -> dict:
     prs = {(p["repo"], p["pr"]): p for p in load(d, "prs")}
     rounds = sorted(load(d, "rounds"), key=lambda r: r["created_at"])
     finds = load(d, "findings")
-    audits = [j for j in load(d, "audits") if session in (None, j.get("session"))]
+    latest: dict[tuple, dict] = {}
+    for j in sorted(load(d, "audits"), key=lambda j: (j.get("created_at") or "", j.get("comment") or 0)):
+        latest[(j.get("session"), j["repo"], j["pr"], j["round"], tuple(j["ids"]))] = j  # a re-posted record counts once
+    audits = [j for j in latest.values() if session in (None, j.get("session"))]
     by_pr: dict[tuple, list] = defaultdict(list)
     for r in rounds:
         by_pr[(r["repo"], r["pr"])].append(r)
