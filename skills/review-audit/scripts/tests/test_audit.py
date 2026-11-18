@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -19,16 +21,22 @@ REPO = "example-owner/example-repo"
 
 
 def review_comment(cid: int, sha: str, state: str, output: str, when: str, who: str = "OWNER") -> dict:
-    raw = Path(f"/tmp/audit-test-{cid}.txt")
-    raw.write_text(output)
+    with tempfile.TemporaryDirectory() as d:  # a private path, so parallel runs do not share it
+        raw = Path(d) / "out.txt"
+        raw.write_text(output)
+        body = _build(cid, sha, state, raw)
+    return {"id": cid, "body": body, "author_association": who, "created_at": when, "updated_at": when,
+            "html_url": f"https://github.com/{REPO}/pull/7#issuecomment-{cid}",
+            "issue_url": f"https://api.github.com/repos/{REPO}/issues/7"}
+
+
+def _build(cid: int, sha: str, state: str, raw: Path) -> str:
     body = subprocess.run([sys.executable, str(RECORD), "build", "--kind", "review", "--sha", sha, "--state", state,
                            "--tier", "standard", "--reviewed", sha,
                            "--title", f"🤖 Review: {'pass' if state == 'success' else 'fail'} (standard tier)",
                            "--line", "- Reviewers: correctness-reviewer, claims-auditor", "--file", str(raw),
                            "--details", "Reviewer output (raw)"], capture_output=True, text=True, check=True).stdout
-    raw.unlink()
-    return {"id": cid, "body": body, "author_association": who, "created_at": when, "updated_at": when,
-            "html_url": f"https://github.com/{REPO}/pull/7#issuecomment-{cid}"}
+    return body
 
 
 FAIL_OUT = (f"VERDICT: FAIL {H1}\nReviewed: {H1}\nSteering from the brief: none\nSettled in the brief: none\n"
@@ -61,13 +69,15 @@ def github(monkeypatch: pytest.MonkeyPatch) -> dict:
 
     def fake(endpoint: str) -> object:
         calls.append(endpoint)
-        base, _, query = endpoint.partition("?per_page=") if "?per_page=" in endpoint else endpoint.partition("&per_page=")
-        page = int(query.split("page=")[-1])
-        rows = data.get(base, [])
-        return rows if page == 1 else []
+        m = re.fullmatch(r"(.*?)[?&]per_page=(\d+)&page=(\d+)", endpoint)
+        if not m:  # one comment by id
+            cid = int(endpoint.rsplit("/", 1)[1])
+            return next((c for c in data[f"repos/{REPO}/issues/7/comments"] if c["id"] == cid), None)
+        per, page = int(m.group(2)), int(m.group(3))
+        return data.get(m.group(1), [])[(page - 1) * per:page * per]
 
     monkeypatch.setattr(audit, "gh_json", fake)
-    return {"calls": calls}
+    return {"calls": calls, "data": data}
 
 
 def harvest(tmp: Path, since: str = "2029-12-01T00:00:00Z") -> Path:
@@ -115,7 +125,8 @@ def judgment(**k: object) -> dict:
     return j
 
 
-def test_record_dry_run_holds_a_table_and_the_judgments(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+def test_record_dry_run_holds_a_table_and_the_judgments(github: dict, tmp_path: Path,
+                                                       capsys: pytest.CaptureFixture) -> None:
     f = tmp_path / "j.json"
     f.write_text(json.dumps([judgment(note="a | pipe")]))
     ns = audit.argparse.Namespace(repo=REPO, pr=7, session="2030-01-05-batch", file=str(f), backfill=True,
@@ -131,12 +142,13 @@ def test_record_dry_run_holds_a_table_and_the_judgments(tmp_path: Path, capsys: 
 
 @pytest.mark.parametrize("bad", [
     [], [judgment(correct="maybe")], [judgment(rank="fine")], [judgment(round="2")], [judgment(ids=[])],
-    [judgment(note="two\nlines")]])
-def test_record_refuses_a_malformed_judgment(tmp_path: Path, bad: list) -> None:
+    [judgment(note="two\nlines")], [judgment(round=True)], [judgment(ids="COR-1")], [judgment(ids=["COR-1\n| x"])],
+    [judgment(repo="other/repo")], [judgment(session="old")]])
+def test_record_refuses_a_malformed_judgment(github: dict, tmp_path: Path, bad: list) -> None:
     f = tmp_path / "j.json"
     f.write_text(json.dumps(bad))
     ns = audit.argparse.Namespace(repo=REPO, pr=7, session="s1", file=str(f), backfill=False, dry_run=True)
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit, match="judgment"):
         audit.record(ns)
 
 
@@ -196,3 +208,127 @@ def test_wilson_interval() -> None:
     ("claims (the leak-hunter's finding is the same)", ["claims"]), (None, ["other"]), ("unnumbered", ["other"])])
 def test_lenses_reads_free_text(text: str | None, want: list) -> None:
     assert audit.lenses(text) == want
+
+
+def judge_file(tmp: Path, items: list) -> str:
+    f = tmp / "j.json"
+    f.write_text(json.dumps(items))
+    return str(f)
+
+
+def test_harvest_skips_records_the_merge_guard_would_not_trust(github: dict, tmp_path: Path) -> None:
+    comments = github["data"][f"repos/{REPO}/issues/7/comments"]
+    edited = dict(review_comment(6, H2, "success", PASS_OUT, "2030-01-02T05:00:00Z"), updated_at="2030-01-09T00:00:00Z")
+    loose = {"id": 8, "author_association": "OWNER", "created_at": "2030-01-02T06:00:00Z",
+             "updated_at": "2030-01-02T06:00:00Z",
+             "body": "🤖 just a note\nsee <!-- loadout" ":review sha=zz state=success --> here\n"}
+    bad_sha = dict(review_comment(9, H2, "success", PASS_OUT, "2030-01-02T07:00:00Z"))
+    bad_sha["body"] = bad_sha["body"].replace(f"sha={H2}", "sha=zz", 1)
+    comments += [edited, loose, bad_sha]
+    d = harvest(tmp_path)
+    assert [r["comment"] for r in rows(d, "rounds")] == [2, 3]
+
+
+def test_harvest_counts_must_fix_from_the_blocking_line(github: dict, tmp_path: Path) -> None:
+    out = (f"VERDICT: PASS {H2}\nReviewed: {H2}\nBlocking: none\n## Must-fix\nnone\n## Settled, not kept\n"
+           "### COR-1\n- rank: must-fix\n- lens: correctness\n## Dropped\n### CLM-9\n- lens: claims\n"
+           "## Pre-existing\n### GRD-1\n- lens: guardrail\n")
+    github["data"][f"repos/{REPO}/issues/7/comments"].append(review_comment(6, H2, "success", out, "2030-01-02T05:00:00Z"))
+    d = harvest(tmp_path)
+    r = rows(d, "rounds")[-1]
+    assert (r["must_fix"], r["pre_existing"], r["blocking_line"]) == (0, 1, 0)
+    assert [(f["ids"], f["must_fix"], f["rank"]) for f in rows(d, "findings") if f["round"] == 6] == [
+        (["COR-1"], False, "other"), (["GRD-1"], False, "pre-existing")]  # the dropped block is no finding
+
+
+def test_harvest_reads_audits_back_and_the_record_wins_over_the_block(github: dict, tmp_path: Path,
+                                                                      capsys: pytest.CaptureFixture) -> None:
+    ns = audit.argparse.Namespace(repo=REPO, pr=7, session="s-one", file=judge_file(tmp_path, [judgment()]),
+                                  backfill=False, dry_run=True)
+    audit.record(ns)
+    body = capsys.readouterr().out.replace('"note"', '"pr": 99, "session": "forged", "note"')  # a hand-edited block
+    github["data"][f"repos/{REPO}/issues/7/comments"].append(
+        {"id": 10, "body": body, "author_association": "OWNER", "created_at": "2030-01-02T08:00:00Z",
+         "updated_at": "2030-01-02T08:00:00Z"})
+    d = harvest(tmp_path)
+    [a] = rows(d, "audits")
+    assert (a["repo"], a["pr"], a["session"], a["ids"]) == (REPO, 7, "s-one", ["COR-1", "CLM-2"])
+    (d / "audits.jsonl").write_text(json.dumps(a) + "\n" + json.dumps({**a, "session": "s-two", "correct": "no"}) + "\n")
+    assert audit.summarize(d, "s-one")["audited"] == 1 and audit.summarize(d, "s-two")["wrong"][0] == 1
+
+
+def test_harvest_reads_past_the_first_page(github: dict, tmp_path: Path) -> None:
+    comments = github["data"][f"repos/{REPO}/issues/7/comments"]
+    filler = [{"id": 100 + i, "body": "a person's comment", "author_association": "OWNER",
+               "created_at": "2030-01-01T00:00:00Z", "updated_at": "2030-01-01T00:00:00Z"} for i in range(120)]
+    github["data"][f"repos/{REPO}/issues/7/comments"] = filler + comments
+    d = harvest(tmp_path)
+    assert [r["comment"] for r in rows(d, "rounds")] == [2, 3]
+
+
+def test_record_refuses_a_round_that_is_no_review_record_on_that_pr(github: dict, tmp_path: Path) -> None:
+    for pr, rnd in ((8, 2), (7, 1), (7, 404)):  # another PR, a gates record, no such comment
+        ns = audit.argparse.Namespace(repo=REPO, pr=pr, session="s1", file=judge_file(tmp_path, [judgment(round=rnd)]),
+                                      backfill=False, dry_run=True)
+        with pytest.raises(SystemExit, match="no trusted review record"):
+            audit.record(ns)
+
+
+def test_record_posts_and_refuses_a_comment_that_does_not_hold_the_judgments(
+        github: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    posted: dict = {}
+
+    def fake_run(cmd: list, **_: object) -> subprocess.CompletedProcess:
+        posted["body"] = Path(cmd[-1].split("@", 1)[1]).read_text()
+        return subprocess.CompletedProcess(cmd, 0, json.dumps({"id": 77, "html_url": "u77"}), "")
+
+    monkeypatch.setattr(audit.subprocess, "run", fake_run)
+    comments = github["data"][f"repos/{REPO}/issues/7/comments"]
+    ns = audit.argparse.Namespace(repo=REPO, pr=7, session="s1", file=judge_file(tmp_path, [judgment()]),
+                                  backfill=False, dry_run=False)
+    comments.append({"id": 77, "body": "placeholder"})
+    for c in comments:  # the read-back returns what was posted
+        if c["id"] == 77:
+            c["body"] = "x"
+    real = audit.gh_json
+    monkeypatch.setattr(audit, "gh_json", lambda e: {"body": posted["body"]} if e.endswith("/77") else real(e))
+    assert audit.record(ns) == 0 and "u77" in capsys.readouterr().out
+    monkeypatch.setattr(audit, "gh_json", lambda e: {"body": "changed"} if e.endswith("/77") else real(e))
+    with pytest.raises(SystemExit, match="does not hold the judgments"):
+        audit.record(ns)
+
+
+def test_summary_refuses_a_folder_with_no_harvest(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit, match="holds no harvest"):
+        audit.summary(audit.argparse.Namespace(dir=str(tmp_path / "missing"), session=None, json=False))
+
+
+def test_harvest_keeps_records_up_to_until(github: dict, tmp_path: Path) -> None:
+    out = tmp_path / "snap"
+    audit.harvest(audit.argparse.Namespace(repo=[REPO], since="2029-12-01T00:00:00Z", until="2030-01-01T12:00:00Z",
+                                           out=str(out)))
+    assert [r["comment"] for r in rows(out, "rounds")] == [2]
+
+
+def test_harvest_keeps_rounds_from_since_on(github: dict, tmp_path: Path) -> None:
+    d = harvest(tmp_path, since="2030-01-02T00:00:00Z")
+    assert [r["comment"] for r in rows(d, "rounds")] == [3] and rows(d, "gates") == []
+
+
+def test_summary_flags_a_change_whose_must_fix_count_grew(github: dict, tmp_path: Path) -> None:
+    d = harvest(tmp_path)
+    rounds = rows(d, "rounds")
+    rounds[1]["must_fix"], rounds[1]["state"] = 3, "failure"
+    (d / "rounds.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rounds))
+    [c] = audit.summarize(d, None)["attention"]
+    assert c["grew"] and c["series"] == [1, 3]
+
+
+def test_sample_leaves_out_pre_existing_findings(github: dict, tmp_path: Path) -> None:
+    d = harvest(tmp_path)
+    found = rows(d, "findings")
+    for f in found:
+        f["rank"], f["must_fix"] = "pre-existing", False
+    (d / "findings.jsonl").write_text("".join(json.dumps(f) + "\n" for f in found))
+    audit.sample(audit.argparse.Namespace(dir=str(d), n=5, seed=0))
+    assert rows(d, "sample") == []
