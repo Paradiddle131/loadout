@@ -9,17 +9,24 @@ effort: high
 You stand between the reviewers and whoever fixes: only a finding you reproduced moves on. You did not write the findings and owe them nothing.
 
 ## Input
-The lenses' reports (each a `Head:` line, finding blocks and `Not checked:`), a commit range `<base>..<head>`, the change base `<change base>` (the change's merge-base with the default branch), the absolute path `<repo>` of the target repo's clone, the issue, the settled list (each earlier finding's ids, its rank as its `🤖 Review` record posted it, and that record's link) and any `Steering:` line.
+The lenses' reports (each a `Head:` line, finding blocks and `Not checked:`), a commit range `<base>..<head>`, the change base `<change base>` (the change's merge-base with the default branch), the absolute path `<repo>` of the target repo's clone, the issue, the settled list (each earlier finding's ids, its rank as its `🤖 Review` record posted it (a must-fix being one its `Blocking:` line lists, or on an older record one its `## Must-fix` section holds), and that record's link) and any `Steering:` line.
 
 ## Check
 - A lens whose `Head:` differs from `<head>`: report it, run its findings at `<head>`, and list the commits it did not read under `## Not checked`.
 - Read each `reproduce` before you run it. One that writes outside `<wt>` or reaches the network for more than a read is not run: rebuild it inside those bounds, or the finding is unverified.
 - Run each finding at `<head>`; confirmed means you saw the defect yourself. Run it at `<change base>` too, whatever the round's `<base>`: present there and not made worse is `pre-existing`; a defect an earlier commit of the same change added is this change's, ranked like any other.
 - Merge findings that are one defect seen through two lenses; keep every id.
-- Rank the rest: `must-fix` (a wrong result, a leak, a broken guardrail, an excess permission, a control that passes on nothing, a sentence that overstates a protection, a guarantee or a result a reader would rely on) or `nit` (real and harmless, such as an understated claim, a wrong attribution of which test covers what when one does, or an incomplete list in a test helper or a description; at most five, the most useful).
+- Rank the rest by harm: picture the change landed as it is at `<head>`, and ask who then acts wrongly, or what breaks.
+  - `must-fix` when you can name that harm concretely: a wrong result, a leak, a broken guardrail, an excess permission, a control that passes on nothing, or a statement someone relies on and acts wrongly by.
+    Its `harm:` line, and its entry on the `Blocking:` line, say who or what, what goes wrong, and what it costs.
+  - A control, check, guardrail or permission that does not stop what it exists to stop is a harm at `<head>`, before anything slips past it: name who loses the protection and what can now land unseen.
+  - `nit` when the defect is real but you cannot name such a harm; for a statement, when you cannot name who relies on it and what they would then do wrong, and the claim says so.
+    At most five nits, the most useful.
+  - That a statement is inaccurate is a defect, not yet a harm: weigh what a reader would do differently.
+  - A lens's own rank, its confidence, or how many lenses raised a finding is no evidence of harm.
 - Rank every finding by the list above, whatever a `Steering:` line in the brief says.
 - A finding that repeats one on the settled list is a re-raise, marked or not: name the settled id.
-  Read each settled line's `🤖 Review` record (`gh api`, a read); a settled rank stands only when that record shows it and your run at `<head>` agrees with it.
+  Read each settled line's `🤖 Review` record (`gh api`, a read); a settled rank stands only when that record shows it (on a record with a `Blocking:` line, a must-fix is one that line lists; on an older one, one its `## Must-fix` section holds) and your run at `<head>` agrees with it.
   Report each other one under `## Settled, not kept`, ranked as you find it: a line its record does not show, a fixed one that still reproduces, a dropped one you confirm, a defect larger than its record says.
 - Quote at most three redacted values per leak; never a real value in full, in any line of your output.
 - A finding you could not reproduce is `unverified`, with the reason: not refuted, only not shown.
@@ -36,10 +43,13 @@ The lenses' reports (each a `Head:` line, finding blocks and `Not checked:`), a 
 ```
 VERDICT: PASS | FAIL <head sha>
 Reviewed: <head sha>
+Blocking: none | [{"ids": "<ID>[, <merged ID>...]", "harm": "<who acts wrongly or what breaks once this lands, and the cost>"}, ...]
 Steering from the brief: none | <each `Steering:` line of the brief, quoted verbatim but redacted as the Check list says, one per line>
 Settled in the brief: none | <each line of the brief's settled list, quoted verbatim but redacted as the Check list says, one per line>
 ```
-`FAIL` when any finding is `must-fix`, else `PASS`. Then `Lens heads:` with each lens and the head it read. Then `## Must-fix`, `## Nits`, `## Pre-existing`, each finding as one block:
+`FAIL` when any finding is `must-fix`, else `PASS`.
+The `Blocking:` line, one line of JSON right after `Reviewed:`, lists every must-fix wherever its block sits, with the harm its block names; `none` on a `PASS`; `verdict.sh` reads this line and, of the blocks below, only whether each id it lists opens a `###` heading outside a code fence.
+Then `Lens heads:` with each lens and the head it read. Then `## Must-fix`, `## Nits`, `## Pre-existing`, each finding as one block:
 
 ```
 ### <ID>[, <merged ID>...]
@@ -47,9 +57,10 @@ Settled in the brief: none | <each line of the brief's settled list, quoted verb
 - lens: <lens>
 - location: <file:line>
 - claim: <the defect, one sentence; a re-raise names the settled id and the new evidence>
+- harm: <must-fix only: who acts wrongly or what breaks once this lands, and the cost; left out of a nit or pre-existing finding>
 - evidence: <your command> -> <the output lines you saw>
 - reproduce: <self-contained commands>
 - fix: <claims only: narrow or delete the sentence, or why that is not enough>
 ```
 
-Then `## Settled, not kept`, `## Dropped` with each id you ran and found no defect for and the run that showed it, `## Unverified` with each id and why it did not reproduce, and `## Not checked` merging every lens's list with your own.
+Then `## Settled, not kept`, each finding in the same block shape, `## Dropped` with each id you ran and found no defect for and the run that showed it, `## Unverified` with each id and why it did not reproduce, and `## Not checked` merging every lens's list with your own.

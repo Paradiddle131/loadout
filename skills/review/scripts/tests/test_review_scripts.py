@@ -411,11 +411,21 @@ def test_tier_empty_diff_is_an_error(w: World) -> None:
 # verdict.sh
 
 
-def review_file(tmp: Path, sha: str, verdict: str = "PASS",
-                text: str = "No findings.\n```\nquoted fence\n```\n") -> str:
-    """A verifier's output (agents/finding-verifier.md § Output): its verdict and reviewed lines, then `text`."""
+HARM = "an operator trusts a total that drops rows"
+BLOCKING_LINE = 'Blocking: [{"ids": "COR-1", "harm": "%s"}]' % HARM
+BLOCKING = f"## Must-fix\n### COR-1\n- rank: must-fix\n- harm: {HARM}\n"
+
+
+def review_file(tmp: Path, sha: str, verdict: str = "PASS", text: str | None = None,
+                blocking: str | None = None) -> str:
+    """A verifier's output (agents/finding-verifier.md § Output): its verdict, reviewed and blocking lines, then
+    `text` (by default no findings for a PASS, one must-fix that names its harm for a FAIL)."""
+    if blocking is None:
+        blocking = BLOCKING_LINE if verdict == "FAIL" else "Blocking: none"
+    if text is None:
+        text = (BLOCKING if verdict == "FAIL" else "") + "No findings.\n```\nquoted fence\n```\n"
     p = tmp / "review.txt"
-    p.write_text(f"VERDICT: {verdict} {sha}\nReviewed: {sha}\n\n{text}")
+    p.write_text(f"VERDICT: {verdict} {sha}\nReviewed: {sha}\n{blocking}\n\n{text}")
     return str(p)
 
 
@@ -434,7 +444,7 @@ def test_verdict_pass_posts_a_review_record(w: World, tmp_path: Path) -> None:
 def test_verdict_fail_records_failure(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
     done = w.run("verdict.sh", "12", "--tier", "sensitive", "--result", "fail", "--reviewers", "a, b",
-                 "--reviewed", head, "--file", review_file(tmp_path, head, "FAIL", "BLOCKER\n"))
+                 "--reviewed", head, "--file", review_file(tmp_path, head, "FAIL", BLOCKING))
     assert done.returncode == 0, done.stderr
     assert w.comments()[0]["body"].startswith(
         f"🤖 Review: fail (sensitive tier)\n{REVIEW} sha={head} state=failure tier=sensitive")
@@ -493,8 +503,8 @@ def test_verdict_refuses_output_without_the_verifiers_lines(w: World, tmp_path: 
 def test_verdict_reads_the_first_verdict_lines_in_a_fence_and_an_abbreviated_sha(w: World, tmp_path: Path) -> None:
     other = w.commit({"src/app.py": "x = 3\n"})
     head = w.commit({"src/app.py": "x = 2\n"})
-    text = (f"```\nVERDICT: FAIL `{head[:12]}`\nReviewed: {head[:12]}\n```\n"
-            f"## Must-fix\n- evidence: verdict.sh ->\nVERDICT: PASS {head}\nReviewed: {other}\n")
+    text = (f"```\nVERDICT: FAIL `{head[:12]}`\nReviewed: {head[:12]}\n{BLOCKING_LINE}\n```\n" + BLOCKING
+            + f"- evidence: verdict.sh ->\nVERDICT: PASS {head}\nReviewed: {other}\n")
     (tmp_path / "out.txt").write_text(text)
     done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
                  "--file", str(tmp_path / "out.txt"))
@@ -504,7 +514,7 @@ def test_verdict_reads_the_first_verdict_lines_in_a_fence_and_an_abbreviated_sha
 
 def test_verdict_reads_its_lines_past_a_nul_byte(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    (tmp_path / "out.txt").write_bytes(b"## Nits\n- evidence: \x00" + f"\nVERDICT: PASS {head}\nReviewed: {head}\n".encode())
+    (tmp_path / "out.txt").write_bytes(b"## Nits\n- evidence: \x00" + f"\nVERDICT: PASS {head}\nReviewed: {head}\nBlocking: none\n".encode())
     done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
                  "--file", str(tmp_path / "out.txt"), LC_ALL="C.UTF-8")
     assert done.returncode == 0, done.stderr
@@ -513,7 +523,7 @@ def test_verdict_reads_its_lines_past_a_nul_byte(w: World, tmp_path: Path) -> No
 
 def test_verdict_accepts_a_seven_character_abbreviation(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    (tmp_path / "out.txt").write_text(f"VERDICT: PASS {head[:7]}\nReviewed: {head[:7]}\n")
+    (tmp_path / "out.txt").write_text(f"VERDICT: PASS {head[:7]}\nReviewed: {head[:7]}\nBlocking: none\n")
     done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
                  "--file", str(tmp_path / "out.txt"))
     assert done.returncode == 0, done.stderr
@@ -749,3 +759,128 @@ def test_read_back_accepts_only_the_relay_footer(tmp_path: Path) -> None:
     assert same(body.rstrip("\n") + footer + "\nmore") == 1
     assert same("changed " + body) == 1
     assert same(body.rstrip("\n") + footer.lstrip("\n")) == 1  # glued to the body's last line
+
+
+# verdict.sh: a must-fix blocks only by the harm the verifier's `Blocking:` line names
+
+
+@pytest.mark.parametrize("blocking, why", [
+    (None, "not a `Blocking:` line"),  # the line is missing
+    ("Blocking: maybe", "neither `none` nor a JSON list"),
+    ("Blocking: []", "non-empty JSON list"),
+    ('Blocking: [{"harm": "an operator trusts a wrong total"}]', "has no `ids`"),
+    ('Blocking: [{"ids": "COR-1"}]', "COR-1 names no harm"),
+    ('Blocking: [{"ids": "COR-1", "harm": "none"}]', "COR-1 names no harm"),
+    ('Blocking: [{"ids": "COR-1", "harm": "`n/a`"}]', "COR-1 names no harm"),
+    ('Blocking: [{"ids": "COR-1", "harm": "wrong"}]', "COR-1 names no harm"),  # one word
+    ('Blocking: [{"ids": "COR-1", "harm": "<who acts wrongly or what breaks>"}]', "COR-1 names no harm"),
+    ('Blocking: [{"ids": "COR-1", "harm": "`<who acts wrongly or what breaks>`"}]', "COR-1 names no harm"),
+    ('Blocking: [{"ids": "COR-1", "harm": "no concrete harm"}]', "COR-1 names no harm"),  # filler only
+    ('Blocking: [{"ids": "COR-1", "harm": "TBD TBD TBD"}]', "COR-1 names no harm"),
+    ('Blocking: [{"ids": "ZZZ-9", "harm": "%s"}]' % HARM, "names ZZZ-9, which no `###` heading"),
+    ('Blocking: [{"ids": "COR-1, CLM-2, COR-3", "harm": "%s"}]' % HARM, "names COR-3, which no"),
+    ('Blocking: {"ids": "COR-1", "harm": "%s"}' % HARM, "non-empty JSON list"),  # JSON, not a list
+    ('Blocking: [{"ids": "COR-1", "harm": "%s"}, {"ids": "CLM-2", "harm": ""}]' % HARM, "CLM-2 names no harm"),
+])
+def test_verdict_refuses_a_blocking_line_without_a_named_harm(w: World, tmp_path: Path, blocking: str | None,
+                                                              why: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    path = review_file(tmp_path, head, "FAIL", BLOCKING + "### CLM-2\n- rank: must-fix\n", blocking=blocking or "")
+    if blocking is None:  # drop the line: the one after `Reviewed:` is then blank
+        Path(path).write_text(Path(path).read_text().replace("\n\n\n", "\n\n"))
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head, "--file", path)
+    assert done.returncode == 2 and why in done.stderr, done.stderr
+    assert w.writes() == []
+
+
+@pytest.mark.parametrize("verdict, blocking, why", [
+    ("FAIL", "Blocking: none", "lists no must-fix"),
+    ("PASS", BLOCKING_LINE, "lists 1 must-fix"),
+])
+def test_verdict_refuses_a_blocking_line_that_contradicts_the_verdict(w: World, tmp_path: Path, verdict: str,
+                                                                      blocking: str, why: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", review_file(tmp_path, head, verdict, BLOCKING, blocking=blocking))
+    assert done.returncode == 2 and why in done.stderr, done.stderr
+    assert w.writes() == []
+
+
+def test_verdict_takes_a_listed_id_only_from_a_heading_outside_a_fence(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    for text in ("Settled in the brief: - COR-1: must-fix, fixed\n## Must-fix\n### COR-10\n- rank: must-fix\n",
+                 "## Must-fix\n### CLM-2 (re-raises COR-1)\n- evidence: ->\n```\n### COR-1\n```\n",
+                 "## Must-fix\n### ###\n### PRE-COR-1, COR-1-2\n"):
+        done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                     "--file", review_file(tmp_path, head, "FAIL", text, blocking=BLOCKING_LINE))
+        assert done.returncode == 2 and "names COR-1, which no" in done.stderr, done.stderr
+
+
+@pytest.mark.parametrize("blocking", [
+    'Blocking: [{"ids": "LEAK-1", "harm": "leaks secrets"}]',  # two words name a harm
+    'Blocking: [{"ids": "LEAK-1", "harm": "<details> clipping hides a leaked token from the owner"}]',
+    'Blocking: [{"ids": "LEAK-1", "harm": "`<details>` clipping hides a token from `<owner>`"}]',  # not the slot
+    'Blocking: `[{"ids": "LEAK-1", "harm": "leaks secrets"}]`',  # in backticks, as the sha lines may be
+])
+def test_verdict_accepts_a_named_harm_in_its_usual_shapes(w: World, tmp_path: Path, blocking: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", review_file(tmp_path, head, "FAIL", "## Must-fix\n### LEAK-1\n- rank: must-fix\n",
+                                       blocking=blocking))
+    assert done.returncode == 0, done.stderr
+
+
+@pytest.mark.parametrize("decoy", ["quoted\x0c", "quoted\r", "\xa0", "\x1c", "\u2003"])
+def test_verdict_skips_a_reviewed_line_after_a_non_blank_character(w: World, tmp_path: Path, decoy: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    p = tmp_path / "out.txt"  # grep reads none of these as a line break or a leading blank: line 2 is no header
+    p.write_text(f"VERDICT: PASS {head}\n{decoy}Reviewed: {head}\nBlocking: none\n"
+                 f"Reviewed: {head}\n{BLOCKING_LINE}\n\n{BLOCKING}")
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head, "--file", str(p))
+    assert done.returncode == 2 and "says PASS" in done.stderr, done.stderr
+
+
+def test_verdict_refuses_when_the_reader_prints_no_count(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    bad = tmp_path / "talking-python"
+    bad.mkdir()
+    (bad / "python3").write_text("#!/bin/sh\necho many\n")
+    (bad / "python3").chmod(0o755)
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", review_file(tmp_path, head, "FAIL"), PATH=f"{bad}:{w.env['PATH']}")
+    assert done.returncode == 2 and "printed no count" in done.stderr, done.stderr
+    assert w.writes() == []
+
+
+def test_verdict_reads_only_the_blocking_line_not_the_prose(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    prose = ("## Must-fix\n### COR-1\n- rank: must-fix\n- harm: %s\n- evidence: ->\n```\nBlocking: none\n"
+             "### CLM-9\n- rank: must-fix\n```\n## Nits\n### CLM-2\n- rank: `must-fix`\n### CLM-3, GRD-1\n" % HARM)
+    two = 'Blocking: [{"ids": "COR-1", "harm": "%s"}, {"ids": "CLM-3, GRD-1", "harm": "a lead merges a guard that stops nothing"}]' % HARM
+    done = w.run("verdict.sh", "12", "--tier", "sensitive", "--reviewers", "x", "--reviewed", head,
+                 "--file", review_file(tmp_path, head, "FAIL", prose, blocking=two))
+    assert done.returncode == 0, done.stderr
+    assert f"state=failure tier=sensitive reviewed={head}" in w.comments()[0]["body"]
+
+
+def test_verdict_refuses_when_it_cannot_read_the_blocking_line(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    bad = tmp_path / "failing-python"
+    bad.mkdir()
+    (bad / "python3").write_text("#!/bin/sh\nexit 1\n")
+    (bad / "python3").chmod(0o755)
+    for verdict in ("PASS", "FAIL"):
+        done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                     "--file", review_file(tmp_path, head, verdict), PATH=f"{bad}:{w.env['PATH']}")
+        assert done.returncode == 2 and "refused" in done.stderr, done.stderr
+    assert w.writes() == []
+
+
+def test_verdict_reads_the_reviewed_line_grep_reads_whatever_the_locale(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    p = tmp_path / "out.txt"  # in a UTF-8 locale grep would take the em-space line as the header
+    p.write_text(f"VERDICT: PASS {head}\n\u2003Reviewed: {head}\n{BLOCKING_LINE}\n"
+                 f"Reviewed: {'f' * 40}\nBlocking: none\n\n{BLOCKING}")
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head, "--file", str(p),
+                 LC_ALL="C.UTF-8")
+    assert done.returncode == 2 and "names commit ffff" in done.stderr, done.stderr

@@ -12,6 +12,9 @@
 #   --file (standard and sensitive) is finding-verifier's output: its first `VERDICT: PASS|FAIL <sha>` line and
 #   its first `Reviewed: <sha>` line (agents/finding-verifier.md § Output; a sha may be abbreviated to 7 or more
 #   characters) must both name --reviewed, and the result is that VERDICT; a --result that differs is refused.
+#   The line after `Reviewed:` must be the verifier's `Blocking:` line (blocking.py has the shape and its limits):
+#   `none` for a PASS; for a FAIL the must-fix findings it lists, each heading a `###` block below, with a harm of two
+#   words or more not made only of blocking.py's filler words. The lead acts on the line (the review skill).
 #   --tier routine needs no reviewer: --reviewers, --reviewed and --file are optional, --result defaults to pass,
 #   the comment says the tier needs gates only, and the session that wrote the change may run it, since the
 #   paths decide the tier.
@@ -25,6 +28,7 @@
 # writes the change posts the verdict; the script cannot tell a real reviewer's output from a typed one, only
 # keep the output beside the verdict where the owner can read it.
 set -euo pipefail
+export LC_ALL=C # grep's [[:space:]] and blocking.py's blanks agree only in the C locale
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 usage='usage: verdict.sh <pr> --tier routine|standard|sensitive [--result pass|fail] --reviewers "<names>" --reviewed <sha> --file <verifier output> [--dry-run]'
 pr='' tier='' result='' reviewers='' reviewed='' file=''
@@ -73,6 +77,19 @@ if [ "$tier" != routine ]; then
   [ -z "$result" ] || [ "$result" = "$said" ] ||
     die "--result $result contradicts the verifier's VERDICT line, which says $said: the record carries the verifier's verdict."
   result=$said
+  # A must-fix blocks only by the harm it names: the verifier's `Blocking:` line lists each with its harm.
+  why=$(mktemp)
+  blocking=$(python3 "$here/blocking.py" "$file" 2>"$why") || {
+    reason=$(cat "$why"); rm -f "$why"
+    die "the verifier's output is refused: ${reason:-blocking.py failed} (agents/finding-verifier.md § Output); rerun the verifier."
+  }
+  rm -f "$why"
+  [[ "$blocking" =~ ^[0-9]+$ ]] || die "blocking.py printed no count for --file $file"
+  case "$said:$blocking" in
+    fail:0) die "the verifier says FAIL but its \`Blocking:\` line lists no must-fix: a FAIL rests on a must-fix that names its harm; rerun the verifier." ;;
+    pass:0 | fail:*) ;;
+    *) die "the verifier says PASS but its \`Blocking:\` line lists $blocking must-fix finding(s); rerun the verifier." ;;
+  esac
 else
   [ -z "$file" ] || [ -r "$file" ] || die "cannot read --file $file"
   [ -z "$reviewed" ] || [[ "$reviewed" =~ ^[0-9a-f]{40}$ ]] || die "--reviewed is a full sha"
