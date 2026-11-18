@@ -777,8 +777,8 @@ def test_read_back_accepts_only_the_relay_footer(tmp_path: Path) -> None:
     ('Blocking: [{"ids": "COR-1", "harm": "`<who acts wrongly or what breaks>`"}]', "COR-1 names no harm"),
     ('Blocking: [{"ids": "COR-1", "harm": "no concrete harm"}]', "COR-1 names no harm"),  # filler only
     ('Blocking: [{"ids": "COR-1", "harm": "TBD TBD TBD"}]', "COR-1 names no harm"),
-    ('Blocking: [{"ids": "ZZZ-9", "harm": "%s"}]' % HARM, "names ZZZ-9, which heads no `###` finding"),
-    ('Blocking: [{"ids": "COR-1, CLM-2, COR-3", "harm": "%s"}]' % HARM, "names COR-3, which heads no"),
+    ('Blocking: [{"ids": "ZZZ-9", "harm": "%s"}]' % HARM, "names ZZZ-9, which no `###` heading"),
+    ('Blocking: [{"ids": "COR-1, CLM-2, COR-3", "harm": "%s"}]' % HARM, "names COR-3, which no"),
     ('Blocking: {"ids": "COR-1", "harm": "%s"}' % HARM, "non-empty JSON list"),  # JSON, not a list
     ('Blocking: [{"ids": "COR-1", "harm": "%s"}, {"ids": "CLM-2", "harm": ""}]' % HARM, "CLM-2 names no harm"),
 ])
@@ -806,12 +806,14 @@ def test_verdict_refuses_a_blocking_line_that_contradicts_the_verdict(w: World, 
     assert w.writes() == []
 
 
-def test_verdict_takes_a_listed_id_only_from_a_heading_not_from_a_longer_id_or_a_quote(w: World, tmp_path: Path) -> None:
+def test_verdict_takes_a_listed_id_only_from_a_heading_outside_a_fence(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    text = "Settled in the brief: - COR-1: must-fix, fixed\n## Must-fix\n### COR-10\n- rank: must-fix\n"
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
-                 "--file", review_file(tmp_path, head, "FAIL", text, blocking=BLOCKING_LINE))
-    assert done.returncode == 2 and "names COR-1, which heads no" in done.stderr, done.stderr
+    for text in ("Settled in the brief: - COR-1: must-fix, fixed\n## Must-fix\n### COR-10\n- rank: must-fix\n",
+                 "## Must-fix\n### CLM-2 (re-raises COR-1)\n- evidence: ->\n```\n### COR-1\n```\n",
+                 "## Must-fix\n### ###\n### PRE-COR-1, COR-1-2\n"):
+        done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                     "--file", review_file(tmp_path, head, "FAIL", text, blocking=BLOCKING_LINE))
+        assert done.returncode == 2 and "names COR-1, which no" in done.stderr, done.stderr
 
 
 @pytest.mark.parametrize("blocking", [
@@ -828,8 +830,8 @@ def test_verdict_accepts_a_named_harm_in_its_usual_shapes(w: World, tmp_path: Pa
     assert done.returncode == 0, done.stderr
 
 
-@pytest.mark.parametrize("decoy", ["quoted\x0c", "\xa0", "\x1c", "\u2003"])
-def test_verdict_reads_the_reviewed_line_grep_reads(w: World, tmp_path: Path, decoy: str) -> None:
+@pytest.mark.parametrize("decoy", ["quoted\x0c", "quoted\r", "\xa0", "\x1c", "\u2003"])
+def test_verdict_skips_a_reviewed_line_after_a_non_blank_character(w: World, tmp_path: Path, decoy: str) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
     p = tmp_path / "out.txt"  # grep reads none of these as a line break or a leading blank: line 2 is no header
     p.write_text(f"VERDICT: PASS {head}\n{decoy}Reviewed: {head}\nBlocking: none\n"
@@ -872,3 +874,13 @@ def test_verdict_refuses_when_it_cannot_read_the_blocking_line(w: World, tmp_pat
                      "--file", review_file(tmp_path, head, verdict), PATH=f"{bad}:{w.env['PATH']}")
         assert done.returncode == 2 and "refused" in done.stderr, done.stderr
     assert w.writes() == []
+
+
+def test_verdict_reads_the_reviewed_line_grep_reads_whatever_the_locale(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    p = tmp_path / "out.txt"  # in a UTF-8 locale grep would take the em-space line as the header
+    p.write_text(f"VERDICT: PASS {head}\n\u2003Reviewed: {head}\n{BLOCKING_LINE}\n"
+                 f"Reviewed: {'f' * 40}\nBlocking: none\n\n{BLOCKING}")
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head, "--file", str(p),
+                 LC_ALL="C.UTF-8")
+    assert done.returncode == 2 and "names commit ffff" in done.stderr, done.stderr
