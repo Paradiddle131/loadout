@@ -30,6 +30,17 @@ A repo's own instructions win where they set a different default.
 - The lead removes each worktree once its branch is merged or parked.
 - The worker commits as it goes; the lead pushes each worker branch when the worker returns, under the repo's branch rule, since an unpushed commit can die with its machine.
 
+## A worker on the owner's computer
+
+Work only the owner's machine can do (their logins, local tools, live runs off the cloud proxy) goes to a session there, on a Remote Control bridge environment the owner serves.
+
+- Start it with `create_session` on that environment (`list_environments`, kind `bridge`), not `request_computer_folder`: once a session has asked for a computer folder it no longer reaches the owner's other sessions.
+- A refusal of that call that carries a `content_digest` asks for the owner's one-time approval: say in one line what the card asks, call `confirm_repository_trust` with that digest, and repeat the call once they allow it.
+- The lead reaches the worker with `send_message`; the worker's `send_message` to a lead whose permission mode was set on a trusted device is refused (`elevated_session_untrusted_device`, non-retryable, no digest), so the brief names another report channel and says not to retry a refused send.
+- The report channel: a comment on the item's PR, which the lead watches with `subscribe_pr_activity` and receives as a GitHub event (an issue sends none, so a comment there waits for the lead's next read); the lead also reads the worker's last turn itself (`list_events` with kinds `["result"]`, or `get_session`'s `post_turn_summary`).
+- Put the task and its report step in `create_session`'s opening prompt, saying the owner asked for both: a worker in auto mode refuses a GitHub write that only a later `send_message` asks for, as communication nobody sanctioned.
+- The comment is a report like any other: public, so the brief restates the repo's redaction rules, and a claim until the lead checks it.
+
 ## Model and effort
 
 Set both on every delegation and in every agent definition (`model` and `effort` in its frontmatter): a subagent on another model than the session's does not run at the session's effort.
