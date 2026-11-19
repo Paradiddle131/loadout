@@ -39,6 +39,7 @@ Work only the owner's machine can do (their logins, local tools, live runs off t
 - The lead reaches the worker with `send_message`; the worker's `send_message` to a lead whose permission mode was set on a trusted device is refused (`elevated_session_untrusted_device`, non-retryable, no digest), so the brief names another report channel and says not to retry a refused send.
 - The report channel: a comment on the item's PR, which the lead watches with `subscribe_pr_activity` and receives as a GitHub event (an issue sends none, so a comment there waits for the lead's next read); the lead also reads the worker's last turn itself (`list_events` with kinds `["result"]`, or `get_session`'s `post_turn_summary`).
 - Put the task and its report step in `create_session`'s opening prompt, saying the owner asked for both: a worker in auto mode refuses a GitHub write that only a later `send_message` asks for, as communication nobody sanctioned.
+- A sensitive step the owner confirmed only to the lead (an IAM write, a grant) can still be refused by the worker's auto-mode classifier, whatever the opening prompt says: put it in the brief as the last step, have the worker stop at a refusal and report it, and give the owner the commands to run themselves.
 - The comment is a report like any other: public, so the brief restates the repo's redaction rules, and a claim until the lead checks it.
 
 ## Model and effort
