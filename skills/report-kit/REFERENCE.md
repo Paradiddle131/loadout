@@ -281,6 +281,7 @@ The page filters its own rows on the boxes' `change` events: the component only 
 - `data-rk-sort-group="name"` links tables (a switch's views of the same rows): a sort on one sorts the others by the same column and direction.
 - `data-rk-flip` slides rows to their new places, except under reduced motion.
 - `rk-stack` turns each row into a block when the table's wrap is narrower than `data-rk-stack-at` (default `56rem`; rem, em or px): the row head and `.rk-wide` cells span the row, every other value gets its column's label and mark.
+  A text value sits under its label, as a number does.
   `rk-stack-compact` keeps only the mark beside each number (the words stay for screen readers and for columns without a mark) and lays the header out as a two-column sort bar.
 - Each sort fires `rk:sort` on the table with `{table, key, dir}`; `ReportKit.tableSort.apply(table, col, kind, dir)` sorts a table from a page's own script.
 
