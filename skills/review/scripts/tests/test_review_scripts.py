@@ -366,6 +366,14 @@ def test_tier_reads_this_repos_review_md_with_its_lenses(w: World) -> None:
     assert out == ["sensitive", "cloud/gcp/guard.py (lenses: control-prober, guardrail-reviewer)"]
 
 
+def test_tier_takes_the_debrief_skill_as_sensitive_by_this_repos_review_md(w: World) -> None:
+    base_has(w, {"REVIEW.md": (SCRIPTS.parents[2] / "REVIEW.md").read_text()})
+    w.commit({"skills/debrief/landings.md": "x\n"})
+    code, out, err = tier(w)
+    assert code == 0 and err == "", err
+    assert out == ["sensitive", "skills/debrief/landings.md (lenses: claims-auditor, guardrail-reviewer)"]
+
+
 @pytest.mark.parametrize("line, lenses", [
     ("- `src/**` — keeps the lenses honest; lenses: one, two", "one, two"),  # the word in a reason is text
     ("- `src/**` — lenses: one", ""),  # no `;`: a reason, not a lenses clause
