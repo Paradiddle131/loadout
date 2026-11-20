@@ -93,7 +93,7 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 ## 9. File and brief
 
 - File an issue (the `issue` skill) per unfixed finding: `pre-existing`, `unverified`; one per PR for its unapplied nits; a parked item's `must-fix` findings stay in its `needs-owner` packet, not also in issues.
-- The owner's brief (and a `debrief` over several runs) lists sensitive landings first, then unreviewed ones; per item: tier, reviewers run, verdict link, issues filed, and each steering line, quoted with personal or secret values redacted.
+- The owner's brief lists sensitive landings first, then unreviewed ones (a `debrief` over several runs follows its own `landings.md`); per item: tier, reviewers run, verdict link, issues filed, and each steering line, quoted with personal or secret values redacted.
 - A decision that weakens how a guardrail is enforced is never the session's: it is a conflict packet on its issue (`ways/guardrails.md`), labelled `needs-owner`.
 - Before the owner sees it, [`handoff-auditor`](../../agents/handoff-auditor.md) checks the handoff and its decisions against the PRs and issues; fix what it confirms.
 - Done when the auditor has returned and every unfixed finding has an issue the brief links.

@@ -12,9 +12,9 @@ It is a pitch: short, plain English, visual, and built around **attention**, mea
 
 - **The big picture first:** where the work stands against its scope, roadmap or vision, drawn as a picture, so the owner sees direction and distance left rather than a list of items.
 - **Attention gets the space.** What went wrong, what is blocked, what the owner must decide, what could improve: each in a few plain lines, with its cost and what clears it.
-- **Every change gets its line.** When anything merged, closed or waits, the attention part opens, after the big picture, with the lines [`landings.md`](landings.md) defines: sensitive and waiting work first, the rest one short line each; none goes silent.
+- **Every change gets its line.** When anything landed, closed or waits, the attention part carries the lines [`landings.md`](landings.md) defines, after what needs the owner and is not a PR: risky and waiting changes in full, the expected one short line each; none goes silent.
 - **The expected stays quiet.** Everything else that went as it should (no cost, rules held, nothing dropped) gets one short line or nothing; it earns detail only once it goes wrong.
-- **Sections are a menu.** Usual ones: what happened, how the agents did, how the reviews did, what went wrong, what needs you and how to unblock, the next best action. Leave out any with nothing to say (no agent PR merged or open, nothing blocks) and add any the work calls for.
+- **Sections are a menu.** Usual ones: what happened, how the agents did, how the reviews did, what went wrong, what needs you and how to unblock, the next best action. Leave out any with nothing to say (nothing merged, closed, pushed or waiting; nothing blocks) and add any the work calls for.
 - **Plain English for a reader outside the work**, by the standing rule on reports: process metadata stays in the PRs and issues, and every term the page shows gets a gloss.
 
 ## The form
