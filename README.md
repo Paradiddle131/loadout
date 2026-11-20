@@ -6,8 +6,8 @@ Agent skills, ways of working and standing rules, packaged as a [Claude Code](ht
 
 | Plugin | Holds | For |
 |---|---|---|
-| `loadout` | `pr`, `issue`, `review`, `delegating`, `experiment-preflight`, `draw-architecture`, `report-kit`, `grilling`, `writing-for-agents`, `concern-to-rule`; review agents `correctness-reviewer`, `claims-auditor`, `guardrail-reviewer`, `leak-hunter`, `control-prober`, `finding-verifier`, `handoff-auditor` | any machine |
-| `cloud` | `autopilot`, `autopilot-brief`, `image-cache`, and session hooks | [Claude Code on the web](cloud/README.md) |
+| `loadout` | `pr`, `issue`, `review`, `delegating`, `experiment-preflight`, `draw-architecture`, `report-kit`, `debrief`, `grilling`, `writing-for-agents`, `concern-to-rule`; review agents `correctness-reviewer`, `claims-auditor`, `guardrail-reviewer`, `leak-hunter`, `control-prober`, `finding-verifier`, `handoff-auditor` | any machine |
+| `cloud` | `autopilot`, `image-cache`, and session hooks | [Claude Code on the web](cloud/README.md) |
 
 - [`RULES.md`](RULES.md): standing rules for an agent in any repo.
 - [`FEEDBACK.md`](FEEDBACK.md): the rules that write back to this collection's own repo, kept apart so a machine can leave them out; [`bin/friction`](bin/friction) carries what got in an agent's way to its tracker.
@@ -36,7 +36,7 @@ gh skill install <owner>/loadout pr --agent github-copilot --scope user
 - `npx skills` (Node 22.20+): `npx skills update` takes the latest; it sends anonymous telemetry unless `DO_NOT_TRACK=1`.
 - `gh skill` (GitHub CLI 2.90+): `gh skill update` takes the latest, `--pin <tag-or-sha>` holds one.
 - A skill installed this way is named bare (`/pr`); install it one way only, or it loads twice.
-- `autopilot`, `autopilot-brief` and `image-cache` are for Claude Code on the web; skip them elsewhere.
+- `autopilot` and `image-cache` are for Claude Code on the web; skip them elsewhere.
 
 **Rules** are imported, not installed: clone the repo and add `@<clone>/RULES.md` to `~/.claude/CLAUDE.md` (or paste its rules into another agent's instructions), plus `@<clone>/FEEDBACK.md` only where the work may be described in this collection's repo.
 A rule that names a skill applies where that skill is installed.

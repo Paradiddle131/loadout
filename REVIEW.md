@@ -9,6 +9,7 @@ Every repo that imports the collection runs what these paths hold, so a change t
 - `agents/**` — the reviewers themselves; lenses: guardrail-reviewer, control-prober
 - `skills/review/**` — the landing path and its scripts; lenses: guardrail-reviewer, control-prober
 - `skills/delegating/**` — how work is handed out and checked; lenses: guardrail-reviewer
+- `skills/debrief/**` — what the owner is shown of merges only reviewers read; lenses: guardrail-reviewer, claims-auditor
 - `cloud/setup.sh` — runs as root at every cloud session start; lenses: guardrail-reviewer
 - `cloud/memory.sh` — writes the user-level instructions; lenses: guardrail-reviewer
 - `cloud/gcp/**` — the spend guard and its fences; lenses: guardrail-reviewer, control-prober
