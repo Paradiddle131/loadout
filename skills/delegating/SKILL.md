@@ -10,7 +10,7 @@ A repo's own instructions win where they set a different default.
 ## When to delegate
 
 - Delegate every review.
-- Delegate an item's implementation when it runs beside another item, when the lead runs a stronger model or higher effort than its workers would, or for the `review` skill's rethink; a lead on the workers' model and effort builds a lone item itself, since a worker would re-read what the lead has read, lose what the brief leaves out, and add no judgement.
+- Delegate an item's implementation when it runs beside another item, when the lead runs a stronger model or higher effort than its workers would, or for the `review` skill's rethink; a lead on the workers' model and effort builds a lone item itself, and any other lead delegates it, since a worker would re-read what the lead has read, lose what the brief leaves out, and add no judgement.
 - Keep in the main loop a handful of tool calls, one coupled change, and anything a search answers.
 - Run workers in parallel only on items that touch different files; items that share files run one after another.
 
@@ -64,7 +64,7 @@ Set both on every delegation and in every agent definition (`model` and `effort`
 ## Review
 
 - Which item gets which review is the `review` skill's tier rule, never the lead's sense of what is small.
-- A reviewer gets the commit range, the issue and the lead's central risk, never the worker's summary, and works by the `review` skill.
+- A reviewer gets the commit range, the issue and the lead's central risk where it briefed a worker, never the worker's summary, and works by the `review` skill.
 
 ## Before the handoff
 
