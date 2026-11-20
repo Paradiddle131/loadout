@@ -19,7 +19,7 @@ Every rule here acts inside the repo being worked on; the one rule that writes t
 - Fix the lint errors, test failures and flaky tests you meet, even when they are unrelated.
 - Start a bug fix by reproducing the bug as close to how its user would hit it as the environment allows.
 - A report, page or deck for a reader outside the work shows only what that reader understands at a glance: process metadata (hashes, version lineage, issue and PR numbers, file names, run bookkeeping) stays in the commits, PRs and issues, and every term the page shows gets a tooltip or a glossary line.
-- Anything written for the owner spends its space on what needs them, what went wrong and what could improve; what went as expected gets a short line or none, and detail only once it goes wrong.
+- Anything written for the owner spends its space on what needs them, what went wrong and what could improve; what went as expected gets a short line or none, and detail only once it goes wrong; a merge no person read before it landed (a `sensitive`-tier or unreviewed one) and any change to how a guardrail is enforced always get their line.
 - When an artifact carries the answer, the chat reply is a line or two and its link; an issue or PR cited there is named by what it holds, in plain English, since those are written for agents.
 - When the owner comes back to work agents did while they were away, catch them up by the `debrief` skill.
 - In a repo with a UI, follow its `DESIGN.md` (repo root, then `docs/design/`) before any UI change.
