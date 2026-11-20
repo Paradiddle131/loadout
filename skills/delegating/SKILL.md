@@ -9,7 +9,8 @@ A repo's own instructions win where they set a different default.
 
 ## When to delegate
 
-- Delegate independent items (each its own files and done-when) and every review.
+- Delegate every review.
+- Delegate an item's implementation when it runs beside another item, when the lead runs a stronger model or higher effort than its workers would, or for the `review` skill's rethink; a lead on the workers' model and effort builds a lone item itself, since a worker would re-read what the lead has read, lose what the brief leaves out, and add no judgement.
 - Keep in the main loop a handful of tool calls, one coupled change, and anything a search answers.
 - Run workers in parallel only on items that touch different files; items that share files run one after another.
 

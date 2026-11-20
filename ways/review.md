@@ -8,7 +8,7 @@ Only an independent reader who runs things finds those.
 
 Every change takes it, an urgent one included; the [`review` skill](../skills/review/SKILL.md) is the procedure, and each stage names its step.
 
-1. **Brief** (the [`delegating` skill](../skills/delegating/SKILL.md)): the worker gets the issue and its done-when, which every later stage checks against.
+1. **Brief** (the [`delegating` skill](../skills/delegating/SKILL.md)): the author, the lead itself or a worker it briefs, gets the issue and its done-when, which every later stage checks against.
 2. **Work in a worktree:** one item, one PR off the default branch; long work lands in slices, each its own PR, with no long-lived collecting branch.
 3. **Gate stamp** (step 2): a record on the PR for a clean pushed head, because a typed test count is not evidence.
 4. **Find** (steps 1 and 3): the changed paths set the tier, never the author or the size of the change; fresh reviewers, one lens each, get the diff and the quoted issue, never the author's summary, and verify by running things.
