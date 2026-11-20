@@ -6,11 +6,12 @@ Risky and waiting changes get their line in full, and expected ones one short li
 ## What gets a line
 
 Read the default branch's name from `repos/<owner>/<repo>` (`.default_branch`) and its pushes from `repos/<owner>/<repo>/activity?ref=<default>&per_page=100`, following the `after` cursor until an entry is older than the window.
-When a PR merged in the window has no `pr_merge` entry there, the list is incomplete: say *pushes not checked* in the attention part.
+Read the PRs from `repos/<owner>/<repo>/pulls?state=all&sort=updated&direction=desc&per_page=100`, paged by hand with `&page=N` until an entry's `updated_at` is older than the window.
+The two reads must agree: a `pr_merge` entry whose `after` is no listed PR's `merge_commit_sha` means the PR list is short, and a merged PR whose merge commit neither is an entry's `after` nor lies inside a `compare/<before>...<after>` of one means the push list is; say *PRs not checked* or *pushes not checked* in the attention part.
 
 - Every PR merged, closed unmerged, or still open in the window, unless it is provably the owner's own; a head under `claude/`, a `🤖 Handoff` comment, or an agent session's opening marks it as an agent's.
-- Every commit a `push` or `force_push` added to the default branch in the window (`compare/<before>...<after>`) that `commits/<sha>/pulls` ties to no merged PR: it landed outside review.
-- Every `force_push` to the default branch in the window: say whether the content changed (the two commits' trees differ), name the commits it took off the branch (`compare/<after>...<before>`), and mark each PR of the first bullet whose `merge_commit_sha` or head is among them.
+- Every commit a `push` or `force_push` added to the default branch in the window (`compare/<before>...<after>?per_page=100`, paged until its commits number `ahead_by`) that `commits/<sha>/pulls` ties to no merged PR: it landed outside review.
+- Every `force_push` to the default branch in the window: say whether the content changed (the two commits' trees differ), name the commits it took off the branch (`compare/<after>...<before>`), and mark each PR, in the window or before it, whose `merge_commit_sha` or head is among them.
 
 ## Order
 
