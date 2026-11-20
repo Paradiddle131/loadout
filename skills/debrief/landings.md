@@ -1,28 +1,22 @@
 # Landings
 
-How a debrief reads the agent PRs of its window from their records, for the line each one gets.
-The owner's reading is the after-the-fact check on what agents merged, so these lines are never left out as "the expected".
+Which agent PRs a debrief names, so that what only reviewers read reaches the owner.
+The merge guard decides what may stay quiet; a debrief never restates its rules.
 
-## Records
+## The quiet case
 
-- The records of a PR are its newest unedited `🤖 Gates` comment and its newest unedited `🤖 Review` comment by an `OWNER`, `MEMBER` or `COLLABORATOR`, each carrying its marker, as [`lib.sh`](../review/scripts/lib.sh) defines them for the merge guard.
-- A review whose reviewed commit is neither the PR's head nor differs from it only by a clean merge is shown as *for an older head*, never as a pass.
-- A handoff is the author's account: a number from it is shown as *per the handoff*, and never fills a record field.
-- A record with no `Not checked` section shows *not in the record* for what was left unchecked.
+A PR stays quiet (one short line, or a count) only when all of these hold:
 
-## Which PRs, in this order
+- it merged in the window;
+- run from a clone of its repo with the default branch fetched, `python3 <collection>/cloud/hooks/merge-guard.py --check <owner>/<repo>#<n>` exits 0, so its newest gates and review records pass on its head and the review's tier is not below what its paths give;
+- that review record names the `standard` tier.
 
-Every agent PR merged or open in the window, from its labels and records:
+## Every other PR gets its line
 
-1. **Sensitive merges:** merged at the `sensitive` tier; only reviewers read them before they landed.
-2. **Routine merges:** merged at the `routine` tier, with no reviewer: say so.
-3. **Unreviewed:** labelled `needs-review`, or open with no review record.
-4. **Held:** labelled `owner-merges`, the merge policy's hold label or `needs-local-verify`.
-5. **Parked:** labelled `needs-owner` after review, its open findings the reason.
-6. **Guardrail changes:** any change, merged or open, to how a guardrail is enforced, whatever its tier.
-7. **Standard merges** whose review passed: one short line each, or a count.
+Every other agent PR merged in the window, and every agent PR still open, gets a line of its own; when unsure, give it one.
+After the big picture, the attention part opens with these: `sensitive` merges first, then what waits on the owner (held, parked, failing, unreviewed), then the rest, `routine` merges included.
+Any change to how a guardrail is enforced gets its line whatever its tier and state.
+A PR the guard refused shows its reason in plain words; a merge the guard would have refused landed outside it, which is attention in itself.
 
-## Each line
-
-What the PR does, in plain words, then: its tier, the reviewers run, what the review left unchecked (the verifier's `Not checked` lines put in plain words on the page, as written behind the record's link), the issues filed, and each steering line, redacted.
-A sensitive merge's unchecked lines are on the page, not only behind the link.
+Each line, in plain words: what the PR does; its tier and the reviewers run; what its review left unchecked (the verifier's `Not checked` lines, put plainly on the page, as written behind the record's link, or *not in the record* when it has none); the issues filed; each steering line, redacted; and the record's link.
+A number from a handoff, the author's own account, is shown as *per the handoff*.

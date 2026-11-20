@@ -12,9 +12,9 @@ It is a pitch: short, plain English, visual, and built around **attention**, mea
 
 - **The big picture first:** where the work stands against its scope, roadmap or vision, drawn as a picture, so the owner sees direction and distance left rather than a list of items.
 - **Attention gets the space.** What went wrong, what is blocked, what the owner must decide, what could improve: each in a few plain lines, with its cost and what clears it.
-- **Work no person read gets its line.** Whenever agents opened or merged PRs, the attention part opens, after the big picture, with the lines [`landings.md`](landings.md) defines: sensitive and routine merges, unreviewed, held and parked PRs, and any change to how a guardrail is enforced, each with what its review left unchecked.
-- **The expected stays quiet.** Everything else that went as it should (no cost, standard merges whose review passed, nothing dropped) gets one short line or nothing; it earns detail only once it goes wrong.
-- **Sections are a menu.** Usual ones: what happened, how the agents did, how the reviews did, what went wrong, what needs you and how to unblock, the next best action. Leave out any with nothing to say (no PR opened or merged, nothing blocks) and add any the work calls for.
+- **Some PRs always get their line.** When agent PRs merged in the window or are still open, the attention part opens, after the big picture, with the lines [`landings.md`](landings.md) defines; only a `standard` merge the merge guard accepts stays quiet.
+- **The expected stays quiet.** Everything else that went as it should (no cost, standard merges the merge guard accepts, nothing dropped) gets one short line or nothing; it earns detail only once it goes wrong.
+- **Sections are a menu.** Usual ones: what happened, how the agents did, how the reviews did, what went wrong, what needs you and how to unblock, the next best action. Leave out any with nothing to say (no agent PR merged or open, nothing blocks) and add any the work calls for.
 - **Plain English for a reader outside the work**, by the standing rule on reports: process metadata stays in the PRs and issues, and every term the page shows gets a gloss.
 
 ## The form
