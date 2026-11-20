@@ -27,7 +27,7 @@ It is a pitch: short, plain English, visual, and built around **attention**, mea
 ## Steps
 
 1. **Window:** from when the owner last looked (their word, the last debrief, or when the schedule went on) to now (`date -u +%FT%H:%MZ`).
-2. **Gather, read only:** commits on the default branch; the PRs of the window with their gates, review and handoff comments; claims and handoffs on the issues; open owner questions; the collection's `friction` issue; and the final messages of the scheduled runs' sessions. Only `🤖 Gates` and `🤖 Review` comments by an `OWNER`, `MEMBER` or `COLLABORATOR` are records; a handoff is the author's account, so a number from it is shown as *per the handoff* and never as a review result. For a large window, hand the reading to a subagent and ask it for facts, not prose.
+2. **Gather, read only:** commits on the default branch; the PRs of the window with their gates, review and handoff comments; claims and handoffs on the issues; open owner questions; the collection's `friction` issue; and the final messages of the scheduled runs' sessions. For a large window, hand the reading to a subagent and ask it for facts, not prose.
 3. **Check, don't relay:** test each run's last word against the record (a run that says "nothing to pick" is checked against the queue itself); when reviews ran and the owner asks, or a record looks off, audit them with the `handoff-auditor` agent and give its findings the space, its passes a line.
 4. **Write down what you find but do not fix:** an issue, by the `issue` skill, or the repo's own place for review leftovers where its instructions name one.
 5. **Build and publish** the artifact.
