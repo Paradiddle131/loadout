@@ -7,6 +7,8 @@ A repo adopts it with one line in its `CLAUDE.md` (`<owner>/<collection>`: the G
 Ways of working: [ways](https://github.com/<owner>/<collection>/tree/main/ways) (on cloud, the `ways/` folder of the clone `~/.claude/CLAUDE.md` names); this file wins where it is more specific.
 ```
 
+A repo owned by the collection's owner keeps the line as written, placeholders included: its owner check (`cloud/githooks/check-portable.sh`) refuses the login, and the clone path is the link agents follow.
+
 ## Placement rule
 
 - **git** holds current state the next person must read before changing code, amended in place: agent instructions, the README, one architecture document, tests.
