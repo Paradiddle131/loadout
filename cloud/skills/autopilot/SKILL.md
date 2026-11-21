@@ -123,7 +123,7 @@ It edits the handoff in place: each box ticked with evidence; headline **verifie
 
 ## Never
 
-- Merge a PR unless its gates and review records pass on its head (the merge guard's check) and nothing holds it; approve a PR; push to the default branch.
+- Merge a PR unless its gates and review records pass on its head (the merge guard's check; the gates record alone where the depth floor is none) and nothing holds it; approve a PR; push to the default branch.
 - Push any branch but a new item's `claude/<n>-<slug>` or the existing head branch of the open agent PR being resumed, whatever its name; rename neither (the session branch the harness names only when it is one of these).
 - Put an issue, PR, phase or decision id in a checked-in file.
 - Anything in the profile's `Never`.
