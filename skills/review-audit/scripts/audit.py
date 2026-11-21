@@ -14,8 +14,10 @@ back on the PRs, and sums both up. GitHub holds every record; the JSONL files ar
   audit.py record --repo <owner/name> --pr <n> --session <id> --file <judgments.json> [--backfill] [--dry-run]
       posts one `🤖 Audit` record on the PR: a table for people and the judgments as a JSON block.
   audit.py summary --dir <dir> [--session <id>] [--json]
-      prints the batch's numbers: rounds, passes, convergence, lens yield and, from the audits, how often
-      a finding was wrong, mattered, or was ranked too high or too low, each rate with its 95% interval.
+      prints the batch's numbers: rounds, passes, convergence, lens yield and, from the audits, how often a
+      checkable finding was wrong or mattered and a must-fix was ranked too high, each with its 95% interval,
+      and how many findings were ranked too low; "merged without a pass" reads the review record the merge
+      guard saw at merge time, not the gates record or the tier.
 
 A judgment (judgments.json is a list of them):
   {"round": <the 🤖 Review comment id>, "ids": ["COR-1"], "correct": "yes|no|unverifiable",
@@ -164,6 +166,7 @@ def harvest(a: argparse.Namespace) -> int:
                 lines2 = (c.get("body") or "").split("\n")
                 if (c.get("author_association") in TRUSTED and len(lines2) > 1
                         and GUARD_REVIEW.match(lines2[1])
+                        and not (row["merged_at"] and c["created_at"] > row["merged_at"])  # what the guard saw at merge
                         and (newest is None or (c["created_at"], c["id"]) > (newest["created_at"], newest["id"]))):
                     newest = c
                 if not (rec := trusted_record(c)):
@@ -293,7 +296,8 @@ def record(a: argparse.Namespace) -> int:
         rec = trusted_record(c) if isinstance(c, dict) else None
         if not rec or rec[0] != "review" or not str(c.get("issue_url", "")).endswith(f"/issues/{a.pr}"):
             sys.exit(f"audit.py: comment {rnd} is no trusted review record on {a.repo}#{a.pr}")
-        blocks = {tuple(b["ids"]) for b in verifier_output.parse(raw_output(c["body"]))["findings"]}
+        blocks = {tuple(b["ids"]) for b in verifier_output.parse(raw_output(c["body"]))["findings"]
+                  if not SKIPPED.match(b["section"])}  # the findings harvest counts: no dropped or unverified block
         for j in items:
             if j["round"] == rnd and tuple(j["ids"]) not in blocks:
                 sys.exit(f"audit.py: {', '.join(j['ids'])} is no finding of review record {rnd}; use a block's ids")
@@ -403,7 +407,7 @@ def summary(a: argparse.Namespace) -> int:
             ("First round passed", pct(s["first_round_pass"])), ("Rounds per merged change", s["rounds_per_merge"]),
             ("Must-fix findings", s["must_fix"]), ("Must-fix naming a harm", pct(s["must_fix_with_harm"])),
             ("Findings audited", s["audited"]), ("Wrong, of those checkable", pct(s["wrong"])),
-            ("Mattered", pct(s["matters"])), ("Must-fix ranked too high", pct(s["must_fix_too_high"])),
+            ("Mattered, of those checkable", pct(s["matters"])), ("Must-fix ranked too high", pct(s["must_fix_too_high"])),
             ("Must-fix about wording only", pct(s["must_fix_wording"])), ("Ranked too low", s["too_low"])]
     print("| Measure | Value |\n|---|---|")
     for k, v in rows:

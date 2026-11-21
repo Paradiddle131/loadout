@@ -14,6 +14,7 @@ import pytest
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 import audit  # noqa: E402
+import findings as verifier_output  # noqa: E402
 
 RECORD = HERE.parents[2] / "review" / "scripts" / "record.py"
 H1, H2 = "1" * 40, "2" * 40
@@ -358,7 +359,7 @@ GOOD = (f"🤖 Review: pass (standard tier)\n<!-- loadout" f":review sha={H2} st
     f"🤖 Gates: failure\n<!-- loadout" f":gates sha={H2} state=success -->\n",
     f"🤖 Audit: 1 finding re-checked (session s-one)\n<!-- loadout" ":audit session=s-two -->\n",
 ])
-def test_trusted_record_refuses_what_the_merge_guard_refuses(body: str) -> None:
+def test_trusted_record_refuses_malformed_or_disagreeing_records(body: str) -> None:
     c = {"id": 1, "body": body, "author_association": "OWNER", "created_at": "t", "updated_at": "t"}
     assert audit.trusted_record(c) is None
     assert audit.trusted_record(dict(c, body=GOOD)) == ("review", {"sha": H2, "state": "success", "tier": "standard",
@@ -530,3 +531,128 @@ def test_harvest_reads_a_record_without_the_backfill_flag_as_live(github: dict, 
         {"id": 46, "body": capsys.readouterr().out, "author_association": "OWNER",
          "created_at": "2030-01-05T00:00:00Z", "updated_at": "2030-01-05T00:00:00Z"})
     assert [a["backfill"] for a in rows(harvest(tmp_path), "audits")] == [False]
+
+
+# What the merge guard saw at merge time, and the checks each mutant of the last review left green.
+
+
+def test_merged_without_pass_reads_only_records_posted_before_the_merge(github: dict, tmp_path: Path) -> None:
+    cs = github["data"][f"repos/{REPO}/issues/7/comments"]
+    cs.append(review_comment(50, H2, "failure", FAIL_OUT.replace(H1, H2), "2030-01-05T00:00:00Z"))
+    [c] = audit.summarize(harvest(tmp_path / "a"), None)["series"]
+    assert not c["merged_without_pass"]  # a failing re-review after a guarded merge is no bypass
+    cs[:] = [c for c in cs if c["id"] not in (3, 50)]
+    cs.append(review_comment(51, H2, "success", PASS_OUT, "2030-01-05T00:00:00Z"))
+    [c] = audit.summarize(harvest(tmp_path / "b"), None)["series"]
+    assert c["merged_without_pass"]  # a pass posted after an unguarded merge does not hide it
+
+
+def test_record_refuses_a_block_the_verifier_dropped(github: dict, tmp_path: Path) -> None:
+    out = (f"VERDICT: PASS {H2}\nReviewed: {H2}\nBlocking: none\n## Must-fix\nnone\n"
+           "## Dropped\n### CLM-9\n- lens: claims\n- claim: not a defect\n")
+    github["data"][f"repos/{REPO}/issues/7/comments"].append(review_comment(6, H2, "success", out,
+                                                                            "2030-01-02T05:00:00Z"))
+    ns = audit.argparse.Namespace(repo=REPO, pr=7, session="s1", backfill=False, dry_run=True,
+                                  file=judge_file(tmp_path, [judgment(round=6, ids=["CLM-9"], correct="no")]))
+    with pytest.raises(SystemExit, match="no finding of review record 6"):
+        audit.record(ns)
+
+
+def test_summary_does_not_flag_an_open_pr_without_a_pass(github: dict, tmp_path: Path) -> None:
+    d = harvest(tmp_path)
+    prs = rows(d, "prs")
+    prs[0]["merged_at"], prs[0]["head"] = None, "3" * 40
+    (d / "prs.jsonl").write_text("".join(json.dumps(p) + "\n" for p in prs))
+    [c] = audit.summarize(d, None)["series"]
+    assert not c["merged_without_pass"]
+
+
+def test_summary_counts_a_must_fix_without_a_harm_against_the_harm_rate(github: dict, tmp_path: Path) -> None:
+    d = harvest(tmp_path)
+    found = rows(d, "findings") + [{"repo": REPO, "pr": 7, "round": 2, "ids": ["GRD-8"], "rank": "must-fix",
+                                    "must_fix": True, "harm": None, "lens": "guardrail"}]
+    (d / "findings.jsonl").write_text("".join(json.dumps(f) + "\n" for f in found))
+    assert audit.summarize(d, None)["must_fix_with_harm"][0] == 0.5
+
+
+def test_summary_does_not_flag_a_steady_must_fix_count(github: dict, tmp_path: Path) -> None:
+    d = harvest(tmp_path)
+    rounds = rows(d, "rounds")
+    rounds[1]["must_fix"], rounds[1]["state"] = 1, "failure"
+    (d / "rounds.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rounds))
+    [c] = audit.summarize(d, None)["series"]
+    assert c["series"] == [1, 1] and not c["grew"]
+
+
+def test_sample_draws_every_lens_before_a_second_of_any(tmp_path: Path) -> None:
+    rows_ = [{"repo": REPO, "pr": 1, "round": 1, "ids": [f"{lens[:3].upper()}-{i}"], "must_fix": False,
+              "rank": "nit", "lens": lens} for lens in ("correctness", "claims", "guardrail") for i in range(4)]
+    (tmp_path / "findings.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows_))
+    for seed in range(5):
+        audit.sample(audit.argparse.Namespace(dir=str(tmp_path), n=3, seed=seed))
+        assert sorted(r["lens"] for r in rows(tmp_path, "sample")) == ["claims", "correctness", "guardrail"]
+
+
+@pytest.mark.parametrize(("field", "bad"), [("matters", "maybe"), ("kind", "other"), ("method", "guess")])
+def test_record_refuses_a_value_out_of_its_set(github: dict, tmp_path: Path, field: str, bad: str) -> None:
+    ns = audit.argparse.Namespace(repo=REPO, pr=7, session="s1", backfill=False, dry_run=True,
+                                  file=judge_file(tmp_path, [judgment(**{field: bad})]))
+    with pytest.raises(SystemExit):
+        audit.record(ns)
+
+
+def test_summary_keeps_the_newest_of_two_differing_re_posts(github: dict, tmp_path: Path,
+                                                            capsys: pytest.CaptureFixture) -> None:
+    for cid, correct in ((44, "yes"), (45, "no")):
+        audit.record(audit.argparse.Namespace(repo=REPO, pr=7, session="s1", backfill=False, dry_run=True,
+                                              file=judge_file(tmp_path, [judgment(correct=correct)])))
+        github["data"][f"repos/{REPO}/issues/7/comments"].append(
+            {"id": cid, "body": capsys.readouterr().out, "author_association": "OWNER",
+             "created_at": f"2030-01-0{cid - 39}T00:00:00Z", "updated_at": f"2030-01-0{cid - 39}T00:00:00Z"})
+    s = audit.summarize(harvest(tmp_path), "s1")
+    assert s["audited"] == 1 and s["wrong"][0] == 1  # the later record, which says wrong, wins
+
+
+def test_harvest_skips_a_non_dict_row_in_an_audit_block(github: dict, tmp_path: Path) -> None:
+    body = ("🤖 Audit: 1 finding re-checked (session s1)\n<!-- loadout" ":audit session=s1 -->\n\n"
+            "```json\n[1, \"x\"]\n```\n")
+    github["data"][f"repos/{REPO}/issues/7/comments"].append(
+        {"id": 47, "body": body, "author_association": "OWNER", "created_at": "2030-01-05T00:00:00Z",
+         "updated_at": "2030-01-05T00:00:00Z"})
+    assert rows(harvest(tmp_path), "audits") == []
+
+
+# findings.py: each parse rule on its own
+
+
+def test_findings_a_shorter_or_other_fence_does_not_close_a_fence() -> None:
+    text = "## Must-fix\n````\n```\n### COR-1\n````\n### COR-2\n- rank: must-fix\n- harm: rows drop\n"
+    assert [b["ids"] for b in verifier_output.parse(text)["findings"]] == [["COR-2"]]
+    text = "## Must-fix\n```\n~~~\n### COR-1\n```\n"
+    assert verifier_output.parse(text)["findings"] == []
+
+
+def test_findings_a_placeholder_harm_is_no_harm() -> None:
+    [b] = verifier_output.parse("## Must-fix\n### COR-1\n- rank: must-fix\n- harm: none\n")["findings"]
+    assert b["must_fix"] and b["harm"] is None
+
+
+def test_findings_only_the_verifier_s_headings_set_a_section() -> None:
+    text = "## Nits\n### CLM-1\n- claim: x\n## Evidence quoted\n### CLM-2\n- claim: y\n"
+    assert [b["section"] for b in verifier_output.parse(text)["findings"]] == ["Nits", "Nits"]
+
+
+def test_findings_an_indented_line_continues_its_field() -> None:
+    [b] = verifier_output.parse("## Must-fix\n### COR-1\n- harm: an operator\n  trusts a short total\n")["findings"]
+    assert b["harm"] == "an operator trusts a short total"
+
+
+def test_findings_a_rank_line_wins_over_its_section() -> None:
+    [b] = verifier_output.parse("## Must-fix\n### COR-1\n- rank: nit\n- harm: x y\n")["findings"]
+    assert not b["must_fix"]
+    [b] = verifier_output.parse("## Nits\n### COR-1\n- rank: must-fix\n- harm: x y\n")["findings"]
+    assert b["must_fix"]
+
+
+def test_findings_the_first_verdict_line_wins() -> None:
+    assert verifier_output.parse(f"VERDICT: FAIL {H1}\nVERDICT: PASS {H1}\n")["verdict"] == f"FAIL {H1}"
