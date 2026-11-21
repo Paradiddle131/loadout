@@ -15,13 +15,15 @@ It is a pitch: short, plain English, visual, and built around **attention**, mea
 - **Every change gets its line.** When anything landed, closed or waits, the attention part carries the lines [`landings.md`](landings.md) defines, after what needs the owner and is not a PR: risky and waiting changes in full, the expected one short line each.
 - **The expected stays quiet.** Everything else that went as it should (no cost, rules held, nothing dropped) gets one short line or nothing; it earns detail only once it goes wrong.
 - **Sections are a menu.** Usual ones: what happened, how the agents did, how the reviews did, what went wrong, what needs you and how to unblock, the next best action. Leave out any with nothing to say (nothing merged, closed, pushed or waiting; nothing blocks) and add any the work calls for.
-- **End on what needs the owner,** whenever anything does: one closing slide or block of numbered questions, each a decision with the recommended answer and one line of why, worded so a yes, a no or a few words unblock it; the owner can answer from that slide alone, by number.
+- **End on what needs the owner,** whenever anything does: a closing slide (or block) of numbered questions, each a decision with the recommended answer and one line of why, worded so a yes, a no or a few words answer it; where only an action of the owner's clears it, the question names that action.
+  It is a recap by number: the attention part keeps its items, order and full lines, and a question about a change `landings.md` lists in full points to that change's line.
+  The closing slide may hold more than three lines, one per question; past about six questions, continue on a second closing slide.
   Strongly suggested, not required: leave it out when nothing waits on the owner.
 - **Plain English for a reader outside the work**, by the standing rule on reports: process metadata stays in the PRs and issues, and every term the deck or page shows gets a gloss.
 
 ## The form
 
-- **A deck, whenever one can be made:** a few slides, each a headline and at most three short lines or one chart, which keeps the debrief brief and plain.
+- **A deck, whenever one can be made:** a few slides, each a headline and at most three short lines or one chart (the closing questions aside), which keeps the debrief brief and plain.
   Start from the host's slide-deck artifact type where it lists one, else build the deck as one HTML page of slides.
 - **Fallback:** when no deck can be made, build one page under the same slide rule, block by block, and publish it as usual.
 - Chart whatever a picture carries better than words: progress along a path, counts by state, time or wakes spent.
@@ -35,6 +37,6 @@ It is a pitch: short, plain English, visual, and built around **attention**, mea
 3. **Check, don't relay:** test each run's last word against the record (a run that says "nothing to pick" is checked against the queue itself); when reviews ran and the owner asks, or a record looks off, audit them with the `handoff-auditor` agent and give its findings the space, its passes a line.
 4. **Write down what you find but do not fix:** an issue, by the `issue` skill, or the repo's own place for review leftovers where its instructions name one.
 5. **Build and publish** the artifact.
-6. **Offer the way forward:** ask whether to clear the blockers one by one, each with a plain explanation and a recommended step the owner answers yes, no or how; a prompt for a fresh session to carry the work on comes only once the path is clear.
+6. **Offer the way forward:** take the closing slide's answers by number, and ask in chat only what it left open: whether to clear the blockers one by one, each with a plain explanation and a recommended step the owner answers yes, no or how; a prompt for a fresh session to carry the work on comes only once the path is clear.
 
 Done when the owner can tell from the artifact alone where the work stands against its goal, what went wrong, and what they must do next.
