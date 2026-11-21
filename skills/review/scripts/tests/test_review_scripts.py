@@ -366,6 +366,14 @@ def test_tier_reads_this_repos_review_md_with_its_lenses(w: World) -> None:
     assert out == ["sensitive", "cloud/gcp/guard.py (lenses: control-prober, guardrail-reviewer)"]
 
 
+def test_tier_takes_the_debrief_skill_as_sensitive_by_this_repos_review_md(w: World) -> None:
+    base_has(w, {"REVIEW.md": (SCRIPTS.parents[2] / "REVIEW.md").read_text()})
+    w.commit({"skills/debrief/landings.md": "x\n"})
+    code, out, err = tier(w)
+    assert code == 0 and err == "", err
+    assert out == ["sensitive", "skills/debrief/landings.md (lenses: claims-auditor, guardrail-reviewer)"]
+
+
 @pytest.mark.parametrize("line, lenses", [
     ("- `src/**` — keeps the lenses honest; lenses: one, two", "one, two"),  # the word in a reason is text
     ("- `src/**` — lenses: one", ""),  # no `;`: a reason, not a lenses clause
@@ -884,3 +892,21 @@ def test_verdict_reads_the_reviewed_line_grep_reads_whatever_the_locale(w: World
     done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head, "--file", str(p),
                  LC_ALL="C.UTF-8")
     assert done.returncode == 2 and "names commit ffff" in done.stderr, done.stderr
+
+
+@pytest.mark.parametrize("drop, message", [
+    ("--reviewers", "--reviewers names who reviewed"),
+    ("--file", "--file is the reviewers' raw output"),
+    ("--reviewed", "--reviewed is the full sha"),
+])
+def test_verdict_above_routine_refuses_each_missing_input_by_its_own_guard(
+        w: World, tmp_path: Path, drop: str, message: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    empty = tmp_path / "empty.txt"
+    empty.write_text("")
+    args = {"--reviewers": "x", "--reviewed": head, "--file": review_file(tmp_path, head)}
+    args[drop] = {"--reviewers": "", "--file": str(empty), "--reviewed": head[:7]}[drop]
+    flat = [part for kv in args.items() for part in kv]
+    done = w.run("verdict.sh", "12", "--tier", "standard", *flat)
+    assert done.returncode == 2 and message in done.stderr, done.stderr
+    assert w.writes() == []

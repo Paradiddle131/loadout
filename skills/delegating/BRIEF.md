@@ -13,6 +13,7 @@ The item: <issue link or text>. It is done when: <the issue's done-when, verbati
 
 Your workspace: <worktree path>, branch <branch>. Work only there and commit as you go (<the repo's commit style>).
 No push, PR or GitHub write, unless this line allows one: <none, or what>.
+Report to: <the lead's own reply, or, for a worker on the owner's computer, a comment on <PR link> that the lead watches>.
 
 Read first: <the repo's AGENTS.md / CLAUDE.md, its architecture document, the files the item touches, the skills that apply>.
 

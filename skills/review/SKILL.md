@@ -79,7 +79,7 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 
 ## 7. Record the verdict
 
-- Run `$R/scripts/verdict.sh --reviewed <sha>` (its header gives the other arguments) with the verifier's output unedited; for `routine`, `verdict.sh --tier routine`, which the change's own author may run.
+- Run `$R/scripts/verdict.sh --reviewed <sha>` (its header gives the other arguments) with the verifier's output unedited (the author may run it; the script cannot tell the verifier's output from a typed one, so the rule is to post it unedited); for `routine`, `verdict.sh --tier routine`, which the change's own author may run.
 - It recomputes the tier and refuses a lower one than the paths give, and refuses unless the PR head equals the reviewed commit or differs from it only by a clean merge of the default branch.
 - Above `routine` it takes the result from the output's first `VERDICT` line, and refuses an output without the verifier's `VERDICT` and `Reviewed` lines, one whose lines name a commit other than `--reviewed`, one whose `Blocking:` line (right after `Reviewed:`) is missing, lists a must-fix whose harm is missing, under two words or made only of `blocking.py`'s filler words, or whose id opens no `###` heading below it outside a code fence, lists none on a `FAIL` or any on a `PASS`, and a `--result` that contradicts its verdict.
 - It posts the output as a PR comment that starts with `🤖` and names the reviewed commit and the head, as the `🤖 Review` record: `success` when the verifier's `VERDICT` line says `PASS` (for `routine`, when `--result` is `pass`, its default).
@@ -93,7 +93,7 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 ## 9. File and brief
 
 - File an issue (the `issue` skill) per unfixed finding: `pre-existing`, `unverified`; one per PR for its unapplied nits; a parked item's `must-fix` findings stay in its `needs-owner` packet, not also in issues.
-- The owner's brief lists sensitive landings first, then unreviewed ones; per item: tier, reviewers run, verdict link, issues filed, and each steering line, quoted with personal or secret values redacted.
+- The owner's brief lists sensitive landings first, then unreviewed ones (a `debrief` over several runs follows its own `landings.md`); per item: tier, reviewers run, verdict link, issues filed, and each steering line, quoted with personal or secret values redacted.
 - A decision that weakens how a guardrail is enforced is never the session's: it is a conflict packet on its issue (`ways/guardrails.md`), labelled `needs-owner`.
 - Before the owner sees it, [`handoff-auditor`](../../agents/handoff-auditor.md) checks the handoff and its decisions against the PRs and issues; fix what it confirms.
 - Done when the auditor has returned and every unfixed finding has an issue the brief links.

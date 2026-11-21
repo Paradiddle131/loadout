@@ -114,7 +114,7 @@ A `🤖 Gates` or `🤖 Review` record is never edited (the merge guard counts o
 ```
 
 The issue's short `🤖 Handoff` comment ends the claim: the PR link and its state.
-Both end with one **Went wrong:** line, followed only by their `Edited` lines, for the owner's brief (the `autopilot-brief` skill): `none`, or each problem as `<kind> — what happened — what it cost — fixed | known condition | filed #<n> | open`; kind is `environment`, `missing input`, `found in the work`, `delegated work` (a subagent or reviewer returned wrong, unfounded or partial work; name what caught it) or `setup` (prompt, profile or queue: name the change that would have avoided it).
+Both end with one **Went wrong:** line, followed only by their `Edited` lines, for the owner's debrief (the `debrief` skill): `none`, or each problem as `<kind> — what happened — what it cost — fixed | known condition | filed #<n> | open`; kind is `environment`, `missing input`, `found in the work`, `delegated work` (a subagent or reviewer returned wrong, unfounded or partial work; name what caught it) or `setup` (prompt, profile or queue: name the change that would have avoided it).
 
 ## Local resume
 
