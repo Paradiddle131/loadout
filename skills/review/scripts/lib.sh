@@ -29,15 +29,11 @@ die() { echo "error: $*" >&2; exit 2; }
 # A read: always runs.
 gh_get() { gh api "$@"; }
 
-# The remote's default branch, from the local clone (origin/HEAD, else origin/main or origin/master).
-default_branch() {
+# The repo's default branch as GitHub names it on the PR (never origin/HEAD or a local branch).
+pr_default_branch() { # <pr>
   local b
-  b=$(git symbolic-ref --short -q refs/remotes/origin/HEAD 2>/dev/null || true)
-  b=${b#origin/}
-  if [ -z "$b" ]; then
-    for c in main master; do git rev-parse -q --verify "refs/remotes/origin/$c" >/dev/null && { b=$c; break; }; done
-  fi
-  [ -n "$b" ] || die "cannot tell the remote's default branch: run \`git remote set-head origin --auto\`"
+  b=$(gh_get "repos/$REPO/pulls/$1" --jq '.base.repo.default_branch // empty') || die "cannot read PR $1 in $REPO"
+  [[ "$b" =~ ^[A-Za-z0-9._/-]+$ ]] || die "PR $1 in $REPO names no default branch (got '$b')"
   echo "$b"
 }
 

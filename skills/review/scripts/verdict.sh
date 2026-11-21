@@ -5,7 +5,13 @@
 # Usage: verdict.sh <pr> --tier routine|standard|sensitive [--result pass|fail] \
 #          --reviewers "<names>" --reviewed <sha> --file <verifier output> \
 #          --cycle <n> --dupes <n> --nits <n> --lens "<name> model=<m> effort=<e> tokens=<n> seconds=<n> findings=<n>"... \
-#          [--repost] [--dry-run]
+#          [--depth none|light|focused|full] [--repost] [--dry-run]
+#   The round's plan is plan.py's, computed here from what GitHub names (the PR's head, its default branch and that
+#   branch's tip, the PR's newest trusted review record) and REVIEW.md on that tip; plan.py's header has the rules and
+#   the table of its inputs. --depth raises the plan's depth above the paths' floor, never below it. Above routine,
+#   --reviewers must name every planned lens and finding-verifier, and each planned lens's --lens effort must be at
+#   least its planned effort; extra lenses are accepted. The depth goes on the marker (depth=), and depth, floor and
+#   planned on the round line.
 #   --reviewers is every agent that ran in the round, the verifier included, split by commas or blanks.
 #   --cycle (1 for a first review), --dupes (findings the verifier merged), --nits and one --lens per agent named in
 #   --reviewers, no other, say what the round cost and found (required above routine; record.py review-round checks
@@ -30,10 +36,12 @@
 #   words or more not made only of blocking.py's filler words. The lead acts on the line (the review skill).
 #   --tier routine needs no reviewer: --reviewers, --reviewed and --file are optional, --result defaults to pass,
 #   the comment says the tier needs gates only, and the session that wrote the change may run it, since the
-#   paths decide the tier. Above routine the author may run it too, posting the verifier's output unedited.
+#   paths decide the tier. It is accepted whenever the paths' depth floor is none (a routine change, or a standard
+#   one a REVIEW.md line or `Depth: none` lets merge on gates alone), and records depth=none; such a change needs
+#   no review record at all. Above routine the author may run it too, posting the verifier's output unedited.
 #
 # Posts `🤖 Review: <result> (<tier> tier)` with, on its second line,
-#   the review marker (lib.sh has the format), with sha=<head>, state, tier=<tier> and reviewed=<sha>
+#   the review marker (lib.sh has the format), with sha=<head>, state, tier=<tier>, reviewed=<sha> and depth=<d>
 # then the head, the reviewed commit, the reviewers and the raw output under <details> (clipped with a note to
 # fit GitHub's comment limit); reads the comment back and fails (exit 1) when its body is not the one sent.
 #
@@ -43,8 +51,8 @@
 set -euo pipefail
 export LC_ALL=C # grep's [[:space:]] and blocking.py's blanks agree only in the C locale
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-usage='usage: verdict.sh <pr> --tier routine|standard|sensitive [--result pass|fail] --reviewers "<names>" --reviewed <sha> --file <verifier output> --cycle <n> --dupes <n> --nits <n> --lens "<name> model=<m> effort=<e> tokens=<n> seconds=<n> findings=<n>"... [--repost] [--dry-run]'
-pr='' tier='' result='' reviewers='' reviewed='' file='' cycle='' dupes='' nits='' repost=''
+usage='usage: verdict.sh <pr> --tier routine|standard|sensitive [--result pass|fail] --reviewers "<names>" --reviewed <sha> --file <verifier output> --cycle <n> --dupes <n> --nits <n> --lens "<name> model=<m> effort=<e> tokens=<n> seconds=<n> findings=<n>"... [--depth <d>] [--repost] [--dry-run]'
+pr='' tier='' result='' reviewers='' reviewed='' file='' cycle='' dupes='' nits='' repost='' depth=''
 lens=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -56,6 +64,7 @@ while [ $# -gt 0 ]; do
     --cycle) cycle=${2:-}; shift 2 ;;
     --dupes) dupes=${2:-}; shift 2 ;;
     --nits) nits=${2:-}; shift 2 ;;
+    --depth) depth=${2:-}; shift 2 ;;
     --lens) lens+=(--lens "${2:-}"); shift 2 ;;
     --repost) repost=--repost; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -70,6 +79,7 @@ rank() { case "$1" in routine) echo 0 ;; standard) echo 1 ;; sensitive) echo 2 ;
 [[ "$pr" =~ ^[0-9]+$ ]] || die "the first argument is the PR number. $usage"
 case "$tier" in routine | standard | sensitive) ;; *) die "--tier is routine, standard or sensitive. $usage" ;; esac
 [ "$tier" != routine ] || result=${result:-pass}
+case "$depth" in '' | none | light | focused | full) ;; *) die "--depth is none, light, focused or full. $usage" ;; esac
 case "$result" in '' | pass | fail) ;; *) die "--result is pass or fail. $usage" ;; esac
 if [ "$tier" != routine ]; then
   [ -n "$reviewers" ] || die "--reviewers names who reviewed (a $tier change needs a reviewer)."
@@ -127,8 +137,25 @@ fi
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null)" || die "run verdict.sh from a clone of $REPO"
 head=$(pr_head "$pr")
-default=$(default_branch)
-git fetch -q origin "$default" || die "cannot fetch origin/$default, which the tier and the merge check read"
+default=$(pr_default_branch "$pr")
+# The plan: plan.py reads its own inputs from GitHub and force-fetches the default branch's tip GitHub names.
+plan_args=(record --pr "$pr" --tier "$tier" ${depth:+--depth "$depth"})
+if [ "$tier" = routine ]; then
+  plan_args+=(--routine)
+else
+  plan_args+=(--reviewers "$reviewers" ${lens[@]+"${lens[@]}"} ${repost:+--repost --reviewed "$reviewed"})
+fi
+why=$(mktemp)
+plan_out=$(python3 "$here/plan.py" ${plan_args[@]+"${plan_args[@]}"} 2>"$why") || {
+  reason=$(cat "$why"); rm -f "$why"
+  die "${reason#plan.py: }"
+}
+rm -f "$why"
+plan_head='' plan_depth='' plan_pairs=''
+while read -r k v; do
+  case "$k" in head) plan_head=$v ;; depth) plan_depth=$v ;; pairs) plan_pairs=$v ;; esac
+done <<<"$plan_out"
+[ "$plan_head" = "$head" ] || die "PR $pr's head moved while the plan was read: run again"
 for c in "$head" ${reviewed:+"$reviewed"}; do
   git cat-file -e "$c^{commit}" 2>/dev/null || git fetch -q origin "$c" 2>/dev/null ||
     die "commit $c is not in this clone and cannot be fetched"
@@ -136,7 +163,8 @@ done
 
 paths=$(bash "$here/tier.sh" --base "origin/$default" --head "$head") || die "tier.sh could not read PR $pr's paths"
 computed=${paths%%$'\n'*}
-[ "$(rank "$tier")" -ge "$(rank "$computed")" ] ||
+# A routine record is accepted on a change whose depth floor is none (plan.py checked it), whatever its tier.
+[ "$tier" = routine ] || [ "$(rank "$tier")" -ge "$(rank "$computed")" ] ||
   die "PR $pr's paths make it $computed, so --tier $tier is too low:
 $paths"
 
@@ -167,9 +195,11 @@ trap 'rm -rf "$tmp"' EXIT
 state=failure
 [ "$result" = pass ] && state=success
 lines=(--line "- Head commit: \`$head\`" --line "- Reviewed commit: \`$reviewed\`$merged_note"
-  --line "- Tier from the paths: $computed" --line "- Reviewers: ${reviewers:-none}")
+  --line "- Tier from the paths: $computed" --line "- Depth: $plan_depth (${plan_pairs// /, })"
+  --line "- Reviewers: ${reviewers:-none}")
 [ "$tier" != routine ] || lines+=(--line "- The routine tier needs gates only: no reviewer was required.")
 round=()
+read -r -a plan_pair_list <<<"$plan_pairs"
 if [ -n "$round_out" ]; then
   read -r -a pairs <<<"${round_out%%$'\n'*}"
   for p in ${pairs[@]+"${pairs[@]}"}; do round+=(--round "$p"); done
@@ -180,7 +210,9 @@ if [ -n "$round_out" ]; then
     while IFS= read -r l; do lines+=(--line "$l"); done <<<"${round_out#*$'\n'}"
   fi
 fi
-build_record --kind review --sha "$head" --state "$state" --tier "$tier" --reviewed "$reviewed" ${round[@]+"${round[@]}"} \
+for p in ${plan_pair_list[@]+"${plan_pair_list[@]}"}; do round+=(--round "$p"); done
+build_record --kind review --sha "$head" --state "$state" --tier "$tier" --reviewed "$reviewed" --depth "$plan_depth" \
+  ${round[@]+"${round[@]}"} \
   --title "🤖 Review: $result ($tier tier)" ${lines[@]+"${lines[@]}"} ${file:+--file "$file"} \
   --details "Reviewer output (raw)" >"$tmp/body.md"
 url=$(post_record "$pr" "$tmp/body.md") || exit 1
