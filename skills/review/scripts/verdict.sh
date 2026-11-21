@@ -108,7 +108,7 @@ if [ "$tier" != routine ]; then
   # The round's cost and shape: checked here, before anything is read from GitHub or posted.
   why=$(mktemp)
   round_out=$(python3 "$here/record.py" review-round --reviewers "$reviewers" --cycle "$cycle" --dupes "$dupes" \
-    --nits "$nits" --mustfix "$blocking" --dismissals "$file" "${lens[@]}" 2>"$why") || {
+    --nits "$nits" --mustfix "$blocking" --dismissals "$file" ${lens[@]+"${lens[@]}"} 2>"$why") || {
     reason=$(cat "$why"); rm -f "$why"
     die "${reason#record.py: }. $usage"
   }
@@ -166,12 +166,12 @@ lines=(--line "- Head commit: \`$head\`" --line "- Reviewed commit: \`$reviewed\
 round=()
 if [ -n "$round_out" ]; then
   read -r -a pairs <<<"${round_out%%$'\n'*}"
-  for p in "${pairs[@]}"; do round+=(--round "$p"); done
+  for p in ${pairs[@]+"${pairs[@]}"}; do round+=(--round "$p"); done
   lines+=(--line "- Round: cycle $cycle; must-fix $blocking, nits $nits, duplicates merged $dupes")
   while IFS= read -r l; do lines+=(--line "$l"); done <<<"${round_out#*$'\n'}"
 fi
-build_record --kind review --sha "$head" --state "$state" --tier "$tier" --reviewed "$reviewed" "${round[@]}" \
-  --title "🤖 Review: $result ($tier tier)" "${lines[@]}" ${file:+--file "$file"} \
+build_record --kind review --sha "$head" --state "$state" --tier "$tier" --reviewed "$reviewed" ${round[@]+"${round[@]}"} \
+  --title "🤖 Review: $result ($tier tier)" ${lines[@]+"${lines[@]}"} ${file:+--file "$file"} \
   --details "Reviewer output (raw)" >"$tmp/body.md"
 url=$(post_record "$pr" "$tmp/body.md") || exit 1
 echo "verdict: PR $pr, head $head: review $result ($tier tier)${url:+, $url}"

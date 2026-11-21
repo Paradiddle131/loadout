@@ -1169,3 +1169,69 @@ def test_kit_names_the_collection_clone_and_whether_its_review_files_changed(tmp
     subprocess.run(["git", "add", "."], cwd=other, check=True)
     subprocess.run(["git", "commit", "-qm", "c"], cwd=other, env=env, check=True, capture_output=True)
     assert rec.kit(copied) == "none"  # a copy inside the repo under review is not the collection
+
+
+# Old bash: before 4.4, `set -u` makes an empty "${a[@]}" an unbound variable (macOS ships bash 3.2).
+
+ARRAY_EXPANSION = re.compile(r'"\$\{(\w+)\[@\]\}"')
+
+
+def test_every_array_expansion_survives_an_empty_array_on_old_bash() -> None:
+    bare = []
+    for name in NAMES:
+        text = (SCRIPTS / name).read_text()
+        for m in ARRAY_EXPANSION.finditer(text):
+            guard = "${" + m.group(1) + "[@]+"
+            if text[max(0, m.start() - len(guard)):m.start()] != guard:
+                line = text.count("\n", 0, m.start()) + 1
+                bare.append(f"{name}:{line}: {m.group(0)} (write ${{{m.group(1)}[@]+{m.group(0)}}})")
+    assert not bare, "\n".join(bare)
+
+
+BASH32_IMAGE = "mirror.gcr.io/library/bash:3.2"
+
+
+@pytest.fixture(scope="module")
+def bash32(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A directory whose `bash` is bash 3.2: $BASH32 when set, else copied out of a local bash:3.2 image (never
+    pulled); skipped when neither is there."""
+    d = tmp_path_factory.mktemp("bash32")
+    if os.environ.get("BASH32"):
+        (d / "bash").write_text(f'#!/bin/sh\nexec {os.environ["BASH32"]} "$@"\n')
+    else:
+        docker = shutil.which("docker")
+        if not docker or subprocess.run([docker, "image", "inspect", BASH32_IMAGE], capture_output=True).returncode:
+            pytest.skip(f"no bash 3.2: set BASH32, or `docker pull {BASH32_IMAGE}`")
+        cid = subprocess.run([docker, "create", BASH32_IMAGE], capture_output=True, text=True,
+                             check=True).stdout.strip()
+        try:
+            for src in ("/usr/local/bin/bash", "/lib/ld-musl-x86_64.so.1", "/usr/lib/libncursesw.so.6"):
+                subprocess.run([docker, "cp", "-L", f"{cid}:{src}", str(d / ("bash.bin" if src.endswith("bash")
+                                                                               else Path(src).name))], check=True)
+        finally:
+            subprocess.run([docker, "rm", cid], capture_output=True)
+        (d / "bash").write_text(f'#!/bin/sh\nexec {d}/ld-musl-x86_64.so.1 --library-path {d} {d}/bash.bin "$@"\n')
+    (d / "bash").chmod(0o755)
+    got = subprocess.run([str(d / "bash"), "-c", "echo ${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"],
+                         capture_output=True, text=True)
+    if got.returncode or not got.stdout.startswith("3."):
+        pytest.skip(f"the bash 3.2 found does not run here: {got.stderr.strip() or got.stdout.strip()}")
+    return d
+
+
+def test_the_scripts_run_on_bash_3_2(w: World, tmp_path: Path, bash32: Path) -> None:
+    old = {"PATH": f"{bash32}:{w.env['PATH']}"}  # the scripts and the scripts they call all run on bash 3.2
+    w.commit({"docs/a.md": "x\n"})
+    for args in (["--tier", "routine"], ["--tier", "routine", "--dry-run"]):
+        done = w.run("verdict.sh", "12", *args, **old)
+        assert done.returncode == 0 and "unbound" not in done.stderr, done.stderr
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", review_file(tmp_path, head), "--cycle", "1", "--dupes", "0", "--nits", "0", **old)
+    assert done.returncode == 2 and "are not the --reviewers" in done.stderr, done.stderr  # no --lens at all
+    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                 "--file", review_file(tmp_path, head), *round_args("x"), **old)
+    assert done.returncode == 0, done.stderr
+    assert w.comments()[-1]["body"].split("\n")[2].startswith(ROUND + "v=")
+    done = w.run("gate_stamp.sh", "--", "true", **old)
+    assert done.returncode == 0 and "unbound" not in done.stderr, done.stderr
