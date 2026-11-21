@@ -15,11 +15,13 @@ It is a pitch: short, plain English, visual, and built around **attention**, mea
 - **Every change gets its line.** When anything landed, closed or waits, the attention part carries the lines [`landings.md`](landings.md) defines, after what needs the owner and is not a PR: risky and waiting changes in full, the expected one short line each.
 - **The expected stays quiet.** Everything else that went as it should (no cost, rules held, nothing dropped) gets one short line or nothing; it earns detail only once it goes wrong.
 - **Sections are a menu.** Usual ones: what happened, how the agents did, how the reviews did, what went wrong, what needs you and how to unblock, the next best action. Leave out any with nothing to say (nothing merged, closed, pushed or waiting; nothing blocks) and add any the work calls for.
-- **Plain English for a reader outside the work**, by the standing rule on reports: process metadata stays in the PRs and issues, and every term the page shows gets a gloss.
+- **Plain English for a reader outside the work**, by the standing rule on reports: process metadata stays in the PRs and issues, and every term the deck or page shows gets a gloss.
 
 ## The form
 
-- A visual, concise artifact that forces brevity: a short deck by default, or a dashboard or one page when the content suits it better. A long prose document invites detail; choose a form that resists it.
+- **A deck, whenever one can be made:** a few slides, each a headline and at most three short lines or one chart, which keeps the debrief brief and plain.
+  Start from the host's slide-deck artifact type where it lists one, else build the deck as one HTML page of slides.
+- **Fallback:** when no deck can be made, build one page under the same slide rule, block by block, and publish it as usual.
 - Chart whatever a picture carries better than words: progress along a path, counts by state, time or wakes spent.
 - Choose the look fresh for each debrief, from its content; a repo's own design system applies where it has one.
 - Build it in the scratchpad, never in the target repo, and publish it as an artifact (with no artifact tool, send the file); the chat reply is a line or two and the link, since the artifact is the answer.
