@@ -362,6 +362,16 @@ def test_a_tier_check_that_fails_refuses(fx: Fx, local: tuple[Path, str]) -> Non
     assert reason and "tier.sh failed" in reason, reason
 
 
+def test_a_tier_check_that_fails_on_githubs_tip_refuses(fx: Fx, local: tuple[Path, str]) -> None:
+    r, head = local
+    # GitHub names the head itself as the default branch's tip: the check finds no changed path and fails, whatever
+    # the clone's origin/main says.
+    (fx.d / "branches.json").write_text(json.dumps({"main": head}))
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, tier="sensitive")))
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "tier.sh failed" in reason, reason
+
+
 def test_the_tier_check_compares_with_the_default_branch_github_names(fx: Fx, local: tuple[Path, str]) -> None:
     r, head = local
     # Neither main nor master, and no origin/HEAD: the base comes from the PR's repo.
