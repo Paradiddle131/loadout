@@ -2,7 +2,8 @@
 """A stub `gh` for the review scripts' and the merge guard's tests: `gh api` against files, never GitHub.
 
 State lives in $STUB_DIR:
-- pr.json: what `repos/<o>/<r>/pulls/<n>` answers; pulls.json: what `pulls?...` answers.
+- pr.json: what `repos/<o>/<r>/pulls/<n>` answers (pr-later.json, when there, from its third read on: a head that
+  moves between two reads); pulls.json: what `pulls?...` answers.
 - comments.json: the PR's comments; a post appends one (author_association OWNER), and
   `issues/<n>/comments?per_page=P&page=N` and `issues/comments/<id>` read them.
 - calls.jsonl: every call as {"method", "endpoint", "fields"}.
@@ -87,7 +88,8 @@ elif method == "GET" and re.search(r"/issues/\d+/comments\?", ep):
 elif method == "GET" and "/pulls?" in ep:
     out = load("pulls.json", [])
 elif method == "GET" and re.search(r"/pulls/\d+$", ep):
-    out = load("pr.json", {})
+    reads = sum(1 for x in (d / "calls.jsonl").read_text().splitlines() if re.search(r"/pulls/\d+\"", x))
+    out = load("pr-later.json", None) if reads > 2 and (d / "pr-later.json").exists() else load("pr.json", {})
 elif method == "GET" and (m := re.search(r"/branches/([^/?]+)$", ep)):
     name, sha = m.group(1), load("branches.json", {}).get(m.group(1))
     if not sha and os.environ.get("STUB_REMOTE"):

@@ -12,11 +12,12 @@ by the owner, a member or a collaborator whose first line is `🤖 Gates: <state
 as a success. In a local clone holding the head and the default branch GitHub names, the review skill's
 `plan.py floor` (tier.sh's tier and the paths' depth floor) runs against that branch's tip as GitHub's branches API
 names it when the clone holds that commit, else against `origin/<that branch>`; a review below the paths' tier
-refuses, as does one whose `depth` is below the floor (a record without `depth`, made before depths existed, is
-judged on its tier alone), and so does a check that fails or runs out of time; with no such clone the check is
-skipped. When the floor is `none` and it was computed against GitHub's tip, no review record is needed: the gates
-record alone lets the merge go, unless the newest trusted review record is a well-formed failure on the head. The merge must name the head checked (`expectedHeadSha`),
-so GitHub refuses it if a push lands in between. A PR labelled `owner-merges`, in any case, is refused whatever
+refuses, as does a record that carries a `depth` below the floor (a record without `depth` is judged on its tier
+alone), and so does a check that fails or runs out of time; with no such clone the check is skipped. When the floor
+is `none` and it was computed against GitHub's tip, no review record is needed: the gates record alone lets the merge
+go when the newest trusted review record is absent, for an older head, or an unedited, well-formed success; an
+edited, malformed or failing one holds the merge. The merge must name the head checked (`expectedHeadSha`), so
+GitHub refuses it if a push lands in between. A PR labelled `owner-merges`, in any case, is refused whatever
 its records (the merge is the owner's), here and in `--check`. `enable_pr_auto_merge` is refused.
 
 Bash: the command is read as text, never as shell. A command whose text holds one of the five MENTIONS
@@ -183,7 +184,7 @@ def record_problem(kind: str, c: dict, head: str) -> tuple[str, dict]:
         return f"{where} has a marker that disagrees with its first line", {}
     if fields["sha"] != head:
         return (f"{where} is for {fields['sha']}, not the head {head}: a record for an older head does not "
-                "count"), {}
+                "count"), {"older": True}
     if state != "success":
         return f"{where} says {state}", {"state": state}
     return "", fields
@@ -272,19 +273,27 @@ def check_merge(repo: str | None, number: str | None, expected: str | None, cwd:
     base = ((pr.get("base") or {}).get("repo") or {}).get("default_branch")
     rated = paths_rating(repo, head, base, cwd)
     gates_alone = bool(rated and rated[2] and rated[1] == "none")
+    # Floor none, but against the clone's own ref: the relief needs GitHub's tip, so say how to get it.
+    unpinned_none = bool(rated and not rated[2] and rated[1] == "none")
+    hint = (f"; the head's depth floor is none, but the review is waived only against the tip of {base} GitHub "
+            f"names, which this clone does not hold: fetch it (`git fetch origin {base}`) and merge again, or "
+            "record it with skills/review/scripts/verdict.sh <pr> --tier routine") if unpinned_none else ""
     problems, review = [], {}
     for kind in ("gates", "review"):
         if kind == "review" and gates_alone:
-            # Floor none on GitHub's tip: no review is needed, but a reviewer's failure on this head still holds it.
+            # Floor none on GitHub's tip: no review is needed. The newest trusted review record still holds the merge
+            # unless it is an unedited, well-formed success, or a record for an older head: an edited, malformed or
+            # failing one holds it, as it does on every other path.
             if "review" in newest:
                 why, fields = record_problem(kind, newest[kind], head)
-                if fields.get("state") == "failure":
-                    problems.append(f"{why}; the paths need no review, but a review that failed on the head holds "
-                                    "the merge: fix it and record it again")
+                if why and not fields.get("older"):
+                    problems.append(f"{why}; the paths need no review, but this review record holds the merge: "
+                                    f"record it again with {PRODUCER[kind]}, or delete it if no reviewer ran")
             continue
         if kind not in newest:
             extra = f" (markers by {', '.join(sorted(ignored[kind]))} do not count)" if ignored[kind] else ""
-            problems.append(f"no {kind} record{extra}; record it with {PRODUCER[kind]}")
+            problems.append(f"no {kind} record{extra}; record it with {PRODUCER[kind]}" + (hint if kind == "review"
+                                                                                        else ""))
             continue
         why, fields = record_problem(kind, newest[kind], head)
         if why:
@@ -294,7 +303,8 @@ def check_merge(repo: str | None, number: str | None, expected: str | None, cwd:
     if not problems and review and rated:
         tier, floor = rated[0], rated[1]
         if RANK[review["tier"]] < RANK[tier]:
-            problems.append(f"the review is {review['tier']} tier, but the head's paths make it {tier} "
+            problems.append(hint.lstrip("; ") if unpinned_none and review["tier"] == "routine" else
+                            f"the review is {review['tier']} tier, but the head's paths make it {tier} "
                             "(skills/review/scripts/tier.sh); review it at that tier")
         elif "depth" in review and DEPTH[review["depth"]] < DEPTH[floor]:
             problems.append(f"the review is depth {review['depth']}, but the head's paths need depth {floor} "

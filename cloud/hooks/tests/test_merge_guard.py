@@ -839,3 +839,77 @@ def test_records_without_depth_keep_todays_result(fx: Fx, tmp_path: Path, shape:
     assert (reason is None) is allowed, reason
     done = check(fx, r, "--check", f"{REPO}#12")
     assert (done.returncode == 0) is allowed, done.stderr
+
+
+# On the gates-alone path the newest trusted review record still holds the merge unless it is an unedited, well-formed
+# success or a record for an older head: every way a record fails to count elsewhere holds it here too.
+
+
+def spoiled(state: str, how: str, head: str) -> dict:
+    body = record("review", sha=head, tier="standard", state=state, depth="light")
+    if how == "edited":
+        return comment(body, edited=True)
+    if how == "malformed marker":
+        return comment(body.replace(" -->", " bogus=1 -->", 1))
+    if how == "malformed first line":
+        return comment(body.replace("🤖 Review:", "🤖 Reveiw:", 1))
+    return comment(body.replace("(standard tier)", "(sensitive tier)", 1))  # title and marker disagree
+
+
+@pytest.mark.parametrize("state", ["success", "failure"])
+@pytest.mark.parametrize("how", ["edited", "malformed marker", "malformed first line", "disagreeing"])
+def test_on_gates_alone_a_review_record_that_does_not_count_holds_the_merge(fx: Fx, tmp_path: Path, state: str,
+                                                                           how: str) -> None:
+    r, head, _ = change(tmp_path, fx, {"docs/guide.md": "x\n"})
+    fx.comments(comment(record("gates", sha=head)), spoiled(state, how, head))
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "holds the merge" in reason, reason
+    assert check(fx, r, "--check", f"{REPO}#12").returncode == 1
+
+
+@pytest.mark.parametrize("review", ["absent", "older head", "success"])
+def test_on_gates_alone_only_an_absent_older_or_counting_success_lets_gates_merge(fx: Fx, tmp_path: Path,
+                                                                                  review: str) -> None:
+    r, head, _ = change(tmp_path, fx, {"docs/guide.md": "x\n"})
+    cs = [comment(record("gates", sha=head))]
+    if review == "older head":
+        cs.append(comment(record("review", sha=OLD, tier="standard", state="failure", depth="light")))
+    elif review == "success":
+        cs.append(comment(record("review", sha=head, tier="routine", depth="none")))
+    fx.comments(*cs)
+    assert mcp(fx, r, expectedHeadSha=head) is None
+
+
+def test_a_record_without_depth_is_judged_on_its_tier_alone(fx: Fx, tmp_path: Path) -> None:
+    # Records posted before depths existed sit on open PRs: none may become unmergeable.
+    r, head, _ = change(tmp_path, fx, {"src/app.py": "x = 2\n"},
+                        base={"REVIEW.md": "## Paths\n- `src/**`; depth: full\n"})
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head)))
+    assert mcp(fx, r, expectedHeadSha=head) is None
+
+
+@pytest.mark.parametrize("review", [None, "routine"])
+def test_without_githubs_tip_a_floor_none_change_is_told_to_fetch_it(fx: Fx, tmp_path: Path,
+                                                                    review: str | None) -> None:
+    r, head, _ = change(tmp_path, fx, {"src/app.py": "x = 2\n"}, base={"REVIEW.md": "Depth: none\n"}, pin=False)
+    cs = [comment(record("gates", sha=head))]
+    if review:
+        cs.append(comment(record("review", sha=head, tier="routine", depth="none")))
+    fx.comments(*cs)
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "git fetch origin main" in reason and "review it at that tier" not in reason, reason
+
+
+def test_a_floor_check_that_exits_non_zero_refuses_whatever_it_printed(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"})
+    guard = tmp_path / "copy" / "cloud" / "hooks" / "merge-guard.py"
+    guard.parent.mkdir(parents=True)
+    guard.write_text(GUARD.read_text())
+    fake = tmp_path / "copy" / "skills" / "review" / "scripts" / "plan.py"
+    fake.parent.mkdir(parents=True)
+    fake.write_text("import sys\nprint('routine none')\nsys.exit(1)\n")  # an answer that would waive the review
+    fx.comments(comment(record("gates", sha=head)))
+    done = run_copy(fx, guard, {"tool_name": "mcp__github__merge_pull_request", "cwd": str(r),
+                                "tool_input": {"owner": "example-owner", "repo": "example-repo", "pullNumber": 12,
+                                               "expectedHeadSha": head}})
+    assert done.returncode == 0 and "tier.sh failed" in done.stdout, done.stdout + done.stderr

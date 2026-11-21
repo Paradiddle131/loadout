@@ -15,7 +15,7 @@ The author of a change fixes it and never reviews it; with no fresh-context suba
 
 - Run `$R/scripts/tier.sh [--base <ref>]`: it prints `routine`, `standard` or `sensitive` and the paths that decided it.
 - Run `$R/scripts/plan.py [--pr <n>] [--depth <d>]`: it prints the round's depth, lenses in order and each lens's effort, from what GitHub names for the PR and `REVIEW.md` on the default branch; `verdict.sh` computes the same plan and refuses a round that does not cover it (the script's header has the rules and the table of its inputs).
-- The depth floor is the highest among the changed paths: `routine` none (gates only), `standard` light (one lens and the verifier) or `REVIEW.md`'s `Depth:`, `sensitive` focused; a `REVIEW.md` line's `; depth:` raises its paths anywhere and lowers them only off the sensitive set.
+- The depth floor is the highest among the changed paths: `routine` none (gates only), `standard` light (one lens and the verifier) or `REVIEW.md`'s `Depth:`, `sensitive` focused, or that `Depth:` when it is higher; a `REVIEW.md` line's `; depth:` raises its paths anywhere and lowers them only off the sensitive set.
   A lead may raise the depth (`--depth`), never lower it.
 - The changed paths decide, never the author or the change's size; the highest tier wins:
   - **sensitive:** a built-in floor, always applied: agent instruction and rule files (`CLAUDE.md`, `AGENTS.md`, `REVIEW.md`, the rule files they import), hook and agent-settings directories (`.claude/**`, `.githooks/**`, `**/hooks/**`), CI workflow files, an unattended run's profile and markers (`docs/agents/**`); plus the globs under `REVIEW.md § Sensitive`, which can only add to it.
@@ -100,7 +100,7 @@ Done when every planned lens has returned its raw findings; remove the worktrees
 
 ## 8. Merge
 
-- Merge when both records are `success` on the PR's head commit (for a floor-none change, the gates record, with no review record that failed on the head), naming that head in the merge; the merge guard recomputes the floor and refuses a review whose `depth` is below it; on cloud a hook refuses it otherwise, and refuses any Bash command whose text holds `pr merge` or a `pulls/<n>/merge` endpoint, so merge there with the MCP merge tool (`expectedHeadSha`) or a script that calls the hook's `--check <owner>/<repo>#<n>` (`cloud/hooks/merge-guard.py`), as the autopilot's `merge.sh` does.
+- Merge when both records are `success` on the PR's head commit (for a floor-none change, the gates record, where the guard's clone holds the head and GitHub's tip, and the newest review record, if any, an unedited, well-formed success or one for an older head), naming that head in the merge; the merge guard recomputes the floor and refuses a review record that carries a `depth` below it; on cloud a hook refuses it otherwise, and refuses any Bash command whose text holds `pr merge` or a `pulls/<n>/merge` endpoint, so merge there with the MCP merge tool (`expectedHeadSha`) or a script that calls the hook's `--check <owner>/<repo>#<n>` (`cloud/hooks/merge-guard.py`), as the autopilot's `merge.sh` does.
 - Where the owner keeps the merge (a repo's own rule, an autopilot profile's merge policy, or the owner's word), skip the merge and list the PR as ready; step 9 still runs.
 
 ## 9. File and brief

@@ -418,7 +418,8 @@ def test_an_unusable_newest_trusted_record_plans_a_first_review_not_an_older_rec
         body = crafted(head, later, f"VERDICT: FAIL {later}\nReviewed: {later}\n\nprose\n", tier="sensitive",
                        tmp=tmp_path)
     elif spoil == "routine":
-        body = crafted(head, later, "", tier="routine", state="success", tmp=tmp_path)
+        # A routine record that does carry verifier-shaped output: only its tier keeps it from starting a fix round.
+        body = crafted(head, later, out, tier="routine", tmp=tmp_path)
     elif spoil == "malformed":
         body = body.replace("state=failure", "state=failure state=failure")
     post(w, body, edited=spoil == "edited")
@@ -530,3 +531,110 @@ def test_a_repost_keeps_the_reposted_rounds_depth_and_plan(w: World, tmp_path: P
     assert body.split("\n")[1].endswith(f"reviewed={reviewed} depth=full -->")
     f = dict(x for x in round_fields(body) if x[0] != "lens")
     assert f["repost"] == "1" and f["depth"] == "full" and f["planned"] == f"{COR},{VER}"
+
+
+# The fix round's checks, one test each.
+
+
+def test_a_default_depth_above_focused_raises_sensitive_paths_too(w: World) -> None:
+    base_has(w, {"REVIEW.md": "Depth: full\n"})
+    w.commit({"RULES.md": "a rule\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert (p["tier"], p["floor"]) == ("sensitive", "full")
+
+
+def test_a_depth_line_with_no_value_fails_safe(w: World) -> None:
+    base_has(w, {"REVIEW.md": "Depth:\n"})
+    w.commit({"src/app.py": "x = 2\n"})
+    code, p, err = plan(w)
+    assert code == 0 and "cannot be parsed" in err, err
+    assert (p["tier"], p["floor"]) == ("sensitive", "focused")
+
+
+def test_a_depth_line_in_a_fenced_example_is_not_read(w: World) -> None:
+    base_has(w, {"REVIEW.md": "# Review\n\nAn example:\n\n```\nDepth: none\n## Sensitive\n```\n"})
+    w.commit({"src/app.py": "x = 2\n"})
+    code, p, err = plan(w)
+    assert code == 0 and "cannot be parsed" not in err, err
+    assert (p["tier"], p["floor"]) == ("standard", "light")
+
+
+def test_a_fence_inside_a_list_stays_unparsable(w: World) -> None:
+    base_has(w, {"REVIEW.md": "## Sensitive\n```\n- `src/**`\n```\n"})
+    w.commit({"docs/a.md": "x\n"})
+    code, p, err = plan(w)
+    assert code == 0 and "cannot be parsed" in err, err
+    assert p["floor"] == "focused"
+
+
+def test_the_floor_of_a_change_with_no_paths_is_refused_with_its_reason(w: World) -> None:
+    done = subprocess.run([sys.executable, str(PLAN), "floor", "--base", "HEAD", "--head", "HEAD"], cwd=w.repo,
+                          env=w.env, capture_output=True, text=True, timeout=60)
+    assert done.returncode == 2 and "changes nothing" in done.stderr and "Traceback" not in done.stderr, done.stderr
+
+
+def test_verdict_refuses_when_the_plans_head_is_not_the_head_it_read(w: World, tmp_path: Path) -> None:
+    reviewed = w.commit({"src/app.py": "x = 2\n"})
+    later = w.commit({"src/app.py": "x = 3\n"})  # pushed: the remote holds it, and plan.py reads it as the head
+    pr = json.loads((w.fx / "pr.json").read_text())
+    (w.fx / "pr-later.json").write_text(json.dumps(pr))
+    (w.fx / "pr.json").write_text(json.dumps({**pr, "head": {"sha": reviewed}}))
+    done = verdict(w, tmp_path, reviewed, [COR, VER], "standard", extra=())
+    assert done.returncode == 2 and "moved while the plan was read" in done.stderr, done.stderr
+    assert w.writes() == [] and later
+
+
+def repost(w: World, tmp: Path, reviewed: str) -> subprocess.CompletedProcess[str]:
+    return w.verdict("12", "--tier", "standard", "--reviewers", f"{COR}, {VER}", "--reviewed", reviewed,
+                     "--file", review_file(tmp, reviewed), "--repost", cost=False)
+
+
+def merge_main(w: World, files: dict[str, str] | None = None) -> str:
+    for name, text in (files or {"README.md": "main moved\n"}).items():
+        (w.seed / name).write_text(text)
+    w.git(w.seed, "add", ".")
+    w.git(w.seed, "commit", "-qm", "main moves")
+    w.git(w.seed, "push", "-q", str(w.remote), "main")
+    w.git(w.repo, "fetch", "-q", "origin")
+    w.git(w.repo, "merge", "-q", "--no-edit", "origin/main")
+    w.push()
+    return w.git(w.repo, "rev-parse", "HEAD")
+
+
+def test_a_repost_of_a_round_recorded_before_depths_carries_no_depth(w: World, tmp_path: Path) -> None:
+    reviewed = w.commit({"src/app.py": "x = 2\n"})
+    out = f"VERDICT: PASS {reviewed}\nReviewed: {reviewed}\nBlocking: none\n\nNo findings.\n"
+    post(w, crafted(reviewed, reviewed, out, tier="standard", state="success", tmp=tmp_path))
+    head = merge_main(w)
+    done = repost(w, tmp_path, reviewed)
+    assert done.returncode == 0, done.stderr
+    body = w.comments()[-1]["body"]
+    assert body.split("\n")[1] == f"{REVIEW} sha={head} state=success tier=standard reviewed={reviewed} -->"
+    assert "depth" not in body.split("\n")[2]
+
+
+@pytest.mark.parametrize("spoil", ["another commit", "depth without a plan"])
+def test_a_repost_needs_the_newest_record_of_the_reviewed_commit_whole(w: World, tmp_path: Path, spoil: str) -> None:
+    reviewed = w.commit({"src/app.py": "x = 2\n"})
+    assert verdict(w, tmp_path, reviewed, [COR, VER], "standard").returncode == 0
+    cs = w.comments()
+    if spoil == "another commit":
+        other = w.commit({"src/app.py": "x = 3\n"})
+        cs[-1]["body"] = cs[-1]["body"].replace(f"reviewed={reviewed}", f"reviewed={other}")
+    else:
+        lines = cs[-1]["body"].split("\n")
+        lines[2] = " ".join(x for x in lines[2].split() if not x.startswith("planned="))
+        cs[-1]["body"] = "\n".join(lines)
+    (w.fx / "comments.json").write_text(json.dumps(cs))
+    merge_main(w)
+    done = repost(w, tmp_path, reviewed)
+    assert done.returncode == 2 and "record the round anew" in done.stderr, done.stderr
+
+
+def test_a_repost_below_the_floor_at_the_head_is_refused(w: World, tmp_path: Path) -> None:
+    reviewed = w.commit({"src/app.py": "x = 2\n"})
+    assert verdict(w, tmp_path, reviewed, [COR, VER], "standard").returncode == 0  # depth light
+    merge_main(w, {"REVIEW.md": "## Paths\n- `src/**`; depth: full\n"})  # main raises the floor afterwards
+    done = repost(w, tmp_path, reviewed)
+    assert done.returncode == 2 and "below the floor full" in done.stderr, done.stderr

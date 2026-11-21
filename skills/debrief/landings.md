@@ -17,7 +17,7 @@ The two reads must agree over the window: a `pr_merge` entry in the window whose
 
 Landings come after what needs the owner and is not a PR (a run that failed, a cost above zero, an open question).
 Among them, first and in full: what merged at the `sensitive` tier by its record or its paths, what waits on the owner (held, parked, failing, unreviewed, closed unmerged), what landed outside review or was force-pushed away, anything reviewed below its depth or with a record the next section flags, and any change to how a guardrail is enforced.
-Then the expected ones, one short line each: what it did and the reviewers its record names, or *gates only, no reviewer* when it names none.
+Then the expected ones, one short line each: what it did and the reviewers its record names, or *gates only, no reviewer* when it names none; a change whose depth floor is none, merged on its gates record alone, is *gates only, floor none*, not a missing review.
 
 ## A full line
 
@@ -25,7 +25,7 @@ In plain words: what it does; its depth and the reviewers run; what that review 
 
 - The review is the newest `🤖 Gates` and the newest `🤖 Review` record by an `OWNER`, `MEMBER` or `COLLABORATOR`, a record being a comment with the `<!-- loadout:<kind> ... -->` marker on its second line, as the merge guard reads it.
   Say plainly when either is missing, edited, malformed, failing, posted after the merge, or names a commit other than the PR's head, or when a newer comment titled like a record has no marker.
-- The depth is what the `review` skill's `scripts/tier.sh` gives for the change's own diff, the higher of each form that applies: `--base <the PR's base.sha> --head <PR head>` with `pull/<n>/head` fetched; for a merged PR whose merge commit is not its head, also `--base <merge commit>^1`; for a push, `--base <before> --head <after>`, and for a force push also `--base <after> --head <before>`, the side it removed.
-  When it is above the record's tier, say the change was reviewed at the lower depth; when `tier.sh` cannot run, say *depth not checked*, with the reason, and put the line first.
+- The depth is the record's `depth` against the floor the `review` skill's `scripts/plan.py floor` gives for the change's own diff (for a record without `depth`, its tier against `scripts/tier.sh`'s, which takes the same `--base` and `--head`), the higher of each form that applies: `--base <the PR's base.sha> --head <PR head>` with `pull/<n>/head` fetched; for a merged PR whose merge commit is not its head, also `--base <merge commit>^1`; for a push, `--base <before> --head <after>`, and for a force push also `--base <after> --head <before>`, the side it removed.
+  When the floor is above the record's depth (or the tier above its tier), say the change was reviewed at the lower depth; when the script cannot run, say *depth not checked*, with the reason, and put the line first.
 - What the review left unchecked is its `Not checked` lines, put plainly, or *not in the record* when it has none.
 - A number from a handoff, the author's own account, is shown as *per the handoff*. When unsure what a record means, say so on the line.

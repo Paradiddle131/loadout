@@ -154,8 +154,17 @@ def split_clauses(rest):
 def parse(text):
     """{'sensitive': [item], 'routine': [item] or None, 'paths': [item], 'depth': <d> or None}; an item is
     {'glob', 'lenses', 'depth', 'effort'}."""
-    lists, section, seen = empty_rules(), None, set()
+    lists, section, seen, fence = empty_rules(), None, set(), None
     for n, line in enumerate(text.splitlines(), 1):
+        mark = re.match(r"\s*(`{3,}|~{3,})", line)
+        if section is None and (fence or mark):
+            # A fenced block outside the lists holds an example, never a rule (as imports() reads instruction files);
+            # inside a list a fence is not an item, so it stays unparsable.
+            if mark and not fence:
+                fence = mark.group(1)
+            elif mark and mark.group(1).startswith(fence[0] * len(fence)) and not line.strip().strip(fence[0]):
+                fence = None
+            continue
         h = re.match(r"^(#{1,6})\s+(.*?)\s*$", line)
         if h:
             name = h.group(2).strip().lower()

@@ -22,7 +22,8 @@
 # (paths that keep their tier); each line is optionally followed by ` — <reason>` (plain text with no backtick and
 # no `;`) and then by clauses in this order, each at most once: `; lenses: a, b` (lens names, `## Sensitive` only),
 # `; depth: none|light|focused|full` (focused or full under `## Sensitive`) and `; effort: <lens>=<level>, ...`.
-# One `Depth: <d>` line outside those lists sets the depth of standard paths. The tier ignores depth and effort:
+# One `Depth: <d>` line outside those lists sets the depth of standard paths (of sensitive ones too when above
+# focused). The tier ignores depth and effort:
 # plan.py reads them (its header has the depth rules). A glob without a slash matches the file name at any depth;
 # `**` spans folders, `*` and `?` stay within one. A REVIEW.md this script cannot parse makes every path
 # sensitive, with a warning on stderr. The parser is tiers.py, which plan.py shares.

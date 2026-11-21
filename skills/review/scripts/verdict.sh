@@ -195,7 +195,7 @@ trap 'rm -rf "$tmp"' EXIT
 state=failure
 [ "$result" = pass ] && state=success
 lines=(--line "- Head commit: \`$head\`" --line "- Reviewed commit: \`$reviewed\`$merged_note"
-  --line "- Tier from the paths: $computed" --line "- Depth: $plan_depth (${plan_pairs// /, })"
+  --line "- Tier from the paths: $computed" --line "- Depth: ${plan_depth:-not recorded (a re-post of a round recorded before depths)}${plan_pairs:+ (${plan_pairs// /, })}"
   --line "- Reviewers: ${reviewers:-none}")
 [ "$tier" != routine ] || lines+=(--line "- The routine tier needs gates only: no reviewer was required.")
 round=()
@@ -211,7 +211,7 @@ if [ -n "$round_out" ]; then
   fi
 fi
 for p in ${plan_pair_list[@]+"${plan_pair_list[@]}"}; do round+=(--round "$p"); done
-build_record --kind review --sha "$head" --state "$state" --tier "$tier" --reviewed "$reviewed" --depth "$plan_depth" \
+build_record --kind review --sha "$head" --state "$state" --tier "$tier" --reviewed "$reviewed" ${plan_depth:+--depth "$plan_depth"} \
   ${round[@]+"${round[@]}"} \
   --title "🤖 Review: $result ($tier tier)" ${lines[@]+"${lines[@]}"} ${file:+--file "$file"} \
   --details "Reviewer output (raw)" >"$tmp/body.md"

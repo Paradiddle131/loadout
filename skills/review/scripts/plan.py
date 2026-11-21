@@ -28,6 +28,7 @@ Inputs, where each is read from, who controls it, and how a lead-controlled one 
 | `--reviewers`, `--lens` | the lead's arguments to verdict.sh | the lead | must cover every planned lens and the verifier, each planned lens at its planned effort or above; extra lenses are accepted |
 | `--pr` | the lead's argument | the lead | names the PR the record is posted on, so it can only describe that PR |
 | Repo (`REVIEW_REPO`, else `origin`'s URL) and the object store | the local clone | the lead | every object is read by a sha GitHub named; the code these scripts run from is stamped as `kit=` on the round line |
+| Current branch name | `git symbolic-ref HEAD`, in the preview without `--pr` only | the local clone | used only to find that branch's open PR; `record` always takes `--pr` |
 
 Depths, ranked none < light < focused < full; the floor is the highest depth among the changed paths:
   routine path    none;
@@ -393,9 +394,14 @@ def record_main(a: argparse.Namespace) -> int:
     if a.repost:
         f = record_fields(newest_review(comments) or {})
         planned = (f or {}).get("round", {}).get("planned")
-        if not f or f["reviewed"] != a.reviewed or "depth" not in f or not planned:
+        if not f or f["reviewed"] != a.reviewed or ("depth" in f) != bool(planned):
             raise Refused("--repost posts the PR's newest trusted review record again, and that record must have "
-                          "reviewed --reviewed and carry its depth and plan: record the round anew")
+                          "reviewed --reviewed and carry both its depth and plan, or neither: record the round anew")
+        if "depth" not in f:
+            # A round recorded before depths: reposted without one, so the merge guard judges it on its tier, as it
+            # judges the record it repeats.
+            print(f"head {change.head}\ntier {change.tier}\ndepth\npairs")
+            return 0
         if DRANK[f["depth"]] < DRANK[change.floor]:
             raise Refused(f"the reposted round ran depth {f['depth']}, below the floor {change.floor} at the head")
         p = {"planned": [] if planned == "none" else planned.split(","), "effort": {}, "depth": f["depth"],
