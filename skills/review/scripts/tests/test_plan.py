@@ -602,19 +602,18 @@ def merge_main(w: World, files: dict[str, str] | None = None) -> str:
     return w.git(w.repo, "rev-parse", "HEAD")
 
 
-def test_a_repost_of_a_round_recorded_before_depths_carries_no_depth(w: World, tmp_path: Path) -> None:
+def test_a_repost_of_a_round_recorded_before_depths_is_refused(w: World, tmp_path: Path) -> None:
     reviewed = w.commit({"src/app.py": "x = 2\n"})
     out = f"VERDICT: PASS {reviewed}\nReviewed: {reviewed}\nBlocking: none\n\nNo findings.\n"
     post(w, crafted(reviewed, reviewed, out, tier="standard", state="success", tmp=tmp_path))
-    head = merge_main(w)
+    merge_main(w, {"REVIEW.md": "## Paths\n- `src/**`; depth: full\n"})
+    before = len(w.writes())
     done = repost(w, tmp_path, reviewed)
-    assert done.returncode == 0, done.stderr
-    body = w.comments()[-1]["body"]
-    assert body.split("\n")[1] == f"{REVIEW} sha={head} state=success tier=standard reviewed={reviewed} -->"
-    assert "depth" not in body.split("\n")[2]
+    assert done.returncode == 2 and "record the round anew" in done.stderr, done.stderr
+    assert len(w.writes()) == before
 
 
-@pytest.mark.parametrize("spoil", ["another commit", "depth without a plan"])
+@pytest.mark.parametrize("spoil", ["another commit", "depth without a plan", "plan without a depth"])
 def test_a_repost_needs_the_newest_record_of_the_reviewed_commit_whole(w: World, tmp_path: Path, spoil: str) -> None:
     reviewed = w.commit({"src/app.py": "x = 2\n"})
     assert verdict(w, tmp_path, reviewed, [COR, VER], "standard").returncode == 0
@@ -622,10 +621,12 @@ def test_a_repost_needs_the_newest_record_of_the_reviewed_commit_whole(w: World,
     if spoil == "another commit":
         other = w.commit({"src/app.py": "x = 3\n"})
         cs[-1]["body"] = cs[-1]["body"].replace(f"reviewed={reviewed}", f"reviewed={other}")
-    else:
+    elif spoil == "depth without a plan":
         lines = cs[-1]["body"].split("\n")
         lines[2] = " ".join(x for x in lines[2].split() if not x.startswith("planned="))
         cs[-1]["body"] = "\n".join(lines)
+    else:
+        cs[-1]["body"] = cs[-1]["body"].replace(" depth=light -->", " -->", 1)
     (w.fx / "comments.json").write_text(json.dumps(cs))
     merge_main(w)
     done = repost(w, tmp_path, reviewed)
@@ -638,3 +639,19 @@ def test_a_repost_below_the_floor_at_the_head_is_refused(w: World, tmp_path: Pat
     merge_main(w, {"REVIEW.md": "## Paths\n- `src/**`; depth: full\n"})  # main raises the floor afterwards
     done = repost(w, tmp_path, reviewed)
     assert done.returncode == 2 and "below the floor full" in done.stderr, done.stderr
+
+
+@pytest.mark.parametrize("review_md, unparsable", [
+    ("# R\n\n```\nan example\n\n## Sensitive\n- `src/**`\n", True),  # never closed: unparsable
+    ("# R\n\n    ```\n    indented code\n\n## Sensitive\n- `src/**`\n", False),  # 4 spaces in: no fence
+    ("# R\n\n```\nDepth: none\n```\n\n## Sensitive\n- `src/**`\n", False),  # a closed example keeps the list
+    ("# R\n\n````\n```\n## Sensitive\n- `src/**`\n", True),  # a shorter inner line leaves it open
+])
+def test_a_fence_hides_only_what_it_closes_around(w: World, review_md: str, unparsable: bool) -> None:
+    base_has(w, {"REVIEW.md": review_md})
+    w.commit({"src/app.py": "x = 2\n"})
+    code, p, err = plan(w)
+    assert code == 0 and ("cannot be parsed" in err) is unparsable, err
+    assert (p["tier"], p["floor"]) == ("sensitive", "focused"), (p, err)
+    done = w.run("tier.sh")
+    assert done.stdout.split("\n")[0] == "sensitive", done.stdout + done.stderr

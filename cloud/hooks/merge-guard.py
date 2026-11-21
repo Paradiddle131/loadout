@@ -276,8 +276,9 @@ def check_merge(repo: str | None, number: str | None, expected: str | None, cwd:
     # Floor none, but against the clone's own ref: the relief needs GitHub's tip, so say how to get it.
     unpinned_none = bool(rated and not rated[2] and rated[1] == "none")
     hint = (f"; the head's depth floor is none, but the review is waived only against the tip of {base} GitHub "
-            f"names, which this clone does not hold: fetch it (`git fetch origin {base}`) and merge again, or "
-            "record it with skills/review/scripts/verdict.sh <pr> --tier routine") if unpinned_none else ""
+            f"names, which this clone does not hold: fetch it (`git fetch origin {base}`) and merge again"
+            + (", or record it with skills/review/scripts/verdict.sh <pr> --tier routine" if rated[0] == "routine"
+               else "")) if unpinned_none else ""
     problems, review = [], {}
     for kind in ("gates", "review"):
         if kind == "review" and gates_alone:

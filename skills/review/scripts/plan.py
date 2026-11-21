@@ -394,14 +394,9 @@ def record_main(a: argparse.Namespace) -> int:
     if a.repost:
         f = record_fields(newest_review(comments) or {})
         planned = (f or {}).get("round", {}).get("planned")
-        if not f or f["reviewed"] != a.reviewed or ("depth" in f) != bool(planned):
+        if not f or f["reviewed"] != a.reviewed or "depth" not in f or not planned:
             raise Refused("--repost posts the PR's newest trusted review record again, and that record must have "
-                          "reviewed --reviewed and carry both its depth and plan, or neither: record the round anew")
-        if "depth" not in f:
-            # A round recorded before depths: reposted without one, so the merge guard judges it on its tier, as it
-            # judges the record it repeats.
-            print(f"head {change.head}\ntier {change.tier}\ndepth\npairs")
-            return 0
+                          "reviewed --reviewed and carry its depth and plan: record the round anew")
         if DRANK[f["depth"]] < DRANK[change.floor]:
             raise Refused(f"the reposted round ran depth {f['depth']}, below the floor {change.floor} at the head")
         p = {"planned": [] if planned == "none" else planned.split(","), "effort": {}, "depth": f["depth"],

@@ -156,10 +156,10 @@ def parse(text):
     {'glob', 'lenses', 'depth', 'effort'}."""
     lists, section, seen, fence = empty_rules(), None, set(), None
     for n, line in enumerate(text.splitlines(), 1):
-        mark = re.match(r"\s*(`{3,}|~{3,})", line)
+        mark = re.match(r" {0,3}(`{3,}|~{3,})", line)  # a fence line: at most 3 spaces in (CommonMark)
         if section is None and (fence or mark):
             # A fenced block outside the lists holds an example, never a rule (as imports() reads instruction files);
-            # inside a list a fence is not an item, so it stays unparsable.
+            # inside a list a fence is not an item, so it stays unparsable, and so does a fence never closed.
             if mark and not fence:
                 fence = mark.group(1)
             elif mark and mark.group(1).startswith(fence[0] * len(fence)) and not line.strip().strip(fence[0]):
@@ -212,6 +212,8 @@ def parse(text):
                 lists["routine"].append(entry)
             else:
                 lists[section].append(entry)
+    if fence:
+        raise Unparsable(f"a fenced block opened with {fence} is never closed")
     return lists
 
 

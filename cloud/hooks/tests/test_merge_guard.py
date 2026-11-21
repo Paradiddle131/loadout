@@ -898,6 +898,14 @@ def test_without_githubs_tip_a_floor_none_change_is_told_to_fetch_it(fx: Fx, tmp
     fx.comments(*cs)
     reason = mcp(fx, r, expectedHeadSha=head)
     assert reason and "git fetch origin main" in reason and "review it at that tier" not in reason, reason
+    assert "--tier routine" not in reason  # a standard change's routine record is refused here: never advise one
+
+
+def test_without_githubs_tip_a_routine_change_may_also_record_a_routine_verdict(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"docs/guide.md": "x\n"}, pin=False)
+    fx.comments(comment(record("gates", sha=head)))
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "git fetch origin main" in reason and "--tier routine" in reason, reason
 
 
 def test_a_floor_check_that_exits_non_zero_refuses_whatever_it_printed(fx: Fx, tmp_path: Path) -> None:
