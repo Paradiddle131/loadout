@@ -2,10 +2,12 @@
 # Prints the review tier a change's paths call for: one line `routine`, `standard` or `sensitive`, then the
 # changed paths that decided it (a sensitive path with the lenses REVIEW.md names for it).
 #
-# Usage: tier.sh [--base <ref>] [--head <ref>]
+# Usage: tier.sh [--base <ref>] [--head <ref>] [--since <commit>]
 #   --base defaults to the remote's default branch (origin/HEAD, else origin/main or origin/master);
 #   --head defaults to HEAD. The changed paths are `git diff --name-only --no-renames
 #   $(git merge-base <base> <head>) <head>`: a rename lists both its old and its new path.
+#   --since <commit>, an ancestor of --head (a fix round's reviewed commit), diffs from it instead, so a fix round
+#   reads the paths it changed; REVIEW.md and the imports are still read from --base.
 #
 # Rules, highest tier among the changed paths wins; an empty diff is an error (exit 2):
 # - sensitive: a built-in floor that always applies, plus the globs under `## Sensitive` in REVIEW.md (a line
@@ -159,10 +161,15 @@ def main():
     p = argparse.ArgumentParser(prog="tier.sh")
     p.add_argument("--base")
     p.add_argument("--head", default="HEAD")
+    p.add_argument("--since")
     a = p.parse_args()
     base = a.base or default_base()
     try:
         mb = git("merge-base", base, a.head).strip()
+        if a.since:
+            if subprocess.run(["git", "merge-base", "--is-ancestor", a.since, a.head], capture_output=True).returncode:
+                sys.exit(f"tier.sh: --since {a.since} is not an ancestor of {a.head}")
+            mb = git("rev-parse", "--verify", a.since + "^{commit}").strip()
         paths = [x for x in git("diff", "--name-only", "--no-renames", mb, a.head).splitlines() if x]
     except RuntimeError as exc:
         sys.exit(f"tier.sh: {exc}")

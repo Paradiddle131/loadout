@@ -28,22 +28,27 @@ The author of a change fixes it and never reviews it; with no fresh-context suba
 
 ## 3. Find
 
-Start the reviewers as subagents, in parallel and in the foreground, on Opus at high effort set in the call (the collection's default reviewer model, set explicitly because a subagent does not inherit the session's effort; a repo's instructions may name another).
-Give each the brief in [`templates.md`](templates.md): the repo, the range `$(git merge-base <default> <head>)..<head>`, the issue body and its done-when quoted; each agent makes and removes its own detached worktree.
-Give no summary of the work; the PR body goes only to `claims-auditor`, or to a repo's own lens its `REVIEW.md` names that asks for it, as material under audit.
-The first review of a change runs every lens its tier names below; a fix round runs the set step 5 gives.
+- Run `$R/scripts/plan.py [--mode light|focused|full] [--add <lens>,...]` (a fix round adds `--since <reviewed> --prior <that round's verifier output>`): it prints the round's lenses, `first` and `then`, from the paths, never the author.
+  `--add` takes a lens for what paths cannot show (`leak-hunter` for personal data or output from real data, `control-prober` for a check, guard, scorer or the review machinery, `claims-auditor` on a standard change whose docs or PR body state a number or an absolute); nobody drops a lens it prints.
+- The mode is `focused` unless the owner, the repo's instructions or an autopilot profile names another; a lead may raise it to `full`, never lower it:
+  - **focused:** the `first` lens alone, then the `then` lenses in parallel, each brief carrying the first lens's findings as raised this round (templates.md), so a lens reports only what they miss;
+  - **full:** every lens at once, and a fix round reruns the whole set;
+  - **light:** the lenses at once with no first phase; `plan.py` refuses it on a sensitive change's first review.
+- Start each lens as a subagent in the foreground, on Opus at high effort set in the call (the collection's default; set it explicitly, because a subagent does not inherit the session's effort; a repo's instructions may name another), and the same model and effort for every lens of a round, which step 7 records.
+- Give each the brief in [`templates.md`](templates.md): the repo, the range `$(git merge-base <default> <head>)..<head>`, the issue body and its done-when quoted; each agent makes and removes its own detached worktree.
+  Give no summary of the work; the PR body goes only to `claims-auditor`, or to a repo's own lens its `REVIEW.md` names that asks for it, as material under audit.
 
-| Reviewer | Runs on |
+| Reviewer | First review |
 |---|---|
 | [`correctness-reviewer`](../../agents/correctness-reviewer.md) | standard, sensitive |
-| [`claims-auditor`](../../agents/claims-auditor.md) | sensitive; standard when a doc in the diff or the PR body states a number or an absolute (all, every, never, zero) |
-| [`guardrail-reviewer`](../../agents/guardrail-reviewer.md) | sensitive: grants, spend, guardrails, security, review machinery |
-| [`leak-hunter`](../../agents/leak-hunter.md) | sensitive: personal data, or output from real data |
-| [`control-prober`](../../agents/control-prober.md) | sensitive: security, guardrail checks, scorers, review machinery |
+| [`claims-auditor`](../../agents/claims-auditor.md) | sensitive; `--add` on standard when a doc in the diff or the PR body states a number or an absolute (all, every, never, zero) |
+| [`guardrail-reviewer`](../../agents/guardrail-reviewer.md) | sensitive |
+| [`leak-hunter`](../../agents/leak-hunter.md) | by `REVIEW.md` or `--add`: personal data, or output from real data |
+| [`control-prober`](../../agents/control-prober.md) | by `REVIEW.md` or `--add`: security, guardrail checks, scorers, review machinery |
 
-A `REVIEW.md` line's `lenses: a, b` adds those lenses for its paths; `correctness-reviewer` always runs above `routine`, a documentation-only fix round aside (step 5).
+A `REVIEW.md` line's `lenses: a, b` adds those lenses for its paths.
 A change to a line of the repo's guardrails section fails `guardrail-reviewer` unless the PR cites the owner's answer to a conflict packet (`ways/guardrails.md`).
-Done when every reviewer has returned its raw findings; remove the worktrees.
+Done when every lens has returned its raw findings; remove the worktrees.
 
 ## 4. Verify and rank
 
@@ -61,10 +66,13 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 
 - Send each `must-fix` the verifier's `Blocking:` line lists, with its reproduction, to the worker that wrote the change (if you wrote it, you fix it); a nit is applied only when cheap, and never blocks.
 - A fix to code covers the finding's class (every place the same defect occurs) with a test that goes red without it; a fix to a claim says less (narrow or delete the sentence) and adds no new completeness claim.
-- Then steps 2 to 4 on the new commits only (`<reviewed>..<new head>`), each brief carrying the settled list, built from the earlier `🤖 Review` records: each finding's ids, its rank as that record posted it (on a record with a `Blocking:` line, a must-fix is one that line lists; on an older one, one its `## Must-fix` section holds), and the record's link (templates.md):
-  - a round that changes any line of a code, test or configuration file (comments, docstrings and tool directives included) or of a rule an agent follows (an instruction file, a skill, an agent definition) reruns the tier's full set (step 3);
-  - a round that changes only documentation files runs `claims-auditor`, the lenses `REVIEW.md` names for its paths, and each lens whose finding it answers, `correctness-reviewer` only when it answers one of its findings;
-  - the verifier runs on every round.
+- Then steps 2 to 4 on the new commits only (`<reviewed>..<new head>`), each brief carrying the settled list, built from the earlier `🤖 Review` records: each finding's ids, its rank as that record posted it (on a record with a `Blocking:` line, a must-fix is one that line lists; on an older one, one its `## Must-fix` section holds), and the record's link (templates.md).
+  The lenses are what `plan.py --since <reviewed> --prior <its verifier output>` prints:
+  - each lens a must-fix on the round's `Blocking:` line came from, and the lenses `REVIEW.md` names for the paths the fix changed;
+  - `correctness-reviewer` when the fix changes a path `tier.sh` does not rank routine; `claims-auditor` when every path it changes is routine; the sensitive set when it changes a sensitive path;
+  - every lens the first review took by `--add`: pass the same `--add` on every round of the change;
+  - the whole first-review set in `full` mode, or when a blocking id's prefix names no lens;
+  - the verifier on every round.
 - A cycle is a fix round, a red stamp, or an integrate round (step 6); after the third with a `must-fix` or red stamp still open:
   - **rethink** once per item, when the findings point at the approach: a fresh worker, a fresh brief carrying them, the count at zero;
   - **park** otherwise: label the issue `needs-owner`, comment the open findings, take the next item.
@@ -79,10 +87,10 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 
 ## 7. Record the verdict
 
-- Run `$R/scripts/verdict.sh --reviewed <sha>` (its header gives the other arguments) with the verifier's output unedited (the author may run it; the script cannot tell the verifier's output from a typed one, so the rule is to post it unedited); for `routine`, `verdict.sh --tier routine`, which the change's own author may run.
+- Run `$R/scripts/verdict.sh --reviewed <sha> --mode <mode> --model <model> --effort <effort>` (its header gives the other arguments; `--reviewers` names every lens that ran and the verifier) with the verifier's output unedited (the author may run it; the script cannot tell the verifier's output from a typed one, so the rule is to post it unedited); for `routine`, `verdict.sh --tier routine`, which the change's own author may run.
 - It recomputes the tier and refuses a lower one than the paths give, and refuses unless the PR head equals the reviewed commit or differs from it only by a clean merge of the default branch.
 - Above `routine` it takes the result from the output's first `VERDICT` line, and refuses an output without the verifier's `VERDICT` and `Reviewed` lines, one whose lines name a commit other than `--reviewed`, one whose `Blocking:` line (right after `Reviewed:`) is missing, lists a must-fix whose harm is missing, under two words or made only of `blocking.py`'s filler words, or whose id opens no `###` heading below it outside a code fence, lists none on a `FAIL` or any on a `PASS`, and a `--result` that contradicts its verdict.
-- It posts the output as a PR comment that starts with `🤖` and names the reviewed commit and the head, as the `🤖 Review` record: `success` when the verifier's `VERDICT` line says `PASS` (for `routine`, when `--result` is `pass`, its default).
+- It posts the output as a PR comment that starts with `🤖` and names the reviewed commit and the head, with a round line under the marker (`mode`, `model`, `effort`, `lenses`) for people and audits, as the `🤖 Review` record: `success` when the verifier's `VERDICT` line says `PASS` (for `routine`, when `--result` is `pass`, its default).
 - Done when both records are `success` on the PR's head commit.
 
 ## 8. Merge

@@ -3,7 +3,11 @@
 # against a posted verdict instead of one the author retells (cloud/hooks/merge-guard.py reads it).
 #
 # Usage: verdict.sh <pr> --tier routine|standard|sensitive [--result pass|fail] \
-#          --reviewers "<names>" --reviewed <sha> --file <verifier output> [--dry-run]
+#          --reviewers "<names>" --reviewed <sha> --file <verifier output> \
+#          --mode light|focused|full --model <model> --effort low|medium|high|xhigh|max [--dry-run]
+#   --reviewers is the agent names that ran, verifier included, split by commas or blanks (plan.py prints the lenses);
+#   --mode, --model and --effort say how the round ran (one model and effort for every reviewer of the round),
+#   required above routine; they go on the record's round line beside the lenses, for people and for audits.
 #   Run it from a clone of the PR's repo (git 2.38 or later): it reads the tier from the PR head's paths.
 #   --tier may be higher than tier.sh gives for the PR head's paths, never lower.
 #   --reviewed is the commit the reviewers read (required for standard and sensitive): the PR's head must be it,
@@ -30,8 +34,8 @@
 set -euo pipefail
 export LC_ALL=C # grep's [[:space:]] and blocking.py's blanks agree only in the C locale
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-usage='usage: verdict.sh <pr> --tier routine|standard|sensitive [--result pass|fail] --reviewers "<names>" --reviewed <sha> --file <verifier output> [--dry-run]'
-pr='' tier='' result='' reviewers='' reviewed='' file=''
+usage='usage: verdict.sh <pr> --tier routine|standard|sensitive [--result pass|fail] --reviewers "<names>" --reviewed <sha> --file <verifier output> --mode light|focused|full --model <model> --effort low|medium|high|xhigh|max [--dry-run]'
+pr='' tier='' result='' reviewers='' reviewed='' file='' mode='' model='' effort=''
 while [ $# -gt 0 ]; do
   case "$1" in
     --tier) tier=${2:-}; shift 2 ;;
@@ -39,6 +43,9 @@ while [ $# -gt 0 ]; do
     --reviewers) reviewers=${2:-}; shift 2 ;;
     --reviewed) reviewed=${2:-}; shift 2 ;;
     --file) file=${2:-}; shift 2 ;;
+    --mode) mode=${2:-}; shift 2 ;;
+    --model) model=${2:-}; shift 2 ;;
+    --effort) effort=${2:-}; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     -*) echo "$usage" >&2; exit 2 ;;
     *) [ -z "$pr" ] || { echo "$usage" >&2; exit 2; }; pr=$1; shift ;;
@@ -54,6 +61,11 @@ case "$tier" in routine | standard | sensitive) ;; *) die "--tier is routine, st
 case "$result" in '' | pass | fail) ;; *) die "--result is pass or fail. $usage" ;; esac
 if [ "$tier" != routine ]; then
   [ -n "$reviewers" ] || die "--reviewers names who reviewed (a $tier change needs a reviewer)."
+  case "$mode" in light | focused | full) ;; *) die "--mode is light, focused or full (plan.py printed it). $usage" ;; esac
+  case "$effort" in low | medium | high | xhigh | max) ;; *) die "--effort is the reviewers' effort: low, medium, high, xhigh or max. $usage" ;; esac
+  [[ "$model" =~ ^[a-z0-9][a-z0-9.-]*$ ]] || die "--model is the reviewers' model, as the agent call named it (opus, sonnet, a model id). $usage"
+  lenses=$(tr -s ', \t' ',,,' <<<"$reviewers" | sed -E 's/^,//; s/,$//')
+  [[ "$lenses" =~ ^[a-z][a-z0-9-]*(,[a-z][a-z0-9-]*)*$ ]] || die "--reviewers is agent names, split by commas or blanks, each starting with a letter (got '$reviewers')."
   [ -n "$file" ] && [ -s "$file" ] || die "--file is the reviewers' raw output, and it must not be empty (a $tier change needs a reviewer)."
   [[ "$reviewed" =~ ^[0-9a-f]{40}$ ]] || die "--reviewed is the full sha of the commit the reviewers read (a $tier change needs it)."
   # The verifier's own lines decide the result and the commit (agents/finding-verifier.md § Output).
@@ -137,7 +149,10 @@ state=failure
 lines=(--line "- Head commit: \`$head\`" --line "- Reviewed commit: \`$reviewed\`$merged_note"
   --line "- Tier from the paths: $computed" --line "- Reviewers: ${reviewers:-none}")
 [ "$tier" != routine ] || lines+=(--line "- The routine tier needs gates only: no reviewer was required.")
-build_record --kind review --sha "$head" --state "$state" --tier "$tier" --reviewed "$reviewed" \
+round=()
+[ "$tier" = routine ] || round=(--round "mode=$mode" --round "model=$model" --round "effort=$effort" --round "lenses=$lenses")
+[ "$tier" = routine ] || lines+=(--line "- Round: $mode mode, $model at $effort effort")
+build_record --kind review --sha "$head" --state "$state" --tier "$tier" --reviewed "$reviewed" "${round[@]}" \
   --title "🤖 Review: $result ($tier tier)" "${lines[@]}" ${file:+--file "$file"} \
   --details "Reviewer output (raw)" >"$tmp/body.md"
 url=$(post_record "$pr" "$tmp/body.md") || exit 1
