@@ -16,7 +16,8 @@ back on the PRs, and sums both up. GitHub holds every record; the JSONL files ar
   audit.py summary --dir <dir> [--session <id>] [--json]
       prints the batch's numbers: rounds, passes, convergence, lens yield and, from the audits, how often a
       checkable finding was wrong or mattered and a must-fix was ranked too high, each with its 95% interval,
-      and how many findings were ranked too low; "merged without a pass" reads the review record the merge
+      and how many findings were ranked too low, the findings by the effort their lens ran at and the rounds by depth
+      (`unstamped` for a round line without them); "merged without a pass" reads the review record the merge
       guard saw at merge time, not the gates record or the tier. Then the rounds by the review path's version
       (`v` on each record's round line, `unstamped` without one) and the reviewers' tokens and seconds per PR,
       repo, day and month, with an estimated cost at list price (BLENDED_USD_PER_MTOK has the rate).
@@ -54,7 +55,9 @@ MARKER = re.compile(r"<!-- loadout:(gates|review|audit)((?: [a-z_]+=[^\s=]+)+) -
 TITLE = {"gates": re.compile(r"🤖 Gates: (success|failure)"),
          "review": re.compile(r"🤖 Review: (pass|fail) \((routine|standard|sensitive) tier\)"),
          "audit": re.compile(r"🤖 Audit: \d+ findings? re-checked \(session [A-Za-z0-9._-]{1,64}\)")}
-FIELDS = {"gates": {"sha", "state"}, "review": {"sha", "state", "tier", "reviewed"}, "audit": {"session", "backfill"}}
+FIELDS = {"gates": {"sha", "state"}, "review": {"sha", "state", "tier", "reviewed", "depth"},
+          "audit": {"session", "backfill"}}
+DEPTHS = ("none", "light", "focused", "full")  # the review skill's plan.py ranks them
 SHA = re.compile(r"[0-9a-f]{40}")
 GUARD_REVIEW = re.compile(r"\s*<!-- loadout" r":review\b")  # how the merge guard spots a review record's marker
 WHEN = re.compile(r"\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}Z)?")
@@ -127,6 +130,8 @@ def trusted_record(c: dict) -> tuple[str, dict] | None:
     said = {"pass": "success", "fail": "failure"}.get(title.group(1), title.group(1))
     if f["state"] != said or (kind == "review" and title.group(2) != f.get("tier")):
         return None  # the title and the marker disagree
+    if kind == "review" and f.get("depth", "none") not in DEPTHS:
+        return None
     if kind != "audit" and (not SHA.fullmatch(f["sha"]) or ("reviewed" in f and not SHA.fullmatch(f["reviewed"]))):
         return None  # state and tier need no check of their own: they must equal the title's, which TITLE limits
     return kind, f
@@ -259,6 +264,10 @@ def harvest(a: argparse.Namespace) -> int:
                         "lead_nits": rf["nits"] if isinstance(rf.get("nits"), int) else None,
                         "repost": rf.get("repost") == 1,
                         "lenses": rf.get("lens", []),
+                        "depth": f.get("depth") or (rf["depth"] if isinstance(rf.get("depth"), str) else None),
+                        "floor": rf["floor"] if isinstance(rf.get("floor"), str) else None,
+                        "planned": (None if not isinstance(rf.get("planned"), str)
+                                    else [] if rf["planned"] == "none" else rf["planned"].split(",")),
                         "tokens": sum(x["tokens"] for x in rf.get("lens", [])),
                         "seconds": sum(x["seconds"] for x in rf.get("lens", []))})
                     for b in fs:
@@ -417,6 +426,15 @@ def summarize(d: Path, session: str | None) -> dict:
                         "merged_without_pass": bool(p.get("merged_at")) and not passed_head,
                         "steered_rounds": sum(r["steered"] for r in rs)})
     lens: dict[str, Counter] = defaultdict(Counter)
+    # Findings by the effort their lens ran at (the round line's lens= entries); a finding several lenses raised counts
+    # once under each distinct effort among them, and `unstamped` holds those whose round line gave no effort.
+    effort: dict[str, Counter] = defaultdict(Counter)
+    ran = {(r["repo"], r["pr"], r["comment"]): r.get("lenses") or [] for r in rounds}
+    for f in finds:
+        agents = ran.get((f["repo"], f["pr"], f["round"]), [])
+        levels = {a["effort"] for x in lenses(f.get("lens")) for a in agents if a["name"].startswith(x)}
+        for level in levels or {UNSTAMPED}:
+            effort[level]["must_fix" if f["must_fix"] else "other"] += 1
     for f in finds:
         names = lenses(f.get("lens"))
         for x in names:
@@ -437,6 +455,8 @@ def summarize(d: Path, session: str | None) -> dict:
         "must_fix_with_harm": wilson(sum(bool(f["harm"]) for f in finds if f["must_fix"]),
                                      sum(f["must_fix"] for f in finds)),
         "lens": {k: dict(v) for k, v in sorted(lens.items())},
+        "effort": {k: dict(v) for k, v in sorted(effort.items())},
+        "depth": dict(sorted(Counter(r.get("depth") or UNSTAMPED for r in rounds).items())),
         "audited": len(audits),
         "wrong": wilson(sum(j["correct"] == "no" for j in checkable), len(checkable)),
         "matters": wilson(sum(j.get("matters") == "yes" for j in checkable), len(checkable)),
@@ -529,6 +549,12 @@ def summary(a: argparse.Namespace) -> int:
     for k, v in s["lens"].items():
         print(f"| {k} | {v.get('must_fix', 0)} | {v.get('alone_must_fix', 0)} | {v.get('other', 0)} | "
               f"{v.get('alone_other', 0)} |")
+    print("\n| Lens effort | Must-fix | Other |\n|---|---|---|")
+    for k, v in s["effort"].items():
+        print(f"| {k} | {v.get('must_fix', 0)} | {v.get('other', 0)} |")
+    print("\n| Depth | Rounds |\n|---|---|")
+    for k, v in s["depth"].items():
+        print(f"| {k} | {v} |")
     print("\n| Needs a look | Rounds | Must-fix per round | Why |\n|---|---|---|---|")
     for c in s["attention"]:
         why = [w for w, on in (("grew", c["grew"]), ("merged without a pass", c["merged_without_pass"]),

@@ -825,3 +825,39 @@ def test_record_refuses_when_the_review_paths_version_cannot_be_read(github: dic
                                   backfill=False, dry_run=True)
     with pytest.raises(SystemExit, match="cannot read the review path's version"):
         audit.record(ns)
+
+
+# Depth and plan (the review skill's planner): `depth` on line two, `depth` and `planned` on the round line, and the
+# findings grouped by the effort their lens ran at.
+
+
+def with_depth(c: dict) -> dict:
+    lines = c["body"].split("\n")
+    lines[1] = lines[1].replace(" -->", " depth=focused -->")
+    lines[2] = lines[2].replace(" -->", " cycle=1 lenses=correctness-reviewer,claims-auditor,finding-verifier dupes=0 "
+                                         "mustfix=1 nits=1 depth=focused "
+                                         "planned=correctness-reviewer,claims-auditor,finding-verifier "
+                                         "lens=correctness-reviewer:opus:high:10:1:1 "
+                                         "lens=claims-auditor:opus:medium:10:1:2 "
+                                         "lens=finding-verifier:opus:high:10:1:2 -->")
+    return {**c, "body": "\n".join(lines)}
+
+
+def test_harvest_trusts_a_record_with_depth_and_reads_depth_and_planned(github: dict, tmp_path: Path) -> None:
+    cs = github["data"][f"repos/{REPO}/issues/7/comments"]
+    cs[1] = with_depth(cs[1])
+    assert audit.trusted_record(cs[1]) is not None
+    d = harvest(tmp_path)
+    r = next(x for x in rows(d, "rounds") if x["comment"] == 2)
+    assert r["depth"] == "focused"
+    assert r["planned"] == ["correctness-reviewer", "claims-auditor", "finding-verifier"]
+    assert next(x for x in rows(d, "rounds") if x["comment"] == 3)["depth"] is None  # a record from before depth
+
+
+def test_summary_groups_findings_by_the_effort_their_lens_ran_at(github: dict, tmp_path: Path) -> None:
+    cs = github["data"][f"repos/{REPO}/issues/7/comments"]
+    cs[1] = with_depth(cs[1])
+    s = audit.summarize(harvest(tmp_path), None)
+    # COR-1, CLM-2 is one must-fix raised by a high and a medium lens; CLM-3 a nit from the medium one.
+    assert s["effort"] == {"high": {"must_fix": 1}, "medium": {"must_fix": 1, "other": 1}}
+    assert s["depth"] == {"focused": 1, "unstamped": 1}

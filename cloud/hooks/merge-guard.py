@@ -8,11 +8,16 @@ The merge tool: any MCP server's `merge_pull_request` may merge a PR only when i
 (skills/review/scripts/gate_stamp.sh) and newest review record (skills/review/scripts/verdict.sh), PR comments
 by the owner, a member or a collaborator whose first line is `🤖 Gates: <state>` or `🤖 Review: <result>
 (<tier> tier)` and second the marker `<!-- loadout:<gates|review> sha=<head> state=success|failure [tier=..]
-[reviewed=..] -->`, are unedited, well formed, agree with their first line and name the PR's current head as
-a success. In a local clone holding the head and the default branch GitHub names, tier.sh runs with `--base
-origin/<that branch>` and a review below the paths' tier refuses, as does a tier.sh that fails or runs out of
-time; with no such clone the tier check is skipped. The merge must name the head checked (`expectedHeadSha`),
-so GitHub refuses it if a push lands in between. A PR labelled `owner-merges`, in any case, is refused whatever
+[reviewed=..] [depth=..] -->`, are unedited, well formed, agree with their first line and name the PR's current head
+as a success. In a local clone holding the head and the default branch GitHub names, the review skill's
+`plan.py floor` (tier.sh's tier and the paths' depth floor) runs against that branch's tip as GitHub's branches API
+names it when the clone holds that commit, else against `origin/<that branch>`; a review below the paths' tier
+refuses, as does a record that carries a `depth` below the floor (a record without `depth` is judged on its tier
+alone), and so does a check that fails or runs out of time; with no such clone the check is skipped. When the floor
+is `none` and it was computed against GitHub's tip, no review record is needed: the gates record alone lets the merge
+go when the newest trusted review record is absent, for an older head, or an unedited, well-formed success; an
+edited, malformed or failing one holds the merge. The merge must name the head checked (`expectedHeadSha`), so
+GitHub refuses it if a push lands in between. A PR labelled `owner-merges`, in any case, is refused whatever
 its records (the merge is the owner's), here and in `--check`. `enable_pr_auto_merge` is refused.
 
 Bash: the command is read as text, never as shell. A command whose text holds one of the five MENTIONS
@@ -55,9 +60,10 @@ OWNER_MERGES = "owner-merges"  # a PR label: the merge is the owner's alone
 MARKER = re.compile(r"<!-- loadout:(gates|review)((?: [a-z]+=[^\s=]+)+) -->")
 TITLE = {"gates": re.compile(r"🤖 Gates: (success|failure)"),
          "review": re.compile(r"🤖 Review: (pass|fail) \((routine|standard|sensitive) tier\)")}
-FIELDS = {"gates": {"sha", "state"}, "review": {"sha", "state", "tier", "reviewed"}}
+FIELDS = {"gates": {"sha", "state"}, "review": {"sha", "state", "tier", "reviewed", "depth"}}
 RANK = {"routine": 0, "standard": 1, "sensitive": 2}
-TIER_SH = ROOT / "skills/review/scripts/tier.sh"
+DEPTH = {"none": 0, "light": 1, "focused": 2, "full": 3}
+PLAN_PY = ROOT / "skills/review/scripts/plan.py"
 MERGE_SH = ROOT / "cloud/skills/autopilot/scripts/merge.sh"
 FRICTION = ROOT / "bin/friction"
 MAX_PAGES = 30
@@ -168,7 +174,8 @@ def record_problem(kind: str, c: dict, head: str) -> tuple[str, dict]:
     shas = [fields.get("sha", "")] + ([fields["reviewed"]] if "reviewed" in fields else [])
     if (len(fields) != len(pairs) or not {"sha", "state"} <= set(fields) <= FIELDS[kind]
             or not all(re.fullmatch(r"[0-9a-f]{40}", s) for s in shas)
-            or (kind == "review" and fields.get("tier") not in RANK)):
+            or (kind == "review" and fields.get("tier") not in RANK)
+            or ("depth" in fields and fields["depth"] not in DEPTH)):
         return f"{where} has a malformed marker", {}
     state = fields["state"]
     said = title.group(1) if kind == "gates" else {"pass": "success", "fail": "failure"}[title.group(1)]
@@ -177,21 +184,23 @@ def record_problem(kind: str, c: dict, head: str) -> tuple[str, dict]:
         return f"{where} has a marker that disagrees with its first line", {}
     if fields["sha"] != head:
         return (f"{where} is for {fields['sha']}, not the head {head}: a record for an older head does not "
-                "count"), {}
+                "count"), {"older": True}
     if state != "success":
-        return f"{where} says {state}", {}
+        return f"{where} says {state}", {"state": state}
     return "", fields
 
 
-def paths_tier(repo: str, head: str, base: object, cwd: str) -> str | None:
-    """The tier tier.sh gives the head's paths against `origin/<base>`, from a local clone of `repo`.
+def paths_rating(repo: str, head: str, base: object, cwd: str) -> tuple[str, str, bool] | None:
+    """(tier, depth floor, pinned) of the head's paths, from `plan.py floor` in a local clone of `repo`.
 
-    None when no local clone holds both the head and that branch (the check cannot run, and is skipped).
-    Once one does, the check must finish: tier.sh failing, or running out of time, refuses as unreadable.
+    The base is the default branch's tip as GitHub's branches API names it when the clone holds that commit (pinned),
+    else `origin/<base>` in the clone (not pinned: a local ref the session can move). None when no local clone holds
+    both the head and a base (the check cannot run, and is skipped). Once one does, the check must finish: plan.py
+    failing, or running out of time, refuses as unreadable.
     """
     top_done = git_out("-C", cwd, "rev-parse", "--show-toplevel")
     top = top_done.stdout.strip() if top_done else ""
-    if not top or origin_repo(top) != repo or not TIER_SH.is_file():
+    if not top or origin_repo(top) != repo or not PLAN_PY.is_file():
         return None
     held = git_out("-C", top, "cat-file", "-e", f"{head}^{{commit}}")
     if held is None:
@@ -201,24 +210,35 @@ def paths_tier(repo: str, head: str, base: object, cwd: str) -> str | None:
         return None
     if not isinstance(base, str) or not base:
         raise Unreadable("GitHub named no default branch for the repo, so tier.sh has no base to compare with")
-    ref = git_out("-C", top, "rev-parse", "-q", "--verify", f"refs/remotes/origin/{base}^{{commit}}")
-    if not ref or ref.returncode:
-        return None  # this clone has no copy of the default branch: it cannot answer
+    ref, pinned = None, False
+    try:
+        tip = ((gh_json(f"repos/{repo}/branches/{base}") or {}).get("commit") or {}).get("sha")
+    except (Unreadable, AttributeError):
+        tip = None
+    if isinstance(tip, str) and re.fullmatch(r"[0-9a-f]{40}", tip):
+        got = git_out("-C", top, "cat-file", "-e", f"{tip}^{{commit}}")
+        if got is not None and got.returncode == 0:
+            ref, pinned = tip, True
+    if ref is None:
+        local = git_out("-C", top, "rev-parse", "-q", "--verify", f"refs/remotes/origin/{base}^{{commit}}")
+        if not local or local.returncode:
+            return None  # this clone has no copy of the default branch: it cannot answer
+        ref = f"origin/{base}"
     budget = left()
     if budget < 1:
         raise Unreadable("no time was left to run tier.sh on the head, which this clone holds")
     try:
-        done = subprocess.run(["bash", str(TIER_SH), "--base", f"origin/{base}", "--head", head], cwd=top,
+        done = subprocess.run([sys.executable, str(PLAN_PY), "floor", "--base", ref, "--head", head], cwd=top,
                               capture_output=True, text=True, timeout=budget, check=False)
     except subprocess.TimeoutExpired as exc:
-        raise Unreadable(f"tier.sh did not finish on the head within {budget:.0f} s") from exc
+        raise Unreadable(f"tier.sh (plan.py floor) did not finish on the head within {budget:.0f} s") from exc
     except OSError as exc:
-        raise Unreadable(f"tier.sh did not run ({exc})") from exc
-    tier = done.stdout.split("\n", 1)[0].strip()
-    if done.returncode != 0 or tier not in RANK:
+        raise Unreadable(f"tier.sh (plan.py floor) did not run ({exc})") from exc
+    out = done.stdout.split("\n", 1)[0].split()
+    if done.returncode != 0 or len(out) != 2 or out[0] not in RANK or out[1] not in DEPTH:
         why = (done.stderr.strip().splitlines() or ["no output"])[-1]
-        raise Unreadable(f"tier.sh failed on the head: {why}")
-    return tier
+        raise Unreadable(f"tier.sh failed on the head (plan.py floor): {why}")
+    return out[0], out[1], pinned
 
 
 def check_merge(repo: str | None, number: str | None, expected: str | None, cwd: str = ".",
@@ -250,23 +270,46 @@ def check_merge(repo: str | None, number: str | None, expected: str | None, cwd:
             newest[m.group(1)] = c
         else:
             ignored[m.group(1)].add(str(c.get("author_association")))
+    base = ((pr.get("base") or {}).get("repo") or {}).get("default_branch")
+    rated = paths_rating(repo, head, base, cwd)
+    gates_alone = bool(rated and rated[2] and rated[1] == "none")
+    # Floor none, but against the clone's own ref: the relief needs GitHub's tip, so say how to get it.
+    unpinned_none = bool(rated and not rated[2] and rated[1] == "none")
+    hint = (f"; the head's depth floor is none, but the review is waived only against the tip of {base} GitHub "
+            f"names, which this clone does not hold: fetch it (`git fetch origin {base}`) and merge again"
+            + (", or record it with skills/review/scripts/verdict.sh <pr> --tier routine" if rated[0] == "routine"
+               else "")) if unpinned_none else ""
     problems, review = [], {}
     for kind in ("gates", "review"):
+        if kind == "review" and gates_alone:
+            # Floor none on GitHub's tip: no review is needed. The newest trusted review record still holds the merge
+            # unless it is an unedited, well-formed success, or a record for an older head: an edited, malformed or
+            # failing one holds it, as it does on every other path.
+            if "review" in newest:
+                why, fields = record_problem(kind, newest[kind], head)
+                if why and not fields.get("older"):
+                    problems.append(f"{why}; the paths need no review, but this review record holds the merge: "
+                                    f"record it again with {PRODUCER[kind]}, or delete it if no reviewer ran")
+            continue
         if kind not in newest:
             extra = f" (markers by {', '.join(sorted(ignored[kind]))} do not count)" if ignored[kind] else ""
-            problems.append(f"no {kind} record{extra}; record it with {PRODUCER[kind]}")
+            problems.append(f"no {kind} record{extra}; record it with {PRODUCER[kind]}" + (hint if kind == "review"
+                                                                                        else ""))
             continue
         why, fields = record_problem(kind, newest[kind], head)
         if why:
             problems.append(f"{why}; record it again with {PRODUCER[kind]}")
         elif kind == "review":
             review = fields
-    if not problems and review:
-        base = ((pr.get("base") or {}).get("repo") or {}).get("default_branch")
-        tier = paths_tier(repo, head, base, cwd)
-        if tier and RANK[review["tier"]] < RANK[tier]:
-            problems.append(f"the review is {review['tier']} tier, but the head's paths make it {tier} "
+    if not problems and review and rated:
+        tier, floor = rated[0], rated[1]
+        if RANK[review["tier"]] < RANK[tier]:
+            problems.append(hint.lstrip("; ") if unpinned_none and review["tier"] == "routine" else
+                            f"the review is {review['tier']} tier, but the head's paths make it {tier} "
                             "(skills/review/scripts/tier.sh); review it at that tier")
+        elif "depth" in review and DEPTH[review["depth"]] < DEPTH[floor]:
+            problems.append(f"the review is depth {review['depth']}, but the head's paths need depth {floor} "
+                            "(skills/review/scripts/plan.py); review it at that depth")
     if problems:
         return f"refused merging PR {number} of {repo} at head {head}: " + "; ".join(problems), head
     if require_named and not expected:
