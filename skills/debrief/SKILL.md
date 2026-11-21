@@ -15,6 +15,8 @@ It is a pitch: short, plain English, visual, and built around **attention**, mea
 - **Every change gets its line.** When anything landed, closed or waits, the attention part carries the lines [`landings.md`](landings.md) defines, after what needs the owner and is not a PR: risky and waiting changes in full, the expected one short line each.
 - **The expected stays quiet.** Everything else that went as it should (no cost, rules held, nothing dropped) gets one short line or nothing; it earns detail only once it goes wrong.
 - **Sections are a menu.** Usual ones: what happened, how the agents did, how the reviews did, what went wrong, what needs you and how to unblock, the next best action. Leave out any with nothing to say (nothing merged, closed, pushed or waiting; nothing blocks) and add any the work calls for.
+- **End on what needs the owner,** whenever anything does: one closing slide or block of numbered questions, each a decision with the recommended answer and one line of why, worded so a yes, a no or a few words unblock it; the owner can answer from that slide alone, by number.
+  Strongly suggested, not required: leave it out when nothing waits on the owner.
 - **Plain English for a reader outside the work**, by the standing rule on reports: process metadata stays in the PRs and issues, and every term the deck or page shows gets a gloss.
 
 ## The form
