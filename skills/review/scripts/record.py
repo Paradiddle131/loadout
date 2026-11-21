@@ -2,9 +2,11 @@
 """Builds and compares the PR comments gate_stamp.sh and verdict.sh post as records (lib.sh has the format).
 
   record.py build --kind gates|review --sha <head> --state success|failure --title <first line>
-                  [--tier <tier>] [--reviewed <sha>] [--line <markdown line>]... [--file <raw output>]
-                  [--details <summary>]
-    prints the body: the title, the marker line, the lines, and the raw output under <details> in a fence
+                  [--tier <tier>] [--reviewed <sha>] [--round <key=value>]... [--line <markdown line>]...
+                  [--file <raw output>] [--details <summary>]
+    prints the body: the title, the marker line, the round line (a review's round marker, kind `round` with
+    mode=..., model=..., effort=..., lenses=..., from each --round pair, when any is given; the merge guard reads only
+    the marker line), the lines, and the raw output under <details> in a fence
     longer than any backtick run in it, clipped (with a note) so the whole body fits GitHub's comment limit.
   record.py same <comment json> <sent body file>
     exits 0 when the comment's body is the one sent (line endings and trailing newlines aside), else 1.
@@ -19,6 +21,8 @@ import sys
 
 COMMENT_MAX = 65536  # GitHub's limit on a comment body, in characters
 SHA = re.compile(r"[0-9a-f]{40}")
+ROUND_KEY = re.compile(r"[a-z]+")
+ROUND_VALUE = re.compile(r"[A-Za-z0-9._,-]+")
 
 
 def build(a: argparse.Namespace) -> str:
@@ -32,7 +36,13 @@ def build(a: argparse.Namespace) -> str:
     if a.reviewed:
         marker += f" reviewed={a.reviewed}"
     marker += " -->"
-    head = "\n".join([a.title, marker, "", *a.line]) + "\n"
+    top = [a.title, marker]
+    if a.round:
+        pairs = [r.split("=", 1) for r in a.round]
+        if any(len(kv) != 2 or not ROUND_KEY.fullmatch(kv[0]) or not ROUND_VALUE.fullmatch(kv[1]) for kv in pairs):
+            sys.exit("record.py: a --round pair is <key>=<value>: a lowercase key, a value of letters, digits and . _ , -")
+        top.append("<!-- loadout" + ":round " + " ".join(f"{k}={v}" for k, v in pairs) + " -->")
+    head = "\n".join([*top, "", *a.line]) + "\n"
     raw = open(a.file, encoding="utf-8", errors="replace").read() if a.file else ""
     if not raw.strip():
         return head
@@ -76,6 +86,7 @@ def main() -> int:
     b.add_argument("--title", required=True)
     b.add_argument("--tier", choices=["routine", "standard", "sensitive"])
     b.add_argument("--reviewed")
+    b.add_argument("--round", action="append", default=[])
     b.add_argument("--line", action="append", default=[])
     b.add_argument("--file")
     b.add_argument("--details", default="Output (raw)")
