@@ -18,6 +18,7 @@ GitHub holds every record, so any past audit session can be read again; the JSON
 
 - `python3 $A/scripts/audit.py harvest --repo <o/r> [--repo ...] --since <ISO> --out <dir>`: reads only, writes `prs`, `gates`, `rounds`, `findings` and `audits` JSONL files in `<dir>` (the session's scratchpad).
 - Only records the merge guard would trust count: by the repo's owner, a member or a collaborator, unedited, with the exact title and marker and the two agreeing; a review round's must-fix findings are the ones its `Blocking:` line lists, where the record has one.
+- Each row carries its record's round line: `v` (the review path's version, `unstamped` on a record from before the line), `kit` (the collection commit), and for a review round its cycle, duplicates merged and each agent's tokens and seconds.
 - Done when the counts it prints are in the notes.
 
 ## 3. Sample
@@ -44,6 +45,6 @@ GitHub holds every record, so any past audit session can be read again; the JSON
 ## 6. Report
 
 - Harvest again (it picks up the new audit records), then `python3 $A/scripts/audit.py summary --dir <dir> --session <id>`.
-- Give the owner its tables as they are: the headline numbers with their intervals, the lens table, and the changes that need a look; add a sentence only where a number needs one.
+- Give the owner its tables as they are: the headline numbers with their intervals, the lens table, the changes that need a look, the rounds by review path version (so rounds before and after a change to the path compare), and the reviewers' tokens and seconds per PR, repo, day and month with the cost estimated at list price (`audit.py` states the rate and its assumption); add a sentence only where a number needs one.
 - Every problem the audit finds in the review path itself is an issue (the `issue` skill) on the audited repo; where this collection's `FEEDBACK.md` is imported, also a `bin/friction note` in generic words (no repo name, path or finding text), as `FEEDBACK.md` says.
 - Done when the owner has the tables and the issues are filed.
