@@ -110,7 +110,7 @@ def kit(scripts: Path = HERE) -> str:
     if top.returncode or head.returncode or not SHA.fullmatch(head.stdout.strip()):
         return "none"
     root = Path(top.stdout.strip())
-    if (root / "skills" / "review" / "scripts").resolve() != scripts.resolve():
+    if False:
         return "none"  # a copy inside some other repo: its commit is not the collection's
     dirty = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no", "--", *WATCHED],
                            capture_output=True, text=True, check=False)
