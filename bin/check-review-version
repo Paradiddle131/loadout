@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Fails a change to the review path that does not bump the review skill's version.
+
+The review path is every file under `skills/review/`, every file under `agents/`, and `cloud/hooks/merge-guard.py`.
+When any of them differs between the change and its merge-base with the default branch, `metadata.version` in
+`skills/review/SKILL.md`'s frontmatter must be a higher semver than at that merge-base (the bump rule is in that
+file's `## Version`). A rename counts its old path and its new one. The version must be present and well formed in
+every change, whatever it touches. A merge-base whose SKILL.md carries no version counts as 1.0.0, the path's
+version before the field existed.
+
+Usage: bin/check-review-version [--base <ref>] [--head <rev>]
+  --base: the default branch's ref (default: origin/HEAD, else origin/main or origin/master).
+  --head: a commit to check; without it, the index is checked (what the next commit would hold), as the pre-commit
+          hook needs.
+Exits 0 when the rule holds, 1 when it does not, 2 when it cannot tell (no default branch, no git); run it from a
+clone of this collection. The version is read by the review skill's own reader (skills/review/scripts/record.py).
+"""
+
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "review" / "scripts"))
+from record import NoVersion, skill_version  # noqa: E402
+
+SKILL = "skills/review/SKILL.md"
+WATCHED = ("skills/review/", "agents/")
+WATCHED_FILES = ("cloud/hooks/merge-guard.py",)
+ABSENT = "1.0.0"  # the version of a merge-base from before the field existed
+
+
+def git(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", *args], capture_output=True, text=True, check=False)
+
+
+def default_ref() -> str | None:
+    head = git("symbolic-ref", "-q", "refs/remotes/origin/HEAD").stdout.strip()
+    if head:
+        return head
+    for c in ("main", "master"):
+        if git("rev-parse", "-q", "--verify", f"refs/remotes/origin/{c}").returncode == 0:
+            return f"refs/remotes/origin/{c}"
+    return None
+
+
+def triple(v: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in v.split("."))
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    p.add_argument("--base")
+    p.add_argument("--head")
+    a = p.parse_args()
+    if git("rev-parse", "--show-toplevel").returncode:
+        print("check-review-version: not in a git checkout", file=sys.stderr)
+        return 2
+    ref = a.base or default_ref()
+    if not ref:
+        print("check-review-version: cannot tell the default branch (no origin/HEAD, origin/main or origin/master), "
+              "so the review path's version was NOT checked; run `git remote set-head origin --auto`", file=sys.stderr)
+        return 2
+    mb = git("merge-base", ref, a.head or "HEAD")
+    if mb.returncode:
+        print(f"check-review-version: no merge-base of {ref} and {a.head or 'HEAD'}: {mb.stderr.strip()}",
+              file=sys.stderr)
+        return 2
+    base = mb.stdout.strip()
+    diff = git("diff", "--name-only", "--no-renames", base, *([a.head] if a.head else ["--cached"]))
+    if diff.returncode:
+        print(f"check-review-version: git diff failed: {diff.stderr.strip()}", file=sys.stderr)
+        return 2
+    changed = [f for f in diff.stdout.splitlines() if f.startswith(WATCHED) or f in WATCHED_FILES]
+
+    now = git("show", f"{a.head or ''}:{SKILL}")
+    if now.returncode:
+        print(f"check-review-version: {SKILL} is missing, so the review path has no version", file=sys.stderr)
+        return 1
+    try:
+        head_v = skill_version(now.stdout)
+    except ValueError as exc:
+        print(f"check-review-version: {exc} ({SKILL}); write it as `metadata:` then `  version: MAJOR.MINOR.PATCH`",
+              file=sys.stderr)
+        return 1
+    if not changed:
+        print(f"check-review-version: the review path is unchanged since {base[:12]}; version {head_v}")
+        return 0
+    then = git("show", f"{base}:{SKILL}")
+    try:
+        base_v = skill_version(then.stdout) if then.returncode == 0 else ABSENT
+    except NoVersion:
+        base_v = ABSENT
+    except ValueError as exc:
+        print(f"check-review-version: the merge-base's {SKILL} is malformed: {exc}", file=sys.stderr)
+        return 1
+    if triple(head_v) <= triple(base_v):
+        shown = "\n".join(f"  {f}" for f in changed[:20]) + ("\n  ..." if len(changed) > 20 else "")
+        print(f"check-review-version: the review path changed since {base[:12]}, but metadata.version is {head_v}, "
+              f"not above {base_v}: bump it by the rule in {SKILL} § Version\n{shown}", file=sys.stderr)
+        return 1
+    print(f"check-review-version: the review path changed; version {base_v} -> {head_v}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

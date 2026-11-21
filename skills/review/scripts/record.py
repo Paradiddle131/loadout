@@ -52,6 +52,10 @@ DISMISSALS_LINE = re.compile(r"[ \t\v\f\r]*Dismissals: re-ran (0|[1-9][0-9]*), p
 WATCHED = ("skills/review", "agents", "cloud/hooks")  # what a `-dirty` kit means: these changed, uncommitted
 
 
+class NoVersion(ValueError):
+    """The frontmatter holds no metadata.version line at all."""
+
+
 def skill_version(text: str) -> str:
     """`metadata.version` from a SKILL.md's frontmatter; ValueError when it is missing, repeated or not semver.
 
@@ -73,6 +77,8 @@ def skill_version(text: str) -> str:
         m = re.fullmatch(r"\s+version:\s*(.*?)\s*", ln)
         if inside and m:
             found.append(m.group(1))
+    if not found:
+        raise NoVersion("SKILL.md's frontmatter holds no metadata.version line")
     if len(found) != 1:
         raise ValueError(f"SKILL.md's frontmatter holds {len(found)} metadata.version lines, not one")
     if not SEMVER.fullmatch(found[0]):
