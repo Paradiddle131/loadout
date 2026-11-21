@@ -140,16 +140,62 @@ def test_head_mode_reads_the_commit_not_the_index(repo: Repo) -> None:
     assert repo.check().returncode == 0
 
 
-def test_the_bump_is_measured_from_the_merge_base_not_the_moved_default_branch(repo: Repo) -> None:
-    repo.stage({"agents/lens.md": "changed\n", SKILL: skill("1.2.0")})
-    repo.git("commit", "-qm", "bump")
+def main_moves(repo: Repo, files: dict[str, str]) -> None:
     repo.git("switch", "-q", "main")
-    repo.stage({SKILL: skill("1.3.0")})
+    repo.stage(files)
     repo.git("commit", "-qm", "main moves on")
     repo.git("push", "-q", "origin", "main")
     repo.git("switch", "-q", "change")
     repo.git("fetch", "-q", "origin")
+
+
+def test_the_bump_is_measured_from_the_merge_base_when_the_default_branch_moved_elsewhere(repo: Repo) -> None:
+    repo.stage({"agents/lens.md": "changed\n", SKILL: skill("1.2.0")})
+    repo.git("commit", "-qm", "bump")
+    main_moves(repo, {"README.md": "main moves\n"})
     assert repo.check("--head", "HEAD").returncode == 0
+
+
+@pytest.mark.parametrize("tip", ["1.2.0", "1.3.0"])
+def test_the_version_must_also_be_above_the_default_branchs_tip(repo: Repo, tip: str) -> None:
+    repo.stage({"agents/lens.md": "changed\n", SKILL: skill("1.2.0")})
+    repo.git("commit", "-qm", "bump")
+    main_moves(repo, {"agents/other.md": "x\n", SKILL: skill(tip)})  # another change landed its own bump first
+    done = repo.check("--head", "HEAD")
+    assert done.returncode == 1 and f"not above {tip} (the default branch's)" in done.stderr, done.stderr
+
+
+def test_a_default_branch_tip_without_a_version_counts_as_one_zero_zero(tmp_path: Path) -> None:
+    r = Repo(tmp_path, base_version=None)
+    r.stage({"agents/lens.md": "changed\n", SKILL: skill("1.0.1")})
+    assert r.check().returncode == 0
+
+
+@pytest.mark.parametrize("path", ["REVIEW.md", "cloud/hooks/hooks.json", "cloud/skills/autopilot/scripts/merge.sh",
+                                  "bin/check-review-version", ".githooks/pre-commit"])
+def test_the_files_that_decide_a_merge_are_on_the_review_path(repo: Repo, path: str) -> None:
+    repo.stage({path: "changed\n"})
+    done = repo.check()
+    assert done.returncode == 1 and path in done.stderr, done.stderr
+
+
+def test_a_merge_base_that_cannot_be_found_is_an_error_not_a_pass(repo: Repo) -> None:
+    done = repo.check("--base", "refs/remotes/origin/nope")
+    assert done.returncode == 2 and "no merge-base" in done.stderr, done.stderr
+
+
+def test_a_failed_diff_is_an_error_not_a_pass(repo: Repo) -> None:
+    repo.stage({"agents/lens.md": "changed\n"})
+    (repo.dir / ".git" / "index").write_bytes(b"not an index")  # git diff --cached cannot read it
+    done = repo.check()
+    assert done.returncode == 2 and "git diff failed" in done.stderr, done.stderr
+
+
+def test_a_malformed_version_at_the_merge_base_fails(tmp_path: Path) -> None:
+    r = Repo(tmp_path, base_version="1.x")
+    r.stage({"agents/lens.md": "changed\n", SKILL: skill("2.0.0")})
+    done = r.check()
+    assert done.returncode == 1 and "the merge-base's" in done.stderr and "malformed" in done.stderr, done.stderr
 
 
 def test_no_default_branch_is_an_error_not_a_pass(tmp_path: Path) -> None:

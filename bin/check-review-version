@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Fails a change to the review path that does not bump the review skill's version.
 
-The review path is every file under `skills/review/`, every file under `agents/`, and `cloud/hooks/merge-guard.py`.
-When any of them differs between the change and its merge-base with the default branch, `metadata.version` in
-`skills/review/SKILL.md`'s frontmatter must be a higher semver than at that merge-base (the bump rule is in that
-file's `## Version`). A rename counts its old path and its new one. The version must be present and well formed in
-every change, whatever it touches. A merge-base whose SKILL.md carries no version counts as 1.0.0, the path's
-version before the field existed.
+The review path is every file under `skills/review/` and `agents/`, and `REVIEW.md`, `cloud/hooks/merge-guard.py`,
+`cloud/hooks/hooks.json`, `cloud/skills/autopilot/scripts/merge.sh`, `.githooks/pre-commit` and this script. When any
+of them differs between the change and its merge-base with the default branch, `metadata.version` in
+`skills/review/SKILL.md`'s frontmatter must be a higher semver than at that merge-base and than at the default
+branch's tip, so two changes from one base cannot land the same number (the bump rule is in that file's
+`## Version`). A rename counts its old path and its new one. The version must be present and well formed in every
+change, whatever it touches. A merge-base or tip whose SKILL.md carries no version counts as 1.0.0, the path's version
+before the field existed.
 
 Usage: bin/check-review-version [--base <ref>] [--head <rev>]
   --base: the default branch's ref (default: origin/HEAD, else origin/main or origin/master).
@@ -28,7 +30,8 @@ from record import NoVersion, skill_version  # noqa: E402
 
 SKILL = "skills/review/SKILL.md"
 WATCHED = ("skills/review/", "agents/")
-WATCHED_FILES = ("cloud/hooks/merge-guard.py",)
+WATCHED_FILES = ("cloud/hooks/merge-guard.py", "cloud/hooks/hooks.json", "cloud/skills/autopilot/scripts/merge.sh",
+                 "REVIEW.md", "bin/check-review-version", ".githooks/pre-commit")
 ABSENT = "1.0.0"  # the version of a merge-base from before the field existed
 
 
@@ -88,20 +91,24 @@ def main() -> int:
     if not changed:
         print(f"check-review-version: the review path is unchanged since {base[:12]}; version {head_v}")
         return 0
-    then = git("show", f"{base}:{SKILL}")
-    try:
-        base_v = skill_version(then.stdout) if then.returncode == 0 else ABSENT
-    except NoVersion:
-        base_v = ABSENT
-    except ValueError as exc:
-        print(f"check-review-version: the merge-base's {SKILL} is malformed: {exc}", file=sys.stderr)
-        return 1
-    if triple(head_v) <= triple(base_v):
-        shown = "\n".join(f"  {f}" for f in changed[:20]) + ("\n  ..." if len(changed) > 20 else "")
-        print(f"check-review-version: the review path changed since {base[:12]}, but metadata.version is {head_v}, "
-              f"not above {base_v}: bump it by the rule in {SKILL} § Version\n{shown}", file=sys.stderr)
-        return 1
-    print(f"check-review-version: the review path changed; version {base_v} -> {head_v}")
+    floor = []  # (where, version): the head's must be above each
+    for where, rev in (("the merge-base", base), ("the default branch", ref)):
+        then = git("show", f"{rev}:{SKILL}")
+        try:
+            floor.append((where, skill_version(then.stdout) if then.returncode == 0 else ABSENT))
+        except NoVersion:
+            floor.append((where, ABSENT))
+        except ValueError as exc:
+            print(f"check-review-version: {where}'s {SKILL} is malformed: {exc}", file=sys.stderr)
+            return 1
+    for where, v in floor:
+        if triple(head_v) <= triple(v):
+            shown = "\n".join(f"  {f}" for f in changed[:20]) + ("\n  ..." if len(changed) > 20 else "")
+            print(f"check-review-version: the review path changed since {base[:12]}, but metadata.version is "
+                  f"{head_v}, not above {v} ({where}'s): bump it by the rule in {SKILL} § Version\n{shown}",
+                  file=sys.stderr)
+            return 1
+    print(f"check-review-version: the review path changed; version {floor[0][1]} -> {head_v}")
     return 0
 
 

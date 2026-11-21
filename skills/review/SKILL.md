@@ -86,7 +86,8 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 - Above `routine` it takes the result from the output's first `VERDICT` line, and refuses an output without the verifier's `VERDICT` and `Reviewed` lines, one whose lines name a commit other than `--reviewed`, one whose `Blocking:` line (right after `Reviewed:`) is missing, lists a must-fix whose harm is missing, under two words or made only of `blocking.py`'s filler words, or whose id opens no `###` heading below it outside a code fence, lists none on a `FAIL` or any on a `PASS`, and a `--result` that contradicts its verdict.
 - It posts the output as a PR comment that starts with `🤖` and names the reviewed commit and the head, as the `🤖 Review` record: `success` when the verifier's `VERDICT` line says `PASS` (for `routine`, when `--result` is `pass`, its default).
 - Above `routine` it also takes the round's cost and shape, refusing a malformed or missing value: `--reviewers` names every agent that ran, the verifier included; `--cycle <n>` (1 for a first review), `--dupes <n>` (findings the verifier merged), `--nits <n>`, and one `--lens "<name> model=<m> effort=<e> tokens=<n> seconds=<n> findings=<n>"` per agent named there and no other, copied from the usage the harness printed when that agent returned (total tokens; duration in ms / 1000, rounded; findings raised, or kept for the verifier).
-  The must-fix count comes from the `Blocking:` line, and the verifier's first `Dismissals: re-ran <n>, promoted <m>` line, when it has one, adds both numbers.
+  The must-fix count comes from the `Blocking:` line, and the verifier's first `Dismissals: re-ran <n>, promoted <m>` line in its header, when it has one, adds both numbers.
+  Re-posting a verdict after a clean merge of the default branch (step 6) takes `--repost` in place of that usage: no reviewer ran, so the record carries none.
 - Every record's third line, which the merge guard does not read, carries `v=<this skill's version>` and `kit=<the collection commit the scripts ran from>`, then the round's numbers (a gates record: the command's seconds); a table of the per-agent numbers follows the record's list.
 - Done when both records are `success` on the PR's head commit.
 
@@ -105,7 +106,7 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 
 ## Version
 
-`metadata.version` above is the review path's version, stamped on every record so rounds before and after a change can be compared; `bin/check-review-version` fails a change under `skills/review/`, `agents/` or to `cloud/hooks/merge-guard.py` that does not raise it.
+`metadata.version` above is the review path's version, stamped on every record so rounds before and after a change can be compared; `bin/check-review-version` fails a change under `skills/review/` or `agents/`, or to `REVIEW.md`, `cloud/hooks/merge-guard.py`, `cloud/hooks/hooks.json`, `cloud/skills/autopilot/scripts/merge.sh`, `.githooks/pre-commit` or itself, that does not raise it above both its merge-base's and the default branch's.
 - **major:** what blocks a merge changes (a refusal, a required record or field, a tier or lens rule that decides the verdict);
 - **minor:** a new lens, mode or record field;
 - **patch:** wording that changes no behaviour.

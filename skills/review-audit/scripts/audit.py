@@ -257,6 +257,7 @@ def harvest(a: argparse.Namespace) -> int:
                         **stamp(rf), **{k: rf[k] if isinstance(rf.get(k), int) else None
                                         for k in ("cycle", "dupes", "dismissals", "promoted")},
                         "lead_nits": rf["nits"] if isinstance(rf.get("nits"), int) else None,
+                        "repost": rf.get("repost") == 1,
                         "lenses": rf.get("lens", []),
                         "tokens": sum(x["tokens"] for x in rf.get("lens", [])),
                         "seconds": sum(x["seconds"] for x in rf.get("lens", []))})
@@ -459,7 +460,16 @@ def _costs(rounds: list[dict], by_pr: dict[tuple, list]) -> dict:
     rounds compare; duplicates, tokens and seconds come from the round line, so an unstamped round adds none of them.
     Cycles to pass: per PR, the cycle its first passing round's line names (its place among the PR's rounds when the
     line has none), averaged within the version of that passing round. Seconds are summed over agents, not wall time.
+    A round's usage counts once: a re-post (`repost=1`, no agent ran) adds none, and neither does a later record of the
+    same PR, reviewed commit and per-agent usage as an earlier one.
     """
+    seen: set[tuple] = set()
+    usage: dict[int, tuple[int, int]] = {}
+    for r in rounds:
+        k = (r["repo"], r["pr"], r.get("reviewed"), json.dumps(r.get("lenses") or []))
+        fresh = not r.get("repost") and k not in seen
+        seen.add(k)
+        usage[id(r)] = (r.get("tokens") or 0, r.get("seconds") or 0) if fresh else (0, 0)
     by_v: dict[str, dict] = {}
     for r in rounds:
         g = by_v.setdefault(r.get("v") or UNSTAMPED, {"rounds": 0, "passes": 0, "to_pass": [], "must_fix": 0,
@@ -468,8 +478,9 @@ def _costs(rounds: list[dict], by_pr: dict[tuple, list]) -> dict:
         g["passes"] += r["state"] == "success"
         g["must_fix"] += r["must_fix"]
         g["nits"] += r["nits"]
-        for k in ("dupes", "tokens", "seconds"):
-            g[k] += r.get(k) or 0
+        g["dupes"] += r.get("dupes") or 0
+        g["tokens"] += usage[id(r)][0]
+        g["seconds"] += usage[id(r)][1]
     for rs in by_pr.values():
         for i, r in enumerate(rs):
             if r["state"] == "success":
@@ -486,8 +497,8 @@ def _costs(rounds: list[dict], by_pr: dict[tuple, list]) -> dict:
         for by, k in (("pr", f"{r['repo']}#{r['pr']}"), ("repo", r["repo"]), ("day", when[:10]), ("month", when[:7])):
             t = totals[by].setdefault(k, {"rounds": 0, "tokens": 0, "seconds": 0})
             t["rounds"] += 1
-            t["tokens"] += r.get("tokens") or 0
-            t["seconds"] += r.get("seconds") or 0
+            t["tokens"] += usage[id(r)][0]
+            t["seconds"] += usage[id(r)][1]
     for t in (t for by in totals.values() for t in by.values()):
         t["est_usd"] = est_usd(t["tokens"])
     return {"by_version": dict(sorted(by_v.items())), "cost": {by: dict(sorted(v.items())) for by, v in totals.items()},

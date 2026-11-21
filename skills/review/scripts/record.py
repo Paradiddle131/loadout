@@ -10,6 +10,8 @@
                   --lens "<name> model=<m> effort=<e> tokens=<n> seconds=<n> findings=<n>"... [--dismissals <file>]
     checks a review round's cost and shape and prints, one per line, the --round pairs (first line, blank-separated)
     and then the human table of the same numbers; exits 2 with the reason on a malformed or missing value.
+    With --repost (an earlier round's verdict posted again after clean merges of the default branch) it takes no
+    --cycle, --dupes, --nits or --lens and prints only repost=1, lenses and mustfix: no agent ran, so no usage.
   record.py version | kit
     prints the review path's version (`metadata.version` in ../SKILL.md) or the collection commit (below).
   record.py same <comment json> <sent body file>
@@ -22,7 +24,8 @@ scripts run from, `-dirty` appended when that clone has uncommitted changes to t
 agents or cloud/hooks, and `none` when the scripts are not where a clone of the collection keeps them (a copied
 skill); never the repo under review. Keys are lowercase letters; values are letters, digits and . _ , - : only;
 only `lens` may repeat. A review round adds cycle, lenses, dupes, mustfix, nits, one lens=<name>:<model>:<effort>:
-<tokens>:<seconds>:<findings> per agent, and dismissals and promoted when the verifier gave them; a later key
+<tokens>:<seconds>:<findings> per agent, and dismissals and promoted when the verifier gave them (a re-post:
+repost=1, lenses and mustfix only); a later key
 (such as a planned depth) is one more pair.
 """
 
@@ -59,8 +62,9 @@ class NoVersion(ValueError):
 def skill_version(text: str) -> str:
     """`metadata.version` from a SKILL.md's frontmatter; ValueError when it is missing, repeated or not semver.
 
-    Only the frontmatter counts (the lines between a first-line `---` and the next `---`), only a `version:` line
-    indented under a top-level `metadata:` line, and only a plain MAJOR.MINOR.PATCH value.
+    Only the frontmatter counts (the lines between a first-line `---` and the next `---`), only a `version:` line that
+    is a direct child of a top-level `metadata:` line (at its first indentation, not nested deeper), and only a plain
+    MAJOR.MINOR.PATCH value.
     """
     lines = text.replace("\r\n", "\n").split("\n")
     if not lines or lines[0].strip() != "---":
@@ -69,13 +73,17 @@ def skill_version(text: str) -> str:
         end = lines.index("---", 1)
     except ValueError:
         raise ValueError("SKILL.md's frontmatter is not closed") from None
-    found, inside = [], False
+    found, inside, child = [], False, None
     for ln in lines[1:end]:
         if ln and not ln[0].isspace():
-            inside = ln.rstrip() == "metadata:"
+            inside, child = ln.rstrip() == "metadata:", None
             continue
+        if not inside or not ln.strip():
+            continue
+        indent = len(ln) - len(ln.lstrip())
+        child = indent if child is None else child  # metadata's own keys sit at its first indentation
         m = re.fullmatch(r"\s+version:\s*(.*?)\s*", ln)
-        if inside and m:
+        if m and indent == child:
             found.append(m.group(1))
     if not found:
         raise NoVersion("SKILL.md's frontmatter holds no metadata.version line")
@@ -125,8 +133,8 @@ def round_line(pairs: list[str]) -> str:
                      "-->"])
 
 
-def names(text: str) -> list[str]:
-    out = [n for n in re.split(r"[,\s]+", text) if n]
+def names(text: str | None) -> list[str]:
+    out = [n for n in re.split(r"[,\s]+", text or "") if n]
     if not out or not all(NAME.fullmatch(n) for n in out):
         raise ValueError(f"--reviewers is agent names, split by commas or blanks, each a lowercase letter then "
                          f"letters, digits or '-' (got {text!r})")
@@ -158,10 +166,25 @@ def lens_spec(spec: str) -> dict:
 
 
 def dismissals(path: str | None) -> tuple[int, int] | None:
-    """(re-ran, promoted) from the first `Dismissals:` line of the verifier's output; None when it has none."""
+    """(re-ran, promoted) from the first `Dismissals:` line of the verifier's header; None when it has none.
+
+    The header is the output's lines before its `Lens heads:` line or its first `##` heading, outside code fences: a
+    `Dismissals:` line quoted in a finding below, or in a fence, is never read.
+    """
     if not path:
         return None
+    fence = ""
     for ln in open(path, encoding="utf-8", errors="replace").read().split("\n"):
+        if m := re.match(r"\s*(`{3,}|~{3,})", ln):
+            if not fence:
+                fence = m.group(1)
+            elif m.group(1).startswith(fence) and not ln.strip()[len(m.group(1)):].strip():
+                fence = ""
+            continue
+        if fence:
+            continue
+        if re.match(r"\s*(Lens heads:|##)", ln):
+            return None
         if DISMISSALS.match(ln):
             m = DISMISSALS_LINE.fullmatch(ln)
             if not m:
@@ -174,6 +197,15 @@ def dismissals(path: str | None) -> tuple[int, int] | None:
 def review_round(a: argparse.Namespace) -> list[str]:
     """The round pairs (one line) and the human table lines for a review round (module docstring)."""
     who = names(a.reviewers)
+    if a.repost:
+        # A re-post records an earlier round's verdict again (the head moved only by clean merges): no agent ran.
+        if a.cycle or a.dupes or a.nits or a.lens:
+            raise ValueError("--repost records no new round, so it takes no --cycle, --dupes, --nits or --lens")
+        if a.mustfix is None or not COUNT.fullmatch(a.mustfix):
+            raise ValueError(f"--mustfix is a whole number (got {a.mustfix!r})")
+        pairs = ["repost=1", f"lenses={','.join(who)}", f"mustfix={a.mustfix}"]
+        round_line(pairs)
+        return [" ".join(pairs)]
     for k in ("cycle", "dupes", "nits", "mustfix"):
         v = getattr(a, k)
         if v is None or not COUNT.fullmatch(v) or (k == "cycle" and v == "0"):
@@ -270,6 +302,7 @@ def main() -> int:
         r.add_argument(f"--{k}")
     r.add_argument("--lens", action="append", default=[])
     r.add_argument("--dismissals")
+    r.add_argument("--repost", action="store_true")
     sub.add_parser("version")
     sub.add_parser("kit")
     s = sub.add_parser("same")

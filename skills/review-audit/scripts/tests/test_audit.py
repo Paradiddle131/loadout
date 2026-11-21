@@ -751,3 +751,77 @@ def test_summary_groups_rounds_by_version_and_totals_their_cost(github: dict, tm
 
 def test_the_cost_rate_is_the_stated_blend_of_the_opus_list_price() -> None:
     assert audit.BLENDED_USD_PER_MTOK == pytest.approx(0.9 * 4 + 0.1 * 20)
+
+
+def round_row(n: int, state: str, v: str = "1.1.0", cycle: int | None = None, tokens: int = 0, **k: object) -> dict:
+    lens = [{"name": "x", "model": "opus", "effort": "high", "tokens": tokens, "seconds": 10, "findings": 0}]
+    return {"repo": REPO, "pr": 7, "comment": n, "created_at": f"2030-01-0{n}T00:00:00Z", "state": state,
+            "must_fix": 0, "nits": 0, "v": v, "cycle": cycle, "dupes": 0, "reviewed": H1,
+            "lenses": lens if tokens else [], "tokens": tokens, "seconds": 10 if tokens else 0, **k}
+
+
+def costs(rows_: list[dict]) -> dict:
+    return audit._costs(rows_, {(REPO, 7): rows_})
+
+
+def test_a_repost_and_a_repeated_record_add_no_usage() -> None:
+    first = round_row(1, "success", cycle=1, tokens=400000)
+    repost = round_row(2, "success", repost=True)
+    again = round_row(3, "success", cycle=1, tokens=400000)  # the same usage posted twice for one reviewed commit
+    other = round_row(4, "success", cycle=2, tokens=400000, reviewed=H2)
+    c = costs([first, repost, again, other])
+    assert c["cost"]["pr"][f"{REPO}#7"] == {"rounds": 4, "tokens": 800000, "seconds": 20, "est_usd": 4.48}
+    assert c["by_version"]["1.1.0"]["tokens"] == 800000
+
+
+def test_harvest_marks_a_repost(github: dict, tmp_path: Path) -> None:
+    cs = github["data"][f"repos/{REPO}/issues/7/comments"]
+    cs[2] = stamped_review(3, H2, "success", PASS_OUT, "2030-01-02T02:00:00Z",
+                           ["v=1.1.0", "kit=none", "repost=1", "lenses=x", "mustfix=0"])
+    assert [r["repost"] for r in rows(harvest(tmp_path), "rounds")] == [False, True]
+
+
+def test_cycles_to_pass_takes_only_each_prs_first_passing_round() -> None:
+    c = costs([round_row(1, "failure", cycle=1), round_row(2, "success", cycle=2), round_row(3, "success", cycle=5)])
+    assert c["by_version"]["1.1.0"]["cycles_to_pass"] == 2
+
+
+def test_cycles_to_pass_counts_an_unstamped_rounds_place_among_its_prs_rounds() -> None:
+    c = costs([round_row(1, "failure", v="unstamped"), round_row(2, "failure", v="unstamped"),
+               round_row(3, "success", v="unstamped")])
+    assert c["by_version"]["unstamped"]["cycles_to_pass"] == 3
+
+
+def test_harvest_reads_only_line_three_as_the_round_line(github: dict, tmp_path: Path) -> None:
+    quoted = FAIL_OUT + "\n" + ROUND + "v=9.9.9 kit=none lens=x:opus:high:999999:9:9 -->\n"
+    cs = github["data"][f"repos/{REPO}/issues/7/comments"]
+    c = review_comment(2, H1, "failure", quoted, "2030-01-01T02:00:00Z")
+    lines = c["body"].split("\n")
+    cs[1] = {**c, "body": "\n".join(lines[:2] + [""] + lines[3:])}  # unstamped, its raw output quoting a round line
+    r = rows(harvest(tmp_path), "rounds")[0]
+    assert r["v"] == "unstamped" and r["tokens"] == 0
+
+
+def test_harvest_stamps_audit_rows_with_their_records_version_and_kit(github: dict, tmp_path: Path,
+                                                                      capsys: pytest.CaptureFixture) -> None:
+    ns = audit.argparse.Namespace(repo=REPO, pr=7, session="s1", file=judge_file(tmp_path, [judgment()]),
+                                  backfill=False, dry_run=True)
+    audit.record(ns)
+    body = capsys.readouterr().out.replace(f"kit={audit.review_record.kit()}", "kit=" + "d" * 40)
+    github["data"][f"repos/{REPO}/issues/7/comments"].append(
+        {"id": 9, "body": body, "author_association": "OWNER", "created_at": "2030-01-03T00:00:00Z",
+         "updated_at": "2030-01-03T00:00:00Z"})
+    [a] = rows(harvest(tmp_path), "audits")
+    assert (a["v"], a["kit"]) == (audit.review_record.version(), "d" * 40)
+
+
+def test_record_refuses_when_the_review_paths_version_cannot_be_read(github: dict, tmp_path: Path,
+                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken() -> str:
+        raise ValueError("SKILL.md's frontmatter holds no metadata.version line")
+
+    monkeypatch.setattr(audit.review_record, "version", broken)
+    ns = audit.argparse.Namespace(repo=REPO, pr=7, session="s1", file=judge_file(tmp_path, [judgment()]),
+                                  backfill=False, dry_run=True)
+    with pytest.raises(SystemExit, match="cannot read the review path's version"):
+        audit.record(ns)
