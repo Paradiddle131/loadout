@@ -3,7 +3,17 @@
 # against a posted verdict instead of one the author retells (cloud/hooks/merge-guard.py reads it).
 #
 # Usage: verdict.sh <pr> --tier routine|standard|sensitive [--result pass|fail] \
-#          --reviewers "<names>" --reviewed <sha> --file <verifier output> [--dry-run]
+#          --reviewers "<names>" --reviewed <sha> --file <verifier output> \
+#          --cycle <n> --dupes <n> --nits <n> --lens "<name> model=<m> effort=<e> tokens=<n> seconds=<n> findings=<n>"... \
+#          [--dry-run]
+#   --reviewers is every agent that ran in the round, the verifier included, split by commas or blanks.
+#   --cycle (1 for a first review), --dupes (findings the verifier merged), --nits and one --lens per agent named in
+#   --reviewers, no other, say what the round cost and found (required above routine; record.py review-round checks
+#   them and refuses a malformed or missing value): model and effort as the agent call set them, tokens and seconds
+#   as the harness printed the agent's usage when it returned (its total tokens; its duration in ms / 1000, rounded),
+#   findings what it raised (for the verifier, what it kept). The must-fix count comes from the `Blocking:` line, and
+#   the verifier's first `Dismissals: re-ran <n>, promoted <m>` line, when it has one, adds both numbers.
+#   They go on the record's round line (record.py has its shape; the merge guard ignores it) and in a table below.
 #   Run it from a clone of the PR's repo (git 2.38 or later): it reads the tier from the PR head's paths.
 #   --tier may be higher than tier.sh gives for the PR head's paths, never lower.
 #   --reviewed is the commit the reviewers read (required for standard and sensitive): the PR's head must be it,
@@ -30,8 +40,9 @@
 set -euo pipefail
 export LC_ALL=C # grep's [[:space:]] and blocking.py's blanks agree only in the C locale
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-usage='usage: verdict.sh <pr> --tier routine|standard|sensitive [--result pass|fail] --reviewers "<names>" --reviewed <sha> --file <verifier output> [--dry-run]'
-pr='' tier='' result='' reviewers='' reviewed='' file=''
+usage='usage: verdict.sh <pr> --tier routine|standard|sensitive [--result pass|fail] --reviewers "<names>" --reviewed <sha> --file <verifier output> --cycle <n> --dupes <n> --nits <n> --lens "<name> model=<m> effort=<e> tokens=<n> seconds=<n> findings=<n>"... [--dry-run]'
+pr='' tier='' result='' reviewers='' reviewed='' file='' cycle='' dupes='' nits=''
+lens=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --tier) tier=${2:-}; shift 2 ;;
@@ -39,6 +50,10 @@ while [ $# -gt 0 ]; do
     --reviewers) reviewers=${2:-}; shift 2 ;;
     --reviewed) reviewed=${2:-}; shift 2 ;;
     --file) file=${2:-}; shift 2 ;;
+    --cycle) cycle=${2:-}; shift 2 ;;
+    --dupes) dupes=${2:-}; shift 2 ;;
+    --nits) nits=${2:-}; shift 2 ;;
+    --lens) lens+=(--lens "${2:-}"); shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     -*) echo "$usage" >&2; exit 2 ;;
     *) [ -z "$pr" ] || { echo "$usage" >&2; exit 2; }; pr=$1; shift ;;
@@ -90,9 +105,20 @@ if [ "$tier" != routine ]; then
     pass:0 | fail:*) ;;
     *) die "the verifier says PASS but its \`Blocking:\` line lists $blocking must-fix finding(s); rerun the verifier." ;;
   esac
+  # The round's cost and shape: checked here, before anything is read from GitHub or posted.
+  why=$(mktemp)
+  round_out=$(python3 "$here/record.py" review-round --reviewers "$reviewers" --cycle "$cycle" --dupes "$dupes" \
+    --nits "$nits" --mustfix "$blocking" --dismissals "$file" "${lens[@]}" 2>"$why") || {
+    reason=$(cat "$why"); rm -f "$why"
+    die "${reason#record.py: }. $usage"
+  }
+  rm -f "$why"
 else
   [ -z "$file" ] || [ -r "$file" ] || die "cannot read --file $file"
   [ -z "$reviewed" ] || [[ "$reviewed" =~ ^[0-9a-f]{40}$ ]] || die "--reviewed is a full sha"
+  [ -z "$cycle$dupes$nits" ] && [ ${#lens[@]} = 0 ] ||
+    die "the routine tier runs no reviewer, so it takes no --cycle, --dupes, --nits or --lens."
+  round_out=''
 fi
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null)" || die "run verdict.sh from a clone of $REPO"
@@ -137,7 +163,14 @@ state=failure
 lines=(--line "- Head commit: \`$head\`" --line "- Reviewed commit: \`$reviewed\`$merged_note"
   --line "- Tier from the paths: $computed" --line "- Reviewers: ${reviewers:-none}")
 [ "$tier" != routine ] || lines+=(--line "- The routine tier needs gates only: no reviewer was required.")
-build_record --kind review --sha "$head" --state "$state" --tier "$tier" --reviewed "$reviewed" \
+round=()
+if [ -n "$round_out" ]; then
+  read -r -a pairs <<<"${round_out%%$'\n'*}"
+  for p in "${pairs[@]}"; do round+=(--round "$p"); done
+  lines+=(--line "- Round: cycle $cycle; must-fix $blocking, nits $nits, duplicates merged $dupes")
+  while IFS= read -r l; do lines+=(--line "$l"); done <<<"${round_out#*$'\n'}"
+fi
+build_record --kind review --sha "$head" --state "$state" --tier "$tier" --reviewed "$reviewed" "${round[@]}" \
   --title "🤖 Review: $result ($tier tier)" "${lines[@]}" ${file:+--file "$file"} \
   --details "Reviewer output (raw)" >"$tmp/body.md"
 url=$(post_record "$pr" "$tmp/body.md") || exit 1

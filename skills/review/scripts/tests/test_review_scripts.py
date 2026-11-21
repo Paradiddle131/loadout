@@ -96,6 +96,13 @@ class World:
         return subprocess.run(["bash", str(SCRIPTS / script), *args], cwd=self.repo, env={**self.env, **extra},
                               capture_output=True, text=True, errors="replace", timeout=60)
 
+    def verdict(self, *args: str, cost: bool = True, **extra: str) -> subprocess.CompletedProcess[str]:
+        """verdict.sh with `args`; above routine, `cost` adds a first round's shape for every --reviewers name."""
+        a = list(args)
+        if cost and "--tier" in a and a[a.index("--tier") + 1] != "routine":
+            a += round_args(a[a.index("--reviewers") + 1] if "--reviewers" in a else "")
+        return self.run("verdict.sh", *a, **extra)
+
     def comments(self) -> list[dict]:
         p = self.fx / "comments.json"
         return json.loads(p.read_text()) if p.exists() else []
@@ -104,6 +111,14 @@ class World:
         p = self.fx / "calls.jsonl"
         calls = [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
         return [c for c in calls if c["method"] != "GET"]
+
+
+def round_args(reviewers: str, cycle: int = 1, dupes: int = 0, nits: int = 0) -> list[str]:
+    """verdict.sh's round arguments: one --lens per name in `reviewers`, each on Opus at high effort."""
+    out = ["--cycle", str(cycle), "--dupes", str(dupes), "--nits", str(nits)]
+    for n in (x for x in re.split(r"[,\s]+", reviewers) if x):
+        out += ["--lens", f"{n} model=opus effort=high tokens=1000 seconds=10 findings=0"]
+    return out
 
 
 @pytest.fixture
@@ -439,7 +454,7 @@ def review_file(tmp: Path, sha: str, verdict: str = "PASS", text: str | None = N
 
 def test_verdict_pass_posts_a_review_record(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "fresh-reviewer",
+    done = w.verdict("12", "--tier", "standard", "--result", "pass", "--reviewers", "fresh-reviewer",
                  "--reviewed", head, "--file", review_file(tmp_path, head))
     assert done.returncode == 0, done.stderr
     [c] = w.comments()
@@ -451,7 +466,7 @@ def test_verdict_pass_posts_a_review_record(w: World, tmp_path: Path) -> None:
 
 def test_verdict_fail_records_failure(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    done = w.run("verdict.sh", "12", "--tier", "sensitive", "--result", "fail", "--reviewers", "a, b",
+    done = w.verdict("12", "--tier", "sensitive", "--result", "fail", "--reviewers", "a, b",
                  "--reviewed", head, "--file", review_file(tmp_path, head, "FAIL", BLOCKING))
     assert done.returncode == 0, done.stderr
     assert w.comments()[0]["body"].startswith(
@@ -462,7 +477,7 @@ def test_verdict_fail_records_failure(w: World, tmp_path: Path) -> None:
 def test_verdict_takes_its_result_from_the_verifiers_verdict_line(w: World, tmp_path: Path, verdict: str,
                                                                    state: str) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+    done = w.verdict("12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
                  "--file", review_file(tmp_path, head, verdict))
     assert done.returncode == 0, done.stderr
     assert f"{REVIEW} sha={head} state={state} tier=standard" in w.comments()[0]["body"]
@@ -472,7 +487,7 @@ def test_verdict_takes_its_result_from_the_verifiers_verdict_line(w: World, tmp_
 def test_verdict_refuses_a_result_the_verifier_did_not_give(w: World, tmp_path: Path, result: str,
                                                             verdict: str) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--result", result, "--reviewers", "x",
+    done = w.verdict("12", "--tier", "standard", "--result", result, "--reviewers", "x",
                  "--reviewed", head, "--file", review_file(tmp_path, head, verdict))
     assert done.returncode == 2 and "contradicts the verifier" in done.stderr
     assert w.writes() == []
@@ -483,7 +498,7 @@ def test_verdict_refuses_output_that_reviewed_another_commit(w: World, tmp_path:
     head = w.commit({"src/app.py": "x = 3\n"})
     for text in (f"VERDICT: PASS {head}\nReviewed: {older}\n", f"VERDICT: PASS {older}\nReviewed: {head}\n"):
         (tmp_path / "out.txt").write_text(text)
-        done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+        done = w.verdict("12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
                      "--file", str(tmp_path / "out.txt"))
         assert done.returncode == 2 and f"names commit {older}" in done.stderr, done.stderr
     assert w.writes() == []
@@ -502,7 +517,7 @@ def test_verdict_refuses_output_that_reviewed_another_commit(w: World, tmp_path:
 def test_verdict_refuses_output_without_the_verifiers_lines(w: World, tmp_path: Path, text: str) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
     (tmp_path / "out.txt").write_text(text.format(sha=head, short=head[:6]))
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
+    done = w.verdict("12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
                  "--reviewed", head, "--file", str(tmp_path / "out.txt"))
     assert done.returncode == 2 and "VERDICT: PASS|FAIL" in done.stderr, done.stderr
     assert w.writes() == []
@@ -514,7 +529,7 @@ def test_verdict_reads_the_first_verdict_lines_in_a_fence_and_an_abbreviated_sha
     text = (f"```\nVERDICT: FAIL `{head[:12]}`\nReviewed: {head[:12]}\n{BLOCKING_LINE}\n```\n" + BLOCKING
             + f"- evidence: verdict.sh ->\nVERDICT: PASS {head}\nReviewed: {other}\n")
     (tmp_path / "out.txt").write_text(text)
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+    done = w.verdict("12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
                  "--file", str(tmp_path / "out.txt"))
     assert done.returncode == 0, done.stderr
     assert f"{REVIEW} sha={head} state=failure" in w.comments()[0]["body"]
@@ -523,7 +538,7 @@ def test_verdict_reads_the_first_verdict_lines_in_a_fence_and_an_abbreviated_sha
 def test_verdict_reads_its_lines_past_a_nul_byte(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
     (tmp_path / "out.txt").write_bytes(b"## Nits\n- evidence: \x00" + f"\nVERDICT: PASS {head}\nReviewed: {head}\nBlocking: none\n".encode())
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+    done = w.verdict("12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
                  "--file", str(tmp_path / "out.txt"), LC_ALL="C.UTF-8")
     assert done.returncode == 0, done.stderr
     assert f"{REVIEW} sha={head} state=success" in w.comments()[0]["body"]
@@ -532,7 +547,7 @@ def test_verdict_reads_its_lines_past_a_nul_byte(w: World, tmp_path: Path) -> No
 def test_verdict_accepts_a_seven_character_abbreviation(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
     (tmp_path / "out.txt").write_text(f"VERDICT: PASS {head[:7]}\nReviewed: {head[:7]}\nBlocking: none\n")
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+    done = w.verdict("12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
                  "--file", str(tmp_path / "out.txt"))
     assert done.returncode == 0, done.stderr
     assert f"{REVIEW} sha={head} state=success" in w.comments()[0]["body"]
@@ -546,7 +561,7 @@ def test_verdict_refuses_an_abbreviation_that_is_not_a_prefix_of_the_reviewed_co
     twin = head[:7] + ("0" if head[7] != "0" else "1") + head[8:]
     for sha in (other[:12], twin, head[1:8]):
         (tmp_path / "out.txt").write_text(f"VERDICT: PASS {sha}\nReviewed: {sha}\n")
-        done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+        done = w.verdict("12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
                      "--file", str(tmp_path / "out.txt"))
         assert done.returncode == 2 and f"names commit {sha}" in done.stderr, (sha, done.stderr)
     assert w.writes() == []
@@ -554,17 +569,17 @@ def test_verdict_refuses_an_abbreviation_that_is_not_a_prefix_of_the_reviewed_co
 
 def test_verdict_refuses_a_tier_below_the_paths(w: World, tmp_path: Path) -> None:
     head = w.commit({".githooks/pre-commit": "x\n"})
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
+    done = w.verdict("12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
                  "--reviewed", head, "--file", review_file(tmp_path, head))
     assert done.returncode == 2 and "make it sensitive" in done.stderr
     assert w.comments() == []
-    done = w.run("verdict.sh", "12", "--tier", "routine")
+    done = w.verdict("12", "--tier", "routine")
     assert done.returncode == 2 and w.comments() == []
 
 
 def test_verdict_routine_on_routine_paths_needs_no_reviewer(w: World) -> None:
     head = w.commit({"docs/a.md": "x\n"})
-    done = w.run("verdict.sh", "12", "--tier", "routine")
+    done = w.verdict("12", "--tier", "routine")
     assert done.returncode == 0, done.stderr
     body = w.comments()[0]["body"]
     assert body.startswith(f"🤖 Review: pass (routine tier)\n{REVIEW} sha={head} state=success "
@@ -574,7 +589,7 @@ def test_verdict_routine_on_routine_paths_needs_no_reviewer(w: World) -> None:
 
 def test_verdict_allows_a_higher_tier(w: World, tmp_path: Path) -> None:
     head = w.commit({"docs/a.md": "x\n"})
-    done = w.run("verdict.sh", "12", "--tier", "sensitive", "--result", "pass", "--reviewers", "x",
+    done = w.verdict("12", "--tier", "sensitive", "--result", "pass", "--reviewers", "x",
                  "--reviewed", head, "--file", review_file(tmp_path, head))
     assert done.returncode == 0, done.stderr
 
@@ -582,7 +597,7 @@ def test_verdict_allows_a_higher_tier(w: World, tmp_path: Path) -> None:
 def test_verdict_refuses_a_head_with_an_unreviewed_commit(w: World, tmp_path: Path) -> None:
     reviewed = w.commit({"src/app.py": "x = 2\n"})
     w.commit({"src/app.py": "x = 3\n"})
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
+    done = w.verdict("12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
                  "--reviewed", reviewed, "--file", review_file(tmp_path, reviewed))
     assert done.returncode == 2 and "nobody reviewed" in done.stderr
     assert w.comments() == []
@@ -594,7 +609,7 @@ def test_verdict_accepts_a_clean_merge_of_the_base(w: World, tmp_path: Path) -> 
     w.git(w.repo, "merge", "-q", "--no-edit", "origin/main")
     w.push()
     head = w.git(w.repo, "rev-parse", "HEAD")
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
+    done = w.verdict("12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
                  "--reviewed", reviewed, "--file", review_file(tmp_path, reviewed))
     assert done.returncode == 0, done.stderr
     body = w.comments()[0]["body"]
@@ -610,23 +625,23 @@ def test_verdict_refuses_a_merge_that_adds_changes(w: World, tmp_path: Path) -> 
     w.git(w.repo, "add", "-A")
     w.git(w.repo, "commit", "-qm", "merge main")
     w.push()
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
+    done = w.verdict("12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
                  "--reviewed", reviewed, "--file", review_file(tmp_path, reviewed))
     assert done.returncode == 2 and "nobody reviewed" in done.stderr
 
 
 def test_verdict_standard_needs_output_and_the_reviewed_commit(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    assert w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
+    assert w.verdict("12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
                  "--reviewed", head).returncode == 2
-    assert w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
+    assert w.verdict("12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
                  "--file", review_file(tmp_path, head)).returncode == 2
     assert w.writes() == []
 
 
 def test_verdict_clips_output_to_the_comment_limit(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
+    done = w.verdict("12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
                  "--reviewed", head, "--file", review_file(tmp_path, head, "PASS", "é" * 70000 + "\nEND\n"))
     assert done.returncode == 0, done.stderr
     body = w.comments()[0]["body"]
@@ -636,14 +651,14 @@ def test_verdict_clips_output_to_the_comment_limit(w: World, tmp_path: Path) -> 
 
 def test_verdict_read_back_mismatch_fails(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
+    done = w.verdict("12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
                  "--reviewed", head, "--file", review_file(tmp_path, head), STUB_MANGLE="1")
     assert done.returncode == 1 and "does not hold the body that was sent" in done.stderr
 
 
 def test_verdict_dry_run_posts_nothing(w: World) -> None:
     w.commit({"docs/a.md": "x\n"})
-    done = w.run("verdict.sh", "12", "--tier", "routine", "--dry-run")
+    done = w.verdict("12", "--tier", "routine", "--dry-run")
     assert done.returncode == 0, done.stderr
     assert w.writes() == []
     assert "dry-run: gh api -X POST repos/example-owner/example-repo/issues/12/comments" in done.stderr
@@ -701,7 +716,7 @@ def test_verdict_refuses_a_merge_of_a_branch_that_is_not_the_default(w: World, t
     w.git(w.repo, "switch", "-q", "feature")
     w.git(w.repo, "merge", "-q", "--no-edit", "side")
     w.push()
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
+    done = w.verdict("12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
                  "--reviewed", reviewed, "--file", review_file(tmp_path, reviewed))
     assert done.returncode == 2 and "not on main" in done.stderr
     assert w.comments() == []
@@ -717,7 +732,7 @@ def test_verdict_refuses_an_octopus_merge(w: World, tmp_path: Path) -> None:
     w.git(w.repo, "switch", "-q", "feature")
     w.git(w.repo, "merge", "-q", "--no-edit", "origin/main", "side")
     w.push()
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
+    done = w.verdict("12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
                  "--reviewed", reviewed, "--file", review_file(tmp_path, reviewed))
     assert done.returncode == 2 and "nobody reviewed" in done.stderr
 
@@ -728,7 +743,7 @@ def test_verdict_refuses_more_than_twenty_merges(w: World, tmp_path: Path) -> No
         w.main_moves({"README.md": f"main moved {i}\n"})
         w.git(w.repo, "merge", "-q", "--no-edit", "origin/main")
     w.push()
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
+    done = w.verdict("12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
                  "--reviewed", reviewed, "--file", review_file(tmp_path, reviewed))
     assert done.returncode == 2 and "nobody reviewed" in done.stderr
 
@@ -739,7 +754,7 @@ def test_verdict_accepts_twenty_merges(w: World, tmp_path: Path) -> None:
         w.main_moves({"README.md": f"main moved {i}\n"})
         w.git(w.repo, "merge", "-q", "--no-edit", "origin/main")
     w.push()
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
+    done = w.verdict("12", "--tier", "standard", "--result", "pass", "--reviewers", "x",
                  "--reviewed", reviewed, "--file", review_file(tmp_path, reviewed))
     assert done.returncode == 0, done.stderr
 
@@ -796,7 +811,7 @@ def test_verdict_refuses_a_blocking_line_without_a_named_harm(w: World, tmp_path
     path = review_file(tmp_path, head, "FAIL", BLOCKING + "### CLM-2\n- rank: must-fix\n", blocking=blocking or "")
     if blocking is None:  # drop the line: the one after `Reviewed:` is then blank
         Path(path).write_text(Path(path).read_text().replace("\n\n\n", "\n\n"))
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head, "--file", path)
+    done = w.verdict("12", "--tier", "standard", "--reviewers", "x", "--reviewed", head, "--file", path)
     assert done.returncode == 2 and why in done.stderr, done.stderr
     assert w.writes() == []
 
@@ -808,7 +823,7 @@ def test_verdict_refuses_a_blocking_line_without_a_named_harm(w: World, tmp_path
 def test_verdict_refuses_a_blocking_line_that_contradicts_the_verdict(w: World, tmp_path: Path, verdict: str,
                                                                       blocking: str, why: str) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+    done = w.verdict("12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
                  "--file", review_file(tmp_path, head, verdict, BLOCKING, blocking=blocking))
     assert done.returncode == 2 and why in done.stderr, done.stderr
     assert w.writes() == []
@@ -819,7 +834,7 @@ def test_verdict_takes_a_listed_id_only_from_a_heading_outside_a_fence(w: World,
     for text in ("Settled in the brief: - COR-1: must-fix, fixed\n## Must-fix\n### COR-10\n- rank: must-fix\n",
                  "## Must-fix\n### CLM-2 (re-raises COR-1)\n- evidence: ->\n```\n### COR-1\n```\n",
                  "## Must-fix\n### ###\n### PRE-COR-1, COR-1-2\n"):
-        done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+        done = w.verdict("12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
                      "--file", review_file(tmp_path, head, "FAIL", text, blocking=BLOCKING_LINE))
         assert done.returncode == 2 and "names COR-1, which no" in done.stderr, done.stderr
 
@@ -832,7 +847,7 @@ def test_verdict_takes_a_listed_id_only_from_a_heading_outside_a_fence(w: World,
 ])
 def test_verdict_accepts_a_named_harm_in_its_usual_shapes(w: World, tmp_path: Path, blocking: str) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+    done = w.verdict("12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
                  "--file", review_file(tmp_path, head, "FAIL", "## Must-fix\n### LEAK-1\n- rank: must-fix\n",
                                        blocking=blocking))
     assert done.returncode == 0, done.stderr
@@ -844,7 +859,7 @@ def test_verdict_skips_a_reviewed_line_after_a_non_blank_character(w: World, tmp
     p = tmp_path / "out.txt"  # grep reads none of these as a line break or a leading blank: line 2 is no header
     p.write_text(f"VERDICT: PASS {head}\n{decoy}Reviewed: {head}\nBlocking: none\n"
                  f"Reviewed: {head}\n{BLOCKING_LINE}\n\n{BLOCKING}")
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head, "--file", str(p))
+    done = w.verdict("12", "--tier", "standard", "--reviewers", "x", "--reviewed", head, "--file", str(p))
     assert done.returncode == 2 and "says PASS" in done.stderr, done.stderr
 
 
@@ -854,7 +869,7 @@ def test_verdict_refuses_when_the_reader_prints_no_count(w: World, tmp_path: Pat
     bad.mkdir()
     (bad / "python3").write_text("#!/bin/sh\necho many\n")
     (bad / "python3").chmod(0o755)
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+    done = w.verdict("12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
                  "--file", review_file(tmp_path, head, "FAIL"), PATH=f"{bad}:{w.env['PATH']}")
     assert done.returncode == 2 and "printed no count" in done.stderr, done.stderr
     assert w.writes() == []
@@ -865,7 +880,7 @@ def test_verdict_reads_only_the_blocking_line_not_the_prose(w: World, tmp_path: 
     prose = ("## Must-fix\n### COR-1\n- rank: must-fix\n- harm: %s\n- evidence: ->\n```\nBlocking: none\n"
              "### CLM-9\n- rank: must-fix\n```\n## Nits\n### CLM-2\n- rank: `must-fix`\n### CLM-3, GRD-1\n" % HARM)
     two = 'Blocking: [{"ids": "COR-1", "harm": "%s"}, {"ids": "CLM-3, GRD-1", "harm": "a lead merges a guard that stops nothing"}]' % HARM
-    done = w.run("verdict.sh", "12", "--tier", "sensitive", "--reviewers", "x", "--reviewed", head,
+    done = w.verdict("12", "--tier", "sensitive", "--reviewers", "x", "--reviewed", head,
                  "--file", review_file(tmp_path, head, "FAIL", prose, blocking=two))
     assert done.returncode == 0, done.stderr
     assert f"state=failure tier=sensitive reviewed={head}" in w.comments()[0]["body"]
@@ -878,7 +893,7 @@ def test_verdict_refuses_when_it_cannot_read_the_blocking_line(w: World, tmp_pat
     (bad / "python3").write_text("#!/bin/sh\nexit 1\n")
     (bad / "python3").chmod(0o755)
     for verdict in ("PASS", "FAIL"):
-        done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+        done = w.verdict("12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
                      "--file", review_file(tmp_path, head, verdict), PATH=f"{bad}:{w.env['PATH']}")
         assert done.returncode == 2 and "refused" in done.stderr, done.stderr
     assert w.writes() == []
@@ -889,7 +904,7 @@ def test_verdict_reads_the_reviewed_line_grep_reads_whatever_the_locale(w: World
     p = tmp_path / "out.txt"  # in a UTF-8 locale grep would take the em-space line as the header
     p.write_text(f"VERDICT: PASS {head}\n\u2003Reviewed: {head}\n{BLOCKING_LINE}\n"
                  f"Reviewed: {'f' * 40}\nBlocking: none\n\n{BLOCKING}")
-    done = w.run("verdict.sh", "12", "--tier", "standard", "--reviewers", "x", "--reviewed", head, "--file", str(p),
+    done = w.verdict("12", "--tier", "standard", "--reviewers", "x", "--reviewed", head, "--file", str(p),
                  LC_ALL="C.UTF-8")
     assert done.returncode == 2 and "names commit ffff" in done.stderr, done.stderr
 
@@ -907,6 +922,250 @@ def test_verdict_above_routine_refuses_each_missing_input_by_its_own_guard(
     args = {"--reviewers": "x", "--reviewed": head, "--file": review_file(tmp_path, head)}
     args[drop] = {"--reviewers": "", "--file": str(empty), "--reviewed": head[:7]}[drop]
     flat = [part for kv in args.items() for part in kv]
-    done = w.run("verdict.sh", "12", "--tier", "standard", *flat)
+    done = w.verdict("12", "--tier", "standard", *flat)
     assert done.returncode == 2 and message in done.stderr, done.stderr
     assert w.writes() == []
+
+
+# The round line: the review path's version, the collection commit, and the round's cost and shape
+
+
+ROUND = "<!-- loadout" + ":round "
+KIT = r"(?:[0-9a-f]{40}(?:-dirty)?|none)"
+sys_path_record = SCRIPTS / "record.py"
+
+
+def skill_version() -> str:
+    return subprocess.run(["python3", str(sys_path_record), "version"], capture_output=True, text=True,
+                          check=True).stdout.strip()
+
+
+def round_fields(body: str) -> list[tuple[str, str]]:
+    line = body.split("\n")[2]
+    assert line.startswith(ROUND) and line.endswith(" -->"), line
+    return [tuple(kv.split("=", 1)) for kv in line[len(ROUND):-4].split()]  # type: ignore[misc]
+
+
+def test_the_version_is_semver_in_the_skills_frontmatter() -> None:
+    assert re.fullmatch(r"\d+\.\d+\.\d+", skill_version())
+    front = (SCRIPTS.parent / "SKILL.md").read_text().split("---")[1]
+    assert f"metadata:\n  version: {skill_version()}\n" in front
+
+
+def test_verdict_puts_the_rounds_cost_and_shape_on_line_three(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.verdict("12", "--tier", "standard", "--reviewers", "correctness-reviewer, finding-verifier",
+                     "--reviewed", head, "--file", review_file(tmp_path, head, "FAIL"), "--cycle", "2",
+                     "--dupes", "3", "--nits", "4",
+                     "--lens", "finding-verifier model=opus effort=high tokens=900 seconds=40 findings=2",
+                     "--lens", "correctness-reviewer model=claude-opus-5-5 effort=medium tokens=41234 seconds=312 "
+                               "findings=5", cost=False)
+    assert done.returncode == 0, done.stderr
+    body = w.comments()[0]["body"]
+    lines = body.split("\n")
+    assert lines[1] == f"{REVIEW} sha={head} state=failure tier=standard reviewed={head} -->"  # unchanged
+    f = round_fields(body)
+    assert f[0] == ("v", skill_version()) and f[1][0] == "kit" and re.fullmatch(KIT, f[1][1])
+    assert f[2:] == [("cycle", "2"), ("lenses", "correctness-reviewer,finding-verifier"), ("dupes", "3"),
+                     ("mustfix", "1"), ("nits", "4"),
+                     ("lens", "correctness-reviewer:claude-opus-5-5:medium:41234:312:5"),
+                     ("lens", "finding-verifier:opus:high:900:40:2")]
+    assert "| correctness-reviewer | claude-opus-5-5 | medium | 41234 | 312 | 5 |" in body
+    assert "| Total (summed) | | | 42134 | 352 | 7 |" in body
+    assert "- Round: cycle 2; must-fix 1, nits 4, duplicates merged 3" in body
+
+
+def test_verdict_takes_no_must_fix_count_from_the_lead(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.verdict("12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                     "--file", review_file(tmp_path, head), "--mustfix", "0")
+    assert done.returncode == 2 and w.writes() == []
+
+
+GOOD_LENS = "x model=opus effort=high tokens=10 seconds=1 findings=0"
+
+
+@pytest.mark.parametrize("args, why", [
+    (["--cycle", "0", "--dupes", "0", "--nits", "0", "--lens", GOOD_LENS], "--cycle is a whole number from 1"),
+    (["--cycle", "one", "--dupes", "0", "--nits", "0", "--lens", GOOD_LENS], "--cycle"),
+    (["--dupes", "0", "--nits", "0", "--lens", GOOD_LENS], "--cycle"),
+    (["--cycle", "1", "--dupes", "-1", "--nits", "0", "--lens", GOOD_LENS], "--dupes"),
+    (["--cycle", "1", "--dupes", "0", "--nits", "1.5", "--lens", GOOD_LENS], "--nits"),
+    (["--cycle", "1", "--dupes", "0", "--nits", "01", "--lens", GOOD_LENS], "--nits"),
+    (["--cycle", "1", "--dupes", "0", "--nits", "0"], "are not the --reviewers"),
+    (["--cycle", "1", "--dupes", "0", "--nits", "0", "--lens", GOOD_LENS.replace("high", "huge")], "effort="),
+    (["--cycle", "1", "--dupes", "0", "--nits", "0", "--lens", GOOD_LENS.replace("=10", "=1e3")], "tokens="),
+    (["--cycle", "1", "--dupes", "0", "--nits", "0", "--lens", GOOD_LENS.replace("=1 ", "=3.2 ")], "seconds="),
+    (["--cycle", "1", "--dupes", "0", "--nits", "0", "--lens", GOOD_LENS.replace("=0", "=-1")], "findings="),
+    (["--cycle", "1", "--dupes", "0", "--nits", "0", "--lens", GOOD_LENS.replace("opus", "op:us")], "model="),
+    (["--cycle", "1", "--dupes", "0", "--nits", "0", "--lens", GOOD_LENS.replace(" findings=0", "")], "once"),
+    (["--cycle", "1", "--dupes", "0", "--nits", "0", "--lens", GOOD_LENS + " findings=1"], "once"),
+    (["--cycle", "1", "--dupes", "0", "--nits", "0", "--lens", GOOD_LENS + " cost=9"], "once"),
+    (["--cycle", "1", "--dupes", "0", "--nits", "0", "--lens", GOOD_LENS, "--lens", GOOD_LENS], "twice"),
+    (["--cycle", "1", "--dupes", "0", "--nits", "0", "--lens", GOOD_LENS.replace("x ", "y ")], "not the --reviewers"),
+])
+def test_verdict_refuses_a_malformed_or_missing_round_value(w: World, tmp_path: Path, args: list[str],
+                                                            why: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.verdict("12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                     "--file", review_file(tmp_path, head), *args, cost=False)
+    assert done.returncode == 2 and why in done.stderr, done.stderr
+    assert w.writes() == [] and not [c for c in calls(w) if c["method"] == "GET"]  # refused before any read
+
+
+def calls(w: World) -> list[dict]:
+    p = w.fx / "calls.jsonl"
+    return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
+
+
+def test_verdict_refuses_a_reviewer_named_twice(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.verdict("12", "--tier", "standard", "--reviewers", "x, x", "--reviewed", head,
+                     "--file", review_file(tmp_path, head), "--cycle", "1", "--dupes", "0", "--nits", "0",
+                     "--lens", GOOD_LENS, cost=False)
+    assert done.returncode == 2 and "names an agent twice" in done.stderr
+
+
+@pytest.mark.parametrize("line, pairs", [
+    ("Dismissals: re-ran 2, promoted 1", [("dismissals", "2"), ("promoted", "1")]),
+    ("  Dismissals: re-ran 0, promoted 0  ", [("dismissals", "0"), ("promoted", "0")]),
+    (None, []),
+])
+def test_verdict_adds_the_verifiers_dismissals_when_it_gave_them(w: World, tmp_path: Path, line: str | None,
+                                                                pairs: list) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    text = "No findings.\n" + (f"{line}\nDismissals: re-ran 9, promoted 9\n" if line else "")
+    done = w.verdict("12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                     "--file", review_file(tmp_path, head, text=text))
+    assert done.returncode == 0, done.stderr
+    f = round_fields(w.comments()[0]["body"])
+    assert [kv for kv in f if kv[0] in ("dismissals", "promoted")] == pairs
+
+
+@pytest.mark.parametrize("line", ["Dismissals: re-ran two, promoted 1", "Dismissals: none", "Dismissals: re-ran 2"])
+def test_verdict_refuses_a_malformed_dismissals_line(w: World, tmp_path: Path, line: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.verdict("12", "--tier", "standard", "--reviewers", "x", "--reviewed", head,
+                     "--file", review_file(tmp_path, head, text=f"No findings.\n{line}\n"))
+    assert done.returncode == 2 and "Dismissals line" in done.stderr and w.writes() == []
+
+
+def test_verdict_routine_carries_the_version_and_kit_only(w: World) -> None:
+    w.commit({"docs/a.md": "x\n"})
+    done = w.verdict("12", "--tier", "routine")
+    assert done.returncode == 0, done.stderr
+    f = round_fields(w.comments()[0]["body"])
+    assert [k for k, _ in f] == ["v", "kit"] and f[0][1] == skill_version()
+
+
+def test_verdict_routine_takes_no_round_arguments(w: World) -> None:
+    w.commit({"docs/a.md": "x\n"})
+    done = w.verdict("12", "--tier", "routine", "--lens", GOOD_LENS)
+    assert done.returncode == 2 and "takes no --cycle" in done.stderr and w.writes() == []
+
+
+def test_gate_stamp_puts_the_version_kit_and_wall_time_on_line_three(w: World) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.run("gate_stamp.sh", "--", "bash", "-c", "sleep 1.2; echo ok")
+    assert done.returncode == 0, done.stderr
+    body = w.comments()[0]["body"]
+    assert body.split("\n")[1] == f"{GATES} sha={head} state=success -->"
+    f = round_fields(body)
+    assert [k for k, _ in f] == ["v", "kit", "seconds"] and f[0][1] == skill_version()
+    assert re.fullmatch(KIT, f[1][1]) and 1 <= int(f[2][1]) <= 3 and f"- Took: {f[2][1]} s" in body
+
+
+def test_gate_stamp_dry_run_shows_the_round_line(w: World) -> None:
+    w.commit({"src/app.py": "x = 2\n"})
+    done = w.run("gate_stamp.sh", "--dry-run", "--", "true")
+    assert done.returncode == 0 and ROUND + f"v={skill_version()} kit=" in done.stderr
+
+
+# record.py on its own
+
+
+def build(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["python3", str(sys_path_record), "build", "--kind", "gates", "--sha", "a" * 40,
+                           "--state", "success", "--title", "t", *args], capture_output=True, text=True)
+
+
+@pytest.mark.parametrize("pair, why", [
+    ("v=9.9.9", "scripts' own"), ("kit=abc", "scripts' own"), ("Seconds=1", "lowercase key"),
+    ("seconds=1 2", "a value of letters"), ("seconds=", "a value of letters"), ("seconds", "<key>=<value>"),
+    ("note=a-->b", "a value of letters"),
+])
+def test_record_refuses_a_round_pair_out_of_shape(pair: str, why: str) -> None:
+    done = build("--round", pair)
+    assert done.returncode != 0 and why in done.stderr, done.stderr
+
+
+def test_record_lets_only_lens_repeat() -> None:
+    assert build("--round", "lens=a:opus:high:1:1:0", "--round", "lens=b:opus:high:1:1:0").returncode == 0
+    done = build("--round", "seconds=1", "--round", "seconds=2")
+    assert done.returncode != 0 and "appears twice: seconds" in done.stderr
+
+
+def _record_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("review_record", sys_path_record)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize("text, want", [
+    ("---\nname: r\nmetadata:\n  version: 1.2.3\n---\nbody\n", "1.2.3"),
+    ("---\nmetadata:\n  upstream: x\n  version: 10.0.0\nname: r\n---\n", "10.0.0"),
+    ("---\nname: r\n---\nmetadata:\n  version: 1.2.3\n", None),  # outside the frontmatter
+    ("---\nname: r\nversion: 1.2.3\n---\n", None),  # not under metadata
+    ("---\nname: r\nother:\n  version: 1.2.3\n---\n", None),
+    ("---\nmetadata:\n  version: 1.2\n---\n", None),
+    ("---\nmetadata:\n  version: v1.2.3\n---\n", None),
+    ("---\nmetadata:\n  version: 01.2.3\n---\n", None),
+    ("---\nmetadata:\n  version: 1.2.3\n  version: 1.2.4\n---\n", None),
+    ("---\nmetadata:\n  version: 1.2.3\n", None),  # never closed
+    ("name: r\nmetadata:\n  version: 1.2.3\n", None),
+])
+def test_skill_version_reads_only_the_frontmatters_metadata_version(text: str, want: str | None) -> None:
+    rec = _record_module()
+    if want is None:
+        with pytest.raises(ValueError):
+            rec.skill_version(text)
+    else:
+        assert rec.skill_version(text) == want
+
+
+def test_kit_names_the_collection_clone_and_whether_its_review_files_changed(tmp_path: Path,
+                                                                             env: dict[str, str]) -> None:
+    rec = _record_module()
+    assert rec.kit(tmp_path) == "none"  # not a checkout
+    clone = tmp_path / "collection"
+    scripts = clone / "skills/review/scripts"
+    scripts.mkdir(parents=True)
+    for rel in ("skills/review/scripts/a.sh", "agents/lens.md", "cloud/hooks/guard.py", "README.md"):
+        (clone / rel).parent.mkdir(parents=True, exist_ok=True)
+        (clone / rel).write_text("x\n")
+    git = lambda *a: subprocess.run(["git", *a], cwd=clone, env=env, check=True, capture_output=True,  # noqa: E731
+                                    text=True).stdout.strip()
+    git("init", "-q", "-b", "main")
+    git("add", ".")
+    git("commit", "-qm", "c")
+    head = git("rev-parse", "HEAD")
+    assert rec.kit(scripts) == head
+    (clone / "README.md").write_text("changed\n")
+    (clone / "agents/new.md").write_text("untracked\n")
+    assert rec.kit(scripts) == head  # outside the watched paths, or untracked
+    for rel in ("agents/lens.md", "cloud/hooks/guard.py", "skills/review/scripts/a.sh"):
+        (clone / rel).write_text("changed\n")
+        assert rec.kit(scripts) == head + "-dirty", rel
+        git("checkout", "--", rel)
+    other = tmp_path / "project"
+    copied = other / ".claude/skills/review/scripts"
+    copied.mkdir(parents=True)
+    (copied / "a.sh").write_text("x\n")
+    subprocess.run(["git", "init", "-q"], cwd=other, check=True)
+    subprocess.run(["git", "add", "."], cwd=other, check=True)
+    subprocess.run(["git", "commit", "-qm", "c"], cwd=other, env=env, check=True, capture_output=True)
+    assert rec.kit(copied) == "none"  # a copy inside the repo under review is not the collection
