@@ -62,6 +62,7 @@ Everything else goes under `<details>`: it stays on record for the next agent wi
   Easy-to-revert changes say nothing about it.
 - **A stacked PR targets the PR below it** and is retargeted to `main` when that one merges: one targeting `main` early carries the lower PR's commits into its own merge.
   Say in its first line which PR must merge first.
+- **A change to the review path states its version bump** (the paths the `review` skill's `## Version` lists): one line in the summary naming the new `metadata.version` and why that part moved, by the bump rule in the `review` skill's `## Version`.
 - **Required sections stay short.** When the repo asks for named sections (decisions, open questions), keep each as one-line bullets outside `<details>` and put the reasoning inside.
 - **Details hold the rest:** decisions and why, rejected options, the full verification list, what could not be verified, follow-ups filed.
   Several `<details>` blocks are fine when the topics differ.

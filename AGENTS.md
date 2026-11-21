@@ -17,6 +17,7 @@ The pre-commit hook runs them (`git config core.hooksPath .githooks`; the cloud 
 
 - `bin/check-plugins.sh`: every plugin skill path holds a skill, and every agent under `agents/` has full frontmatter (a documented model and effort, read-only tools, no `:` in its name) and the same `## How you work` block;
 - `bin/check-refs`: every link, backticked repo path and `<plugin>:<skill>` name resolves;
+- `bin/check-review-version`: a change to the review path (its list is in `skills/review/SKILL.md § Version`) raises the review skill's `metadata.version` above the merge-base's and the default branch's;
 - `gitleaks protect --staged`: no secrets;
 - `bin/check-generic.sh`: no owner login, sibling repo name, date or issue number in shared content (extra words from `$GENERIC_DENY_FILE`);
 - `cloud/githooks/check-process-ids.py`: no issue, PR, phase or decision id on an added line (the other clones run it too; exemptions in `.process-ids`).

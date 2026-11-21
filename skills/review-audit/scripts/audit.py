@@ -17,7 +17,9 @@ back on the PRs, and sums both up. GitHub holds every record; the JSONL files ar
       prints the batch's numbers: rounds, passes, convergence, lens yield and, from the audits, how often a
       checkable finding was wrong or mattered and a must-fix was ranked too high, each with its 95% interval,
       and how many findings were ranked too low; "merged without a pass" reads the review record the merge
-      guard saw at merge time, not the gates record or the tier.
+      guard saw at merge time, not the gates record or the tier. Then the rounds by the review path's version
+      (`v` on each record's round line, `unstamped` without one) and the reviewers' tokens and seconds per PR,
+      repo, day and month, with an estimated cost at list price (BLENDED_USD_PER_MTOK has the rate).
 
 A judgment (judgments.json is a list of them):
   {"round": <the 🤖 Review comment id>, "ids": ["COR-1"], "correct": "yes|no|unverifiable",
@@ -42,6 +44,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(1, str(Path(__file__).resolve().parents[2] / "review" / "scripts"))
 import blocking  # noqa: E402  (the review skill's reader of the verifier's `Blocking:` line)
+import record as review_record  # noqa: E402  (the review skill's record builder: the round line, v and kit)
 import findings as verifier_output  # noqa: E402  (a lenient reader of the verifier's prose, for counting only)
 
 TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
@@ -63,6 +66,15 @@ KINDS = {"correct": {"yes", "no", "unverifiable"}, "matters": {"yes", "no"},
          "kind": {"code", "test", "wording", "config", "data", "process"},
          "method": {"re-ran", "re-read", "record"}}
 SESSION = re.compile(r"[A-Za-z0-9._-]{1,64}")
+# A record's third line (review_record has the shape); the merge guard never reads it.
+ROUND = re.compile("<!-- loadout" r":round((?: [a-z]+=[A-Za-z0-9._,:-]+)+) -->")
+UNSTAMPED = "unstamped"  # the `v` of a record with no round line: one posted before the line existed
+# The estimate's rate, in US dollars per million tokens. The reviewers run on Opus, whose list price is $4 per million
+# input tokens and $20 per million output tokens (Claude Opus 5.5, Anthropic's API pricing as the claude-api skill
+# lists it). The harness prints one total per agent, not input and output apart, so the rate blends them, assuming
+# 90% input (a reviewer reads far more than it writes): 0.9 * 4 + 0.1 * 20. Cache reads, billed lower, make the true
+# cost lower; another model makes it different: the column is an estimate at list price, never a bill.
+BLENDED_USD_PER_MTOK = 5.6
 LENSES = ("correctness", "claims", "guardrail", "leak", "control")
 
 
@@ -118,6 +130,35 @@ def trusted_record(c: dict) -> tuple[str, dict] | None:
     if kind != "audit" and (not SHA.fullmatch(f["sha"]) or ("reviewed" in f and not SHA.fullmatch(f["reviewed"]))):
         return None  # state and tier need no check of their own: they must equal the title's, which TITLE limits
     return kind, f
+
+
+def round_fields(body: str) -> dict:
+    """The round line's fields (review_record has the shape): `v`, `kit`, the counts as integers, `lenses` as a
+    list, and `lens` as one dict per agent; `v` is `unstamped` when the third line is no round line."""
+    lines = (body or "").replace("\r\n", "\n").split("\n")
+    m = ROUND.fullmatch(lines[2].strip()) if len(lines) > 2 else None
+    if not m:
+        return {"v": UNSTAMPED, "kit": None}
+    out: dict = {"lens": []}
+    for kv in m.group(1).split():
+        k, v = kv.split("=", 1)
+        if k == "lens":
+            parts = v.split(":")
+            if len(parts) == 6 and all(p.isdigit() for p in parts[3:]):
+                out["lens"].append({"name": parts[0], "model": parts[1], "effort": parts[2], "tokens": int(parts[3]),
+                                    "seconds": int(parts[4]), "findings": int(parts[5])})
+        elif k == "lenses":
+            out[k] = v.split(",")
+        else:
+            out.setdefault(k, int(v) if v.isdigit() else v)
+    out.setdefault("v", UNSTAMPED)
+    out.setdefault("kit", None)
+    return out
+
+
+def stamp(rf: dict) -> dict:
+    """The fields every harvested row carries from its round line."""
+    return {"v": rf["v"], "kit": rf["kit"]}
 
 
 def raw_output(body: str) -> str:
@@ -177,14 +218,17 @@ def harvest(a: argparse.Namespace) -> int:
                 lines = c["body"].split("\n")
                 base = {"repo": repo, "pr": n, "comment": c["id"], "url": c.get("html_url"),
                         "created_at": c["created_at"]}
+                rf = round_fields(c["body"])
                 if kind == "gates":
-                    rows["gates"].append({**base, "sha": f.get("sha"), "state": f.get("state")})
+                    rows["gates"].append({**base, "sha": f.get("sha"), "state": f.get("state"), **stamp(rf),
+                                          "seconds": rf.get("seconds") if isinstance(rf.get("seconds"), int) else None})
                 elif kind == "audit":
                     for j in audit_json(c["body"]):
                         if isinstance(j, dict) and type(j.get("round")) is int and isinstance(j.get("ids"), list):
                             # the record's own repo, PR and session win over the block's keys
                             rows["audits"].append({**{k: j.get(k) for k in JUDGMENT_KEYS}, **base,
-                                                   "session": f.get("session"), "backfill": f.get("backfill") == "1"})
+                                                   "session": f.get("session"), "backfill": f.get("backfill") == "1",
+                                                   **stamp(rf)})
                 else:
                     raw = raw_output(c["body"])
                     parsed = verifier_output.parse(raw)
@@ -209,7 +253,14 @@ def harvest(a: argparse.Namespace) -> int:
                         "steered": any(s.strip().lower() not in ("", "none") for s in parsed["steering"]),
                         "must_fix": harms if harms is not None else sum(b["must_fix"] for b in fs),
                         "nits": sum(b["kind_rank"] == "nit" for b in fs),
-                        "pre_existing": sum(b["kind_rank"] == "pre-existing" for b in fs)})
+                        "pre_existing": sum(b["kind_rank"] == "pre-existing" for b in fs),
+                        **stamp(rf), **{k: rf[k] if isinstance(rf.get(k), int) else None
+                                        for k in ("cycle", "dupes", "dismissals", "promoted")},
+                        "lead_nits": rf["nits"] if isinstance(rf.get("nits"), int) else None,
+                        "repost": rf.get("repost") == 1,
+                        "lenses": rf.get("lens", []),
+                        "tokens": sum(x["tokens"] for x in rf.get("lens", [])),
+                        "seconds": sum(x["seconds"] for x in rf.get("lens", []))})
                     for b in fs:
                         rows["findings"].append({
                             "repo": repo, "pr": n, "round": c["id"], "ids": b["ids"], "section": b["section"],
@@ -303,8 +354,13 @@ def record(a: argparse.Namespace) -> int:
                 sys.exit(f"audit.py: {', '.join(j['ids'])} is no finding of review record {rnd}; use a block's ids")
     cell = lambda s: str(s).replace("|", "\\|")  # noqa: E731
     marker = "<!-- loadout" + f":audit session={a.session}" + (" backfill=1" if a.backfill else "") + " -->"
+    try:
+        stamped = review_record.round_line([])
+    except (OSError, ValueError) as exc:
+        sys.exit(f"audit.py: cannot read the review path's version: {exc}")
     body = "\n".join([
-        f"🤖 Audit: {len(items)} finding{'s' if len(items) != 1 else ''} re-checked (session {a.session})", marker, "",
+        f"🤖 Audit: {len(items)} finding{'s' if len(items) != 1 else ''} re-checked (session {a.session})", marker,
+        stamped, "",
         "| Finding | Correct | Matters | Rank | Kind | How | Note |", "|---|---|---|---|---|---|---|",
         *[f"| {cell(', '.join(j['ids']))} | {j['correct']} | {j['matters']} | {j['rank']} | {j['kind']} | "
           f"{j['method']} | {cell(j.get('note', ''))} |" for j in items],
@@ -372,7 +428,7 @@ def summarize(d: Path, session: str | None) -> dict:
                          and f["must_fix"] for f in finds)]
     checkable = [j for j in audits if j.get("correct") in ("yes", "no")]
     merged = [c for c in changes if c["merged"]]
-    return {
+    return {**_costs(rounds, by_pr),
         "rounds": len(rounds), "changes": len(changes),
         "passes": sum(r["state"] == "success" for r in rounds),
         "first_round_pass": wilson(sum(c["first_pass"] for c in changes), len(changes)),
@@ -390,6 +446,63 @@ def summarize(d: Path, session: str | None) -> dict:
         "attention": [c for c in changes if c["grew"] or c["merged_without_pass"] or c["steered_rounds"]],
         "series": changes,
     }
+
+
+def est_usd(tokens: int) -> float:
+    """The estimate at list price (BLENDED_USD_PER_MTOK has the rate and its assumption)."""
+    return round(tokens * BLENDED_USD_PER_MTOK / 1_000_000, 2)
+
+
+def _costs(rounds: list[dict], by_pr: dict[tuple, list]) -> dict:
+    """Rounds grouped by the review path's version, and the reviewers' tokens and seconds per PR, repo, day, month.
+
+    Must-fix and nits are the harvest's own counts (the same ones the headline numbers use), so stamped and unstamped
+    rounds compare; duplicates, tokens and seconds come from the round line, so an unstamped round adds none of them.
+    Cycles to pass: per PR, the cycle its first passing round's line names (its place among the PR's rounds when the
+    line has none), averaged within the version of that passing round. Seconds are summed over agents, not wall time.
+    A round's usage counts once: a re-post (`repost=1`, no agent ran) adds none, and neither does a later record of the
+    same PR, reviewed commit and per-agent usage as an earlier one.
+    """
+    seen: set[tuple] = set()
+    usage: dict[int, tuple[int, int]] = {}
+    for r in rounds:
+        k = (r["repo"], r["pr"], r.get("reviewed"), json.dumps(r.get("lenses") or []))
+        fresh = not r.get("repost") and k not in seen
+        seen.add(k)
+        usage[id(r)] = (r.get("tokens") or 0, r.get("seconds") or 0) if fresh else (0, 0)
+    by_v: dict[str, dict] = {}
+    for r in rounds:
+        g = by_v.setdefault(r.get("v") or UNSTAMPED, {"rounds": 0, "passes": 0, "to_pass": [], "must_fix": 0,
+                                                       "nits": 0, "dupes": 0, "tokens": 0, "seconds": 0})
+        g["rounds"] += 1
+        g["passes"] += r["state"] == "success"
+        g["must_fix"] += r["must_fix"]
+        g["nits"] += r["nits"]
+        g["dupes"] += r.get("dupes") or 0
+        g["tokens"] += usage[id(r)][0]
+        g["seconds"] += usage[id(r)][1]
+    for rs in by_pr.values():
+        for i, r in enumerate(rs):
+            if r["state"] == "success":
+                cyc = r.get("cycle")
+                by_v[r.get("v") or UNSTAMPED]["to_pass"].append(cyc if isinstance(cyc, int) else i + 1)
+                break
+    for g in by_v.values():
+        t = g.pop("to_pass")
+        g["cycles_to_pass"] = round(sum(t) / len(t), 2) if t else None
+        g["est_usd"] = est_usd(g["tokens"])
+    totals: dict[str, dict] = {"pr": {}, "repo": {}, "day": {}, "month": {}}
+    for r in rounds:
+        when = r.get("created_at") or ""
+        for by, k in (("pr", f"{r['repo']}#{r['pr']}"), ("repo", r["repo"]), ("day", when[:10]), ("month", when[:7])):
+            t = totals[by].setdefault(k, {"rounds": 0, "tokens": 0, "seconds": 0})
+            t["rounds"] += 1
+            t["tokens"] += usage[id(r)][0]
+            t["seconds"] += usage[id(r)][1]
+    for t in (t for by in totals.values() for t in by.values()):
+        t["est_usd"] = est_usd(t["tokens"])
+    return {"by_version": dict(sorted(by_v.items())), "cost": {by: dict(sorted(v.items())) for by, v in totals.items()},
+            "usd_per_mtok": BLENDED_USD_PER_MTOK}
 
 
 def summary(a: argparse.Namespace) -> int:
@@ -421,6 +534,16 @@ def summary(a: argparse.Namespace) -> int:
         why = [w for w, on in (("grew", c["grew"]), ("merged without a pass", c["merged_without_pass"]),
                                ("steered", c["steered_rounds"])) if on]
         print(f"| {c['repo']}#{c['pr']} | {c['rounds']} | {', '.join(map(str, c['series']))} | {', '.join(why)} |")
+    est = f"Est. USD at list price (${s['usd_per_mtok']}/M tokens)"
+    print(f"\n| Review path version | Rounds | Passed | Cycles to pass | Must-fix | Nits | Duplicates merged | Tokens | "
+          f"{est} | Agent seconds |\n|---|---|---|---|---|---|---|---|---|---|")
+    for v, g in s["by_version"].items():
+        print(f"| {v} | {g['rounds']} | {g['passes']} | {g['cycles_to_pass'] if g['cycles_to_pass'] is not None else 'n/a'} "
+              f"| {g['must_fix']} | {g['nits']} | {g['dupes']} | {g['tokens']} | {g['est_usd']:.2f} | {g['seconds']} |")
+    print(f"\n| Per | Which | Rounds | Tokens | {est} | Agent seconds |\n|---|---|---|---|---|---|")
+    for by, label in (("pr", "PR"), ("repo", "repo"), ("day", "day"), ("month", "month")):
+        for k, t in s["cost"][by].items():
+            print(f"| {label} | {k} | {t['rounds']} | {t['tokens']} | {t['est_usd']:.2f} | {t['seconds']} |")
     return 0
 
 

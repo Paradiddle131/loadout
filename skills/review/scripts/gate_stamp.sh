@@ -10,8 +10,8 @@
 # 2. Refuses unless the PR's head on GitHub is this clone's HEAD (push first, or pull).
 # 3. Runs the command, its output shown as it runs.
 # 4. Refuses to record when the command moved HEAD or changed a tracked file: the result would not be the head's.
-# 5. Posts `🤖 Gates: success|failure` with the gates marker naming the head (lib.sh has the format), the
-#    command, its exit code, and the output's last 40 non-blank lines (NUL bytes and colour codes stripped,
+# 5. Posts `🤖 Gates: success|failure` with the gates marker naming the head and the round line with the
+#    command's wall time in whole seconds (lib.sh has the format), the command, its exit code, and the output's last 40 non-blank lines (NUL bytes and colour codes stripped,
 #    invalid UTF-8 replaced) with its total line count; the whole log stays in the terminal. Reads the comment back and fails if it differs.
 # 6. Prints a block a PR body can quote; exits with the command's exit code (2 when this script refused before
 #    running it, 3 when the command passed but its record could not be posted).
@@ -52,8 +52,10 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 out=$tmp/out
 set +e
+started=$SECONDS
 "$@" 2>&1 | tee "$out"
 code=${PIPESTATUS[0]}
+took=$((SECONDS - started))
 set -e
 
 [ "$(git rev-parse HEAD)" = "$head" ] || die "the command moved HEAD from $head; nothing recorded. Run the gates on a settled head."
@@ -72,8 +74,8 @@ kept=$(grep -c '' "$tmp/tail" || true)
 summary=$(tail -n 1 "$tmp/tail")
 state=failure
 [ "$code" = 0 ] && state=success
-build_record --kind gates --sha "$head" --state "$state" --title "🤖 Gates: $state" \
-  --line "- Head commit: \`$head\`" --line "- Command: \`$shown\`" --line "- Exit code: $code" \
+build_record --kind gates --sha "$head" --state "$state" --round "seconds=$took" --title "🤖 Gates: $state" \
+  --line "- Head commit: \`$head\`" --line "- Command: \`$shown\`" --line "- Exit code: $code" --line "- Took: ${took} s" \
   --line "- Last line: ${summary:-no output}" --file "$tmp/tail" --tail \
   --details "Output: its last $kept non-blank lines of $total" >"$tmp/body.md"
 

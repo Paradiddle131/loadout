@@ -619,3 +619,50 @@ def test_input_json_cannot_read_fails_closed_for_a_merge(fx: Fx, clone: Path, to
                           timeout=60, env=guard_env(fx))
     assert done.returncode == 0 and done.stderr == "", done.stderr[-300:]
     assert bool(done.stdout.strip()) is refused
+
+
+# The round line (a record's third line) is for audits: the guard never reads it.
+
+
+def round_line_of(body: str) -> str:
+    return body.split("\n")[2]
+
+
+def test_the_record_builder_writes_a_round_line_on_line_three() -> None:
+    assert round_line_of(record("review")).startswith("<!-- loadout" + ":round v=")
+    assert round_line_of(record("gates")).startswith("<!-- loadout" + ":round v=")
+
+
+def test_both_records_with_their_round_lines_merge(fx: Fx, clone: Path) -> None:
+    fx.both()
+    assert mcp(fx, clone, expectedHeadSha=HEAD) is None
+
+
+def without_round(body: str) -> str:
+    lines = body.split("\n")
+    return "\n".join(lines[:2] + lines[3:])
+
+
+def test_records_posted_before_the_round_line_still_merge(fx: Fx, clone: Path) -> None:
+    gates, review = without_round(record("gates")), without_round(record("review"))
+    assert all("round" not in b for b in (gates, review))
+    fx.comments(comment(gates), comment(review))
+    assert mcp(fx, clone, expectedHeadSha=HEAD) is None
+
+
+@pytest.mark.parametrize("garbage", [
+    "<!-- loadout" + ":round v=??? kit= lens=a:b -->",
+    "<!-- loadout" + f":review sha={OLD} state=failure tier=routine reviewed={OLD} -->",
+    "not a marker at all",
+    "",
+])
+def test_a_garbage_round_line_changes_nothing_on_a_good_line_two(fx: Fx, clone: Path, garbage: str) -> None:
+    def spoil(body: str) -> str:
+        lines = body.split("\n")
+        return "\n".join(lines[:2] + [garbage] + lines[3:])
+
+    fx.comments(comment(spoil(record("gates"))), comment(spoil(record("review"))))
+    assert mcp(fx, clone, expectedHeadSha=HEAD) is None
+    fx.comments(comment(spoil(record("gates"))), comment(spoil(record("review", state="failure"))))
+    reason = mcp(fx, clone, expectedHeadSha=HEAD)
+    assert reason and "says failure" in reason  # line two still decides
