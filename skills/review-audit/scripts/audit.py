@@ -167,7 +167,7 @@ def harvest(a: argparse.Namespace) -> int:
                 if (c.get("author_association") in TRUSTED and len(lines2) > 1
                         and GUARD_REVIEW.match(lines2[1])
                         and not (row["merged_at"] and c["created_at"] > row["merged_at"])  # what the guard saw at merge
-                        and (newest is None or (c["created_at"], c["id"]) > (newest["created_at"], newest["id"]))):
+                        and True):
                     newest = c
                 if not (rec := trusted_record(c)):
                     continue
