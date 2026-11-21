@@ -45,5 +45,5 @@ GitHub holds every record, so any past audit session can be read again; the JSON
 
 - Harvest again (it picks up the new audit records), then `python3 $A/scripts/audit.py summary --dir <dir> --session <id>`.
 - Give the owner its tables as they are: the headline numbers with their intervals, the lens table, and the changes that need a look; add a sentence only where a number needs one.
-- Every problem the audit finds in the review path itself is an issue (the `issue` skill) on the audited repo; where this collection's `FEEDBACK.md` is imported, also a `bin/friction note` in generic words, as `FEEDBACK.md` says, so nothing of a private repo reaches the collection's public tracker.
+- Every problem the audit finds in the review path itself is an issue (the `issue` skill) on the audited repo; where this collection's `FEEDBACK.md` is imported, also a `bin/friction note` in generic words (no repo name, path or finding text), as `FEEDBACK.md` says.
 - Done when the owner has the tables and the issues are filed.

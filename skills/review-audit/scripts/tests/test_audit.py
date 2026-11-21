@@ -536,7 +536,7 @@ def test_harvest_reads_a_record_without_the_backfill_flag_as_live(github: dict, 
 # What the merge guard saw at merge time, and the checks each mutant of the last review left green.
 
 
-def test_merged_without_pass_reads_only_records_posted_before_the_merge(github: dict, tmp_path: Path) -> None:
+def test_merged_without_pass_leaves_out_records_posted_after_the_merge(github: dict, tmp_path: Path) -> None:
     cs = github["data"][f"repos/{REPO}/issues/7/comments"]
     cs.append(review_comment(50, H2, "failure", FAIL_OUT.replace(H1, H2), "2030-01-05T00:00:00Z"))
     [c] = audit.summarize(harvest(tmp_path / "a"), None)["series"]
@@ -545,13 +545,19 @@ def test_merged_without_pass_reads_only_records_posted_before_the_merge(github: 
     cs.append(review_comment(51, H2, "success", PASS_OUT, "2030-01-05T00:00:00Z"))
     [c] = audit.summarize(harvest(tmp_path / "b"), None)["series"]
     assert c["merged_without_pass"]  # a pass posted after an unguarded merge does not hide it
+    cs.append(review_comment(52, H2, "success", PASS_OUT, "2030-01-03T00:00:00Z"))  # the merge's own second
+    [c] = audit.summarize(harvest(tmp_path / "c"), None)["series"]
+    assert not c["merged_without_pass"]
 
 
-def test_record_refuses_a_block_the_verifier_dropped(github: dict, tmp_path: Path) -> None:
+@pytest.mark.parametrize("section", ["Dropped", "Unverified", "Not checked"])
+def test_harvest_and_record_leave_out_a_block_the_verifier_did_not_rank(github: dict, tmp_path: Path,
+                                                                        section: str) -> None:
     out = (f"VERDICT: PASS {H2}\nReviewed: {H2}\nBlocking: none\n## Must-fix\nnone\n"
-           "## Dropped\n### CLM-9\n- lens: claims\n- claim: not a defect\n")
+           f"## {section}\n### CLM-9\n- lens: claims\n- claim: not a defect\n")
     github["data"][f"repos/{REPO}/issues/7/comments"].append(review_comment(6, H2, "success", out,
                                                                             "2030-01-02T05:00:00Z"))
+    assert [f for f in rows(harvest(tmp_path / "h"), "findings") if f["round"] == 6] == []
     ns = audit.argparse.Namespace(repo=REPO, pr=7, session="s1", backfill=False, dry_run=True,
                                   file=judge_file(tmp_path, [judgment(round=6, ids=["CLM-9"], correct="no")]))
     with pytest.raises(SystemExit, match="no finding of review record 6"):
