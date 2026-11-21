@@ -87,7 +87,7 @@ def main() -> int:
         try:
             items = blocking.read(open(a.prior, encoding="utf-8", errors="replace", newline="").read())
         except (OSError, ValueError) as e:
-            sys.exit(f"plan.py: --prior is not a verifier output this script can read: {e}")
+            items = []
         prefixes = {x.strip().rsplit("-", 1)[0] for b in items for x in b["ids"].split(",") if x.strip()}
         fix_top, fix_named = tier(common + ["--since", a.since])
         if prefixes - set(PREFIX):
