@@ -29,12 +29,13 @@ ID = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
       "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
 
 
-def record(kind: str, sha: str = HEAD, state: str = "success", tier: str = "standard") -> str:
+def record(kind: str, sha: str = HEAD, state: str = "success", tier: str = "standard",
+           depth: str | None = None) -> str:
     if kind == "gates":
         title, extra = f"🤖 Gates: {state}", []
     else:
         title = f"🤖 Review: {'pass' if state == 'success' else 'fail'} ({tier} tier)"
-        extra = ["--tier", tier, "--reviewed", sha]
+        extra = ["--tier", tier, "--reviewed", sha] + (["--depth", depth] if depth else [])
     return subprocess.run([sys.executable, str(RECORD), "build", "--kind", kind, "--sha", sha, "--state", state,
                            "--title", title, *extra, "--line", "- Head commit: x"],
                           capture_output=True, text=True, check=True).stdout
@@ -666,3 +667,165 @@ def test_a_garbage_round_line_changes_nothing_on_a_good_line_two(fx: Fx, clone: 
     fx.comments(comment(spoil(record("gates"))), comment(spoil(record("review", state="failure"))))
     reason = mcp(fx, clone, expectedHeadSha=HEAD)
     assert reason and "says failure" in reason  # line two still decides
+
+
+# The depth floor (skills/review/scripts/plan.py): the guard recomputes it for the head in a local clone and requires
+# no more. A change whose floor is `none` merges on its gates record alone; a record without `depth` is judged as
+# before depth existed.
+
+
+def git_in(r: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=r, capture_output=True, text=True, check=True,
+                          env={**os.environ, **ID}).stdout.strip()
+
+
+def change(tmp_path: Path, fx: Fx, *commits: dict[str, str], base: dict[str, str] | None = None,
+           pin: bool = True) -> tuple[Path, str, str]:
+    """A local clone whose origin/main holds `base` and whose head adds `commits` one by one; GitHub names that head,
+    and (with `pin`) origin/main's commit as the default branch's tip. Returns the clone, the head and the tip."""
+    r = tmp_path / "change"
+    r.mkdir()
+    git_in(r, "init", "-q", "-b", "main")
+    git_in(r, "remote", "add", "origin", f"https://github.com/{REPO}.git")
+    for name, text in {"README.md": "x\n", "src/app.py": "x = 1\n", **(base or {})}.items():
+        (r / name).parent.mkdir(parents=True, exist_ok=True)
+        (r / name).write_text(text)
+    git_in(r, "add", ".")
+    git_in(r, "commit", "-qm", "seed")
+    tip = git_in(r, "rev-parse", "HEAD")
+    git_in(r, "update-ref", "refs/remotes/origin/main", tip)
+    git_in(r, "switch", "-q", "-c", "feature")
+    for files in commits:
+        for name, text in files.items():
+            (r / name).parent.mkdir(parents=True, exist_ok=True)
+            (r / name).write_text(text)
+        git_in(r, "add", ".")
+        git_in(r, "commit", "-qm", "change")
+    head = git_in(r, "rev-parse", "HEAD")
+    (fx.d / "pr.json").write_text(json.dumps(pr_answer(head)))
+    if pin:
+        (fx.d / "branches.json").write_text(json.dumps({"main": tip}))
+    return r, head, tip
+
+
+def test_a_floor_none_change_merges_on_gates_alone(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"docs/guide.md": "x\n"})
+    fx.comments(comment(record("gates", sha=head)))
+    assert mcp(fx, r, expectedHeadSha=head) is None
+    done = check(fx, r, "--check", f"{REPO}#12")
+    assert done.returncode == 0 and done.stdout.strip() == head, done.stderr
+
+
+def test_a_lab_policy_lets_a_standard_change_merge_on_gates_alone(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"src/app.py": "x = 2\n"}, base={"REVIEW.md": "# Review\n\nDepth: none\n"})
+    fx.comments(comment(record("gates", sha=head)))
+    assert mcp(fx, r, expectedHeadSha=head) is None
+
+
+def test_a_routine_record_on_a_floor_none_standard_change_does_not_block_it(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"src/app.py": "x = 2\n"}, base={"REVIEW.md": "Depth: none\n"})
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, tier="routine",
+                                                                   depth="none")))
+    assert mcp(fx, r, expectedHeadSha=head) is None
+
+
+def test_a_floor_none_change_is_still_refused_by_a_failed_review_on_its_head(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"docs/guide.md": "x\n"})
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, state="failure",
+                                                                   tier="standard", depth="light")))
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "says failure" in reason, reason
+
+
+def test_a_floor_none_change_still_needs_its_gates(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"docs/guide.md": "x\n"})
+    fx.comments()
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "no gates record" in reason
+
+
+def test_without_a_clone_holding_the_head_a_review_is_still_required(fx: Fx, tmp_path: Path, clone: Path) -> None:
+    _, head, _ = change(tmp_path, fx, {"docs/guide.md": "x\n"})
+    fx.comments(comment(record("gates", sha=head)))
+    reason = mcp(fx, clone, expectedHeadSha=head)
+    assert reason and "no review record" in reason
+
+
+def test_without_githubs_tip_of_the_default_branch_a_review_is_still_required(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"docs/guide.md": "x\n"}, pin=False)
+    fx.comments(comment(record("gates", sha=head)))
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "no review record" in reason
+
+
+def test_a_locally_moved_default_branch_does_not_drop_the_review(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"}, {"docs/guide.md": "x\n"})
+    git_in(r, "update-ref", "refs/remotes/origin/main", "HEAD~1")  # the hook commit, so the diff is docs only
+    fx.comments(comment(record("gates", sha=head)))
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "no review record" in reason, reason
+
+
+@pytest.mark.parametrize("depth", ["none", "light"])
+def test_a_record_below_the_floor_refuses(fx: Fx, tmp_path: Path, depth: str) -> None:
+    r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"})
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, tier="sensitive",
+                                                                   depth=depth)))
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and f"depth {depth}" in reason and "focused" in reason, reason
+
+
+@pytest.mark.parametrize("depth", ["focused", "full"])
+def test_a_record_at_or_above_the_floor_merges(fx: Fx, tmp_path: Path, depth: str) -> None:
+    r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"})
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, tier="sensitive",
+                                                                   depth=depth)))
+    assert mcp(fx, r, expectedHeadSha=head) is None
+
+
+def test_a_record_s_depth_is_checked_against_a_lab_policy_too(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"src/app.py": "x = 2\n"},
+                        base={"REVIEW.md": "## Paths\n- `src/**`; depth: full\n"})
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, depth="light")))
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "full" in reason, reason
+
+
+@pytest.mark.parametrize("body", [
+    record("review").replace(" -->", " depth=deep -->", 1),
+    record("review").replace(" -->", " depth= -->", 1),
+    record("review").replace(" -->", " depth=light depth=full -->", 1),
+])
+def test_a_malformed_depth_refuses(fx: Fx, clone: Path, body: str) -> None:
+    fx.comments(comment(record("gates")), comment(body))
+    reason = mcp(fx, clone, expectedHeadSha=HEAD)
+    assert reason and "malformed" in reason, reason
+
+
+def test_a_well_formed_depth_is_accepted_without_a_clone(fx: Fx, clone: Path) -> None:
+    fx.comments(comment(record("gates")), comment(record("review").replace(" -->", " depth=light -->", 1)))
+    assert mcp(fx, clone, expectedHeadSha=HEAD) is None
+
+
+# Records already on open PRs (two lines with no depth, or with the round line): exactly today's result.
+
+
+@pytest.mark.parametrize("shape", ["two-line", "round-line"])
+@pytest.mark.parametrize("files, tier, allowed", [
+    ({"src/app.py": "x = 2\n"}, "standard", True),
+    ({"src/app.py": "x = 2\n"}, "routine", False),
+    ({"docs/guide.md": "x\n"}, "routine", True),
+    ({"hooks/x.sh": "x\n"}, "standard", False),
+    ({"hooks/x.sh": "x\n"}, "sensitive", True),
+])
+def test_records_without_depth_keep_todays_result(fx: Fx, tmp_path: Path, shape: str, files: dict[str, str],
+                                                  tier: str, allowed: bool) -> None:
+    r, head, _ = change(tmp_path, fx, files)
+    gates, review = record("gates", sha=head), record("review", sha=head, tier=tier)
+    if shape == "two-line":
+        gates, review = without_round(gates), without_round(review)
+    fx.comments(comment(gates), comment(review))
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert (reason is None) is allowed, reason
+    done = check(fx, r, "--check", f"{REPO}#12")
+    assert (done.returncode == 0) is allowed, done.stderr

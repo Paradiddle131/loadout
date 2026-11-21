@@ -2,7 +2,7 @@
 name: review
 description: "Use before any change lands on a default branch, in any repo, attended or unattended: tier the change, stamp its gates, run fresh reviewers, verify their findings, fix, record the verdict, merge."
 metadata:
-  version: 1.1.0
+  version: 2.0.0
 ---
 
 # Review

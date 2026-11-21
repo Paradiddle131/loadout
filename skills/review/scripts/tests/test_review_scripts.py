@@ -37,7 +37,7 @@ def env(tmp_path: Path) -> dict[str, str]:
     fx.mkdir()
     e = {**os.environ, **ID, "PATH": f"{bin_dir}:{os.environ['PATH']}", "STUB_DIR": str(fx),
          "REVIEW_REPO": "example-owner/example-repo", "HOME": str(tmp_path / "home")}
-    for k in ("DRY_RUN", "STUB_FAIL", "STUB_MANGLE"):
+    for k in ("DRY_RUN", "STUB_FAIL", "STUB_MANGLE", "STUB_REMOTE"):
         e.pop(k, None)
     return e
 
@@ -49,6 +49,7 @@ class World:
         self.env, self.fx = env, Path(env["STUB_DIR"])
         self.remote = tmp_path / "remote.git"
         self.git(tmp_path, "init", "-q", "--bare", "-b", "main", str(self.remote))
+        env["STUB_REMOTE"] = str(self.remote)  # what the stub's branches endpoint answers from
         seed = tmp_path / "seed"
         seed.mkdir()
         self.git(seed, "init", "-q", "-b", "main")
@@ -83,7 +84,8 @@ class World:
     def push(self) -> None:
         self.git(self.repo, "push", "-q", "-f", "origin", "feature")
         head = self.git(self.repo, "rev-parse", "HEAD")
-        (self.fx / "pr.json").write_text(json.dumps({"number": 12, "head": {"sha": head}}))
+        (self.fx / "pr.json").write_text(json.dumps({"number": 12, "head": {"sha": head},
+                                                     "base": {"ref": "main", "repo": {"default_branch": "main"}}}))
 
     def main_moves(self, files: dict[str, str]) -> None:
         for name, text in files.items():

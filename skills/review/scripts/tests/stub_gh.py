@@ -6,6 +6,8 @@ State lives in $STUB_DIR:
 - comments.json: the PR's comments; a post appends one (author_association OWNER), and
   `issues/<n>/comments?per_page=P&page=N` and `issues/comments/<id>` read them.
 - calls.jsonl: every call as {"method", "endpoint", "fields"}.
+- branches.json ({name: sha}), else the bare repo $STUB_REMOTE: what `repos/<o>/<r>/branches/<name>` answers, as
+  `{"name", "commit": {"sha"}}`; with neither, that call fails as an HTTP 404 does.
 STUB_FAIL=<text>: a call whose endpoint contains it fails the way gh does on an HTTP error.
 STUB_MANGLE=1: a comment read back by id differs from the one posted.
 STUB_SLEEP=<seconds>: every call waits that long first (a slow GitHub).
@@ -86,6 +88,16 @@ elif method == "GET" and "/pulls?" in ep:
     out = load("pulls.json", [])
 elif method == "GET" and re.search(r"/pulls/\d+$", ep):
     out = load("pr.json", {})
+elif method == "GET" and (m := re.search(r"/branches/([^/?]+)$", ep)):
+    name, sha = m.group(1), load("branches.json", {}).get(m.group(1))
+    if not sha and os.environ.get("STUB_REMOTE"):
+        done = subprocess.run(["git", "--git-dir", os.environ["STUB_REMOTE"], "rev-parse", "-q", "--verify",
+                               f"refs/heads/{name}^{{commit}}"], capture_output=True, text=True)
+        sha = done.stdout.strip() if done.returncode == 0 else None
+    if not sha:
+        sys.stderr.write("gh: Branch not found (HTTP 404)\n")
+        sys.exit(1)
+    out = {"name": name, "commit": {"sha": sha}}
 else:
     sys.exit(f"stub gh: no route for {method} {ep}")
 text = json.dumps(out)
