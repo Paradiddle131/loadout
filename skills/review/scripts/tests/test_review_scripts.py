@@ -929,7 +929,8 @@ def prior(tmp: Path, sha: str, ids: list[str]) -> str:
     items = [{"ids": i, "harm": HARM} for i in ids]
     blocks = "".join(f"### {i}\n- rank: must-fix\n- harm: {HARM}\n" for i in ids)
     p = tmp / "prior.txt"
-    p.write_text(f"VERDICT: FAIL {sha}\nReviewed: {sha}\nBlocking: {json.dumps(items)}\n\n## Must-fix\n{blocks}")
+    line = json.dumps(items) if items else "none"
+    p.write_text(f"VERDICT: {'FAIL' if items else 'PASS'} {sha}\nReviewed: {sha}\nBlocking: {line}\n\n## Must-fix\n{blocks}")
     return str(p)
 
 
@@ -962,13 +963,19 @@ def test_plan_add_only_adds_and_names_a_lens(w: World) -> None:
     assert code != 0 and "names no lens" in err
 
 
-def test_plan_full_and_light_run_one_phase(w: World) -> None:
+def test_plan_full_runs_one_phase_and_light_is_refused_on_a_sensitive_first_review(w: World) -> None:
     base_has(w, {"REVIEW.md": SENSITIVE_MD})
     w.commit({"guard/check.py": "ok = True\n"})
     out = plan(w, "--mode", "full")[1]
     assert out["first"] == [] and out["then"][0] == "correctness-reviewer" and len(out["then"]) == 4
     code, _, err = plan(w, "--mode", "light")
-    assert code != 0 and "light mode cannot run a sensitive change's first review" in err
+    assert code == 2 and "light mode cannot run a sensitive change's first review" in err
+
+
+def test_plan_light_runs_one_phase_on_a_standard_change(w: World) -> None:
+    w.commit({"src/app.py": "x = 2\n"})
+    out = plan(w, "--mode", "light", "--add", "claims-auditor")[1]
+    assert out["first"] == [] and out["then"] == ["correctness-reviewer", "claims-auditor"]
 
 
 def test_plan_fix_round_reruns_only_the_lenses_it_answers(w: World, tmp_path: Path) -> None:
@@ -977,9 +984,10 @@ def test_plan_fix_round_reruns_only_the_lenses_it_answers(w: World, tmp_path: Pa
     w.commit({"guard/check.py": "ok = False\n"})
     code, out, err = plan(w, "--since", reviewed, "--prior", prior(tmp_path, reviewed, ["CTL-1"]))
     assert code == 0, err
-    # control-prober answers its finding and REVIEW.md names it for the fixed path; correctness reads the code;
-    # claims, guardrail and leak-hunter, whose paths and findings the fix leaves alone, do not rerun.
-    assert out["first"] == ["correctness-reviewer"] and out["then"] == ["control-prober"]
+    # the fixed path is sensitive, so the sensitive set reads it, with control-prober that answers its finding;
+    # leak-hunter, whose path and findings the fix leaves alone, does not rerun.
+    assert out["first"] == ["correctness-reviewer"]
+    assert out["then"] == ["claims-auditor", "guardrail-reviewer", "control-prober"]
 
 
 def test_plan_fix_round_to_documentation_runs_claims(w: World, tmp_path: Path) -> None:
@@ -1046,10 +1054,15 @@ def test_verdict_records_how_the_round_ran_and_the_merge_guard_still_reads_it(w:
     ("--model", "--model is the reviewers' model"),
     ("--effort", "--effort is the reviewers' effort"),
 ])
-def test_verdict_above_routine_needs_how_the_round_ran(w: World, tmp_path: Path, drop: str, message: str) -> None:
+@pytest.mark.parametrize("missing", [True, False])
+def test_verdict_above_routine_refuses_a_missing_or_bad_mode_model_or_effort(w: World, tmp_path: Path, drop: str,
+                                                                            message: str, missing: bool) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
     args = dict(zip(ROUND[::2], ROUND[1::2]))
-    args[drop] = "Bad Value"
+    if missing:
+        del args[drop]
+    else:
+        args[drop] = "Bad Value"
     flat = [part for kv in args.items() for part in kv]
     done = w.run("verdict.sh", "12", *flat, "--tier", "standard", "--reviewers", "x", "--reviewed", head,
                  "--file", review_file(tmp_path, head))
@@ -1057,8 +1070,81 @@ def test_verdict_above_routine_needs_how_the_round_ran(w: World, tmp_path: Path,
     assert w.writes() == []
 
 
-def test_record_refuses_a_round_pair_out_of_shape() -> None:
+
+
+# Each fix-round rule reaches its lens on its own, so deleting the rule turns its test red.
+
+
+def test_plan_fix_round_runs_the_lens_a_must_fix_came_from(w: World, tmp_path: Path) -> None:
+    reviewed = w.commit({"src/app.py": "x = 2\n"})
+    w.commit({"src/app.py": "x = 3\n"})
+    out = plan(w, "--since", reviewed, "--prior", prior(tmp_path, reviewed, ["GRD-1"]))[1]
+    assert out["first"] == ["correctness-reviewer"] and out["then"] == ["guardrail-reviewer"]
+
+
+def test_plan_fix_round_runs_the_review_md_lenses_of_the_paths_it_changed(w: World, tmp_path: Path) -> None:
+    base_has(w, {"REVIEW.md": SENSITIVE_MD})
+    reviewed = w.commit({"src/app.py": "x = 2\n"})
+    w.commit({"data/load.py": "rows = []\n"})
+    out = plan(w, "--since", reviewed, "--prior", prior(tmp_path, reviewed, ["COR-1"]))[1]
+    assert "leak-hunter" in out["then"]
+
+
+def test_plan_fix_round_keeps_every_add(w: World, tmp_path: Path) -> None:
+    reviewed = w.commit({"src/app.py": "x = 2\n"})
+    w.commit({"src/app.py": "x = 3\n"})
+    out = plan(w, "--add", "leak-hunter", "--since", reviewed, "--prior", prior(tmp_path, reviewed, ["COR-1"]))[1]
+    assert out["then"] == ["leak-hunter"]
+
+
+def test_plan_documentation_fix_to_a_code_finding_runs_claims(w: World, tmp_path: Path) -> None:
+    reviewed = w.commit({"src/app.py": "x = 2\n", "docs/app.md": "x is two\n"})
+    w.commit({"docs/app.md": "x is 2\n"})
+    out = plan(w, "--since", reviewed, "--prior", prior(tmp_path, reviewed, ["COR-1"]))[1]
+    assert out["first"] == ["correctness-reviewer"] and out["then"] == ["claims-auditor"]
+
+
+def test_plan_fix_round_that_turns_the_change_sensitive_runs_the_sensitive_set(w: World, tmp_path: Path) -> None:
+    reviewed = w.commit({"src/app.py": "x = 2\n"})
+    w.commit({"hooks/guard.sh": "exit 0\n", "RULES.md": "- a new rule\n"})
+    out = plan(w, "--since", reviewed, "--prior", prior(tmp_path, reviewed, ["COR-1"]))[1]
+    assert out["first"] == ["correctness-reviewer"] and out["then"] == ["claims-auditor", "guardrail-reviewer"]
+
+
+def test_plan_fix_round_refuses_a_prior_of_another_round_or_the_merge_base(w: World, tmp_path: Path) -> None:
+    reviewed = w.commit({"src/app.py": "x = 2\n"})
+    w.commit({"src/app.py": "x = 3\n"})
+    code, _, err = plan(w, "--since", reviewed, "--prior", prior(tmp_path, "1" * 40, ["COR-1"]))
+    assert code == 2 and "not --since" in err
+    base = w.git(w.repo, "merge-base", "origin/main", "HEAD")
+    code, _, err = plan(w, "--mode", "light", "--since", base, "--prior", prior(tmp_path, base, []))
+    assert code == 2 and "merge-base" in err
+
+
+@pytest.mark.parametrize(("reviewers", "recorded"), [
+    ("correctness-reviewer finding-verifier", "correctness-reviewer,finding-verifier"),
+    ("correctness-reviewer, finding-verifier", "correctness-reviewer,finding-verifier"),
+])
+def test_verdict_records_reviewers_split_by_commas_or_blanks(w: World, tmp_path: Path, reviewers: str,
+                                                             recorded: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.run("verdict.sh", "12", *ROUND, "--tier", "standard", "--reviewers", reviewers, "--reviewed", head,
+                 "--file", review_file(tmp_path, head))
+    assert done.returncode == 0, done.stderr
+    assert w.comments()[0]["body"].split("\n")[2].endswith(f"lenses={recorded} -->")
+
+
+@pytest.mark.parametrize("reviewers", ["--x", ",", "Correctness"])
+def test_verdict_refuses_reviewers_out_of_shape(w: World, tmp_path: Path, reviewers: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.run("verdict.sh", "12", *ROUND, "--tier", "standard", "--reviewers", reviewers, "--reviewed", head,
+                 "--file", review_file(tmp_path, head))
+    assert done.returncode == 2 and "--reviewers is agent names" in done.stderr, done.stderr
+    assert w.writes() == []
+
+
+@pytest.mark.parametrize("pair", ["mode=foc used -->", "Mode=focused", "mo de=focused"])
+def test_record_refuses_a_round_key_or_value_out_of_shape(pair: str) -> None:
     done = subprocess.run([sys.executable, str(SCRIPTS / "record.py"), "build", "--kind", "review", "--sha", "a" * 40,
-                           "--state", "success", "--title", "t", "--round", "mode=foc used -->"],
-                          capture_output=True, text=True)
+                           "--state", "success", "--title", "t", "--round", pair], capture_output=True, text=True)
     assert done.returncode != 0 and "--round pair" in done.stderr

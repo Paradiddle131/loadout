@@ -69,7 +69,8 @@ Done when every lens has returned its raw findings; remove the worktrees.
 - Then steps 2 to 4 on the new commits only (`<reviewed>..<new head>`), each brief carrying the settled list, built from the earlier `🤖 Review` records: each finding's ids, its rank as that record posted it (on a record with a `Blocking:` line, a must-fix is one that line lists; on an older one, one its `## Must-fix` section holds), and the record's link (templates.md).
   The lenses are what `plan.py --since <reviewed> --prior <its verifier output>` prints:
   - each lens a must-fix on the round's `Blocking:` line came from, and the lenses `REVIEW.md` names for the paths the fix changed;
-  - `correctness-reviewer` when the fix changes any line of a code, test or configuration file (comments, docstrings and tool directives included) or of a rule an agent follows (an instruction file, a skill, an agent definition); `claims-auditor` when it changes only documentation;
+  - `correctness-reviewer` when the fix changes a path `tier.sh` does not rank routine; `claims-auditor` when every path it changes is routine; the sensitive set when it changes a sensitive path;
+  - every lens the first review took by `--add`: pass the same `--add` on every round of the change;
   - the whole first-review set in `full` mode, or when a blocking id's prefix names no lens;
   - the verifier on every round.
 - A cycle is a fix round, a red stamp, or an integrate round (step 6); after the third with a `must-fix` or red stamp still open:

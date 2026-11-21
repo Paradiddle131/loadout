@@ -5,7 +5,7 @@
 # Usage: verdict.sh <pr> --tier routine|standard|sensitive [--result pass|fail] \
 #          --reviewers "<names>" --reviewed <sha> --file <verifier output> \
 #          --mode light|focused|full --model <model> --effort low|medium|high|xhigh|max [--dry-run]
-#   --reviewers is the comma-separated agent names that ran, verifier included (plan.py prints the lenses);
+#   --reviewers is the agent names that ran, verifier included, split by commas or blanks (plan.py prints the lenses);
 #   --mode, --model and --effort say how the round ran (one model and effort for every reviewer of the round),
 #   required above routine; they go on the record's round line beside the lenses, for people and for audits.
 #   Run it from a clone of the PR's repo (git 2.38 or later): it reads the tier from the PR head's paths.
@@ -64,8 +64,8 @@ if [ "$tier" != routine ]; then
   case "$mode" in light | focused | full) ;; *) die "--mode is light, focused or full (plan.py printed it). $usage" ;; esac
   case "$effort" in low | medium | high | xhigh | max) ;; *) die "--effort is the reviewers' effort: low, medium, high, xhigh or max. $usage" ;; esac
   [[ "$model" =~ ^[a-z0-9][a-z0-9.-]*$ ]] || die "--model is the reviewers' model, as the agent call named it (opus, sonnet, a model id). $usage"
-  lenses=$(tr -d ' ' <<<"$reviewers")
-  [[ "$lenses" =~ ^[a-z0-9-]+(,[a-z0-9-]+)*$ ]] || die "--reviewers is comma-separated agent names (got '$reviewers')."
+  lenses=$(tr -s ', \t' ',,,' <<<"$reviewers" | sed -E 's/^,//; s/,$//')
+  [[ "$lenses" =~ ^[a-z][a-z0-9-]*(,[a-z][a-z0-9-]*)*$ ]] || die "--reviewers is agent names, split by commas or blanks, each starting with a letter (got '$reviewers')."
   [ -n "$file" ] && [ -s "$file" ] || die "--file is the reviewers' raw output, and it must not be empty (a $tier change needs a reviewer)."
   [[ "$reviewed" =~ ^[0-9a-f]{40}$ ]] || die "--reviewed is the full sha of the commit the reviewers read (a $tier change needs it)."
   # The verifier's own lines decide the result and the commit (agents/finding-verifier.md § Output).
