@@ -286,8 +286,11 @@ def test_record_refuses_a_round_that_is_no_review_record_on_that_pr(github: dict
 def test_record_posts_and_refuses_a_comment_that_does_not_hold_the_judgments(
         github: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
     posted: dict = {}
+    real_run = subprocess.run
 
-    def fake_run(cmd: list, **_: object) -> subprocess.CompletedProcess:
+    def fake_run(cmd: list, **kw: object) -> subprocess.CompletedProcess:
+        if cmd[0] != "gh":  # git, for the record's kit
+            return real_run(cmd, **kw)  # type: ignore[call-overload]
         posted["body"] = Path(cmd[-1].split("@", 1)[1]).read_text()
         return subprocess.CompletedProcess(cmd, 0, json.dumps({"id": 77, "html_url": "u77"}), "")
 
@@ -662,3 +665,89 @@ def test_findings_a_rank_line_wins_over_its_section() -> None:
 
 def test_findings_the_first_verdict_line_wins() -> None:
     assert verifier_output.parse(f"VERDICT: FAIL {H1}\nVERDICT: PASS {H1}\n")["verdict"] == f"FAIL {H1}"
+
+
+# The round line: version, kit and each round's cost
+
+
+ROUND = "<!-- loadout" ":round "
+
+
+def stamped_review(cid: int, sha: str, state: str, output: str, when: str, pairs: list[str]) -> dict:
+    c = review_comment(cid, sha, state, output, when)
+    lines = c["body"].split("\n")
+    lines[2] = ROUND + " ".join(pairs) + " -->"
+    return {**c, "body": "\n".join(lines)}
+
+
+LENSES = ["lens=correctness-reviewer:opus:high:400000:300:2", "lens=finding-verifier:opus:high:100000:60:1"]
+
+
+def test_record_stamps_the_audit_with_the_version_and_kit(github: dict, tmp_path: Path,
+                                                          capsys: pytest.CaptureFixture) -> None:
+    ns = audit.argparse.Namespace(repo=REPO, pr=7, session="s1", file=judge_file(tmp_path, [judgment()]),
+                                  backfill=False, dry_run=True)
+    assert audit.record(ns) == 0
+    line = capsys.readouterr().out.split("\n")[2]
+    assert re.fullmatch(re.escape(ROUND) + r"v=\d+\.\d+\.\d+ kit=(?:[0-9a-f]{40}(?:-dirty)?|none) -->", line), line
+
+
+def test_harvest_reads_the_round_line_into_each_row(github: dict, tmp_path: Path) -> None:
+    cs = github["data"][f"repos/{REPO}/issues/7/comments"]
+    cs[1] = stamped_review(2, H1, "failure", FAIL_OUT, "2030-01-01T02:00:00Z",
+                           ["v=1.1.0", "kit=" + "c" * 40, "cycle=1", "lenses=correctness-reviewer,finding-verifier",
+                            "dupes=2", "mustfix=1", "nits=1", "dismissals=3", "promoted=1", *LENSES])
+    cs[0]["body"] = cs[0]["body"].rstrip("\n") + "\n" + ROUND + "v=1.1.0 kit=none seconds=42 -->\n"
+    d = harvest(tmp_path)
+    [g] = rows(d, "gates")
+    assert (g["v"], g["kit"], g["seconds"]) == ("1.1.0", "none", 42)
+    first, second = rows(d, "rounds")
+    assert (first["v"], first["kit"], first["cycle"], first["dupes"], first["dismissals"], first["promoted"]) == (
+        "1.1.0", "c" * 40, 1, 2, 3, 1)
+    assert (first["tokens"], first["seconds"], first["lead_nits"]) == (500000, 360, 1)
+    assert first["lenses"][0] == {"name": "correctness-reviewer", "model": "opus", "effort": "high",
+                                  "tokens": 400000, "seconds": 300, "findings": 2}
+    assert second["v"] == audit.review_record.version() and second["tokens"] == 0 and second["cycle"] is None
+
+
+@pytest.mark.parametrize("third", ["", "<!-- loadout" ":round v=1.1.0 -- garbage", "plain text"])
+def test_harvest_reads_a_record_without_a_round_line_as_unstamped(github: dict, tmp_path: Path, third: str) -> None:
+    cs = github["data"][f"repos/{REPO}/issues/7/comments"]
+    lines = cs[1]["body"].split("\n")
+    cs[1]["body"] = "\n".join(lines[:2] + [third] + lines[3:])
+    d = harvest(tmp_path)
+    assert rows(d, "rounds")[0]["v"] == "unstamped" and rows(d, "gates")[0]["v"] == "unstamped"
+    assert rows(d, "rounds")[0]["must_fix"] == 1  # the line two record still counts
+
+
+def test_summary_groups_rounds_by_version_and_totals_their_cost(github: dict, tmp_path: Path,
+                                                                capsys: pytest.CaptureFixture) -> None:
+    cs = github["data"][f"repos/{REPO}/issues/7/comments"]
+    lines = cs[1]["body"].split("\n")
+    cs[1]["body"] = "\n".join(lines[:2] + [""] + lines[3:])  # an unstamped first round
+    cs[2] = stamped_review(3, H2, "success", PASS_OUT, "2030-02-02T02:00:00Z",
+                           ["v=1.1.0", "kit=none", "cycle=2", "lenses=correctness-reviewer,finding-verifier",
+                            "dupes=4", "mustfix=0", "nits=0", *LENSES])
+    d = harvest(tmp_path)
+    before = {k: v for k, v in audit.summarize(d, None).items() if k not in ("by_version", "cost", "usd_per_mtok")}
+    s = audit.summarize(d, None)
+    assert s["by_version"]["unstamped"] == {"rounds": 1, "passes": 0, "must_fix": 1, "nits": 1, "dupes": 0,
+                                            "tokens": 0, "seconds": 0, "cycles_to_pass": None, "est_usd": 0.0}
+    assert s["by_version"]["1.1.0"] == {"rounds": 1, "passes": 1, "must_fix": 0, "nits": 0, "dupes": 4,
+                                        "tokens": 500000, "seconds": 360, "cycles_to_pass": 2,
+                                        "est_usd": round(500000 * audit.BLENDED_USD_PER_MTOK / 1e6, 2)}
+    assert s["cost"]["pr"] == {f"{REPO}#7": {"rounds": 2, "tokens": 500000, "seconds": 360, "est_usd": 2.8}}
+    assert s["cost"]["repo"][REPO]["tokens"] == 500000
+    assert s["cost"]["month"] == {"2030-01": {"rounds": 1, "tokens": 0, "seconds": 0, "est_usd": 0.0},
+                                  "2030-02": {"rounds": 1, "tokens": 500000, "seconds": 360, "est_usd": 2.8}}
+    assert set(s["cost"]["day"]) == {"2030-01-01", "2030-02-02"}
+    assert (s["rounds"], s["passes"], s["must_fix"]) == (2, 1, 1) and before == {
+        k: v for k, v in s.items() if k not in ("by_version", "cost", "usd_per_mtok")}
+    audit.summary(audit.argparse.Namespace(dir=str(d), session=None, json=False))
+    out = capsys.readouterr().out
+    assert "| Review path version |" in out and "| 1.1.0 | 1 | 1 | 2.0 | 0 | 0 | 4 | 500000 | 2.80 | 360 |" in out
+    assert f"| PR | {REPO}#7 | 2 | 500000 | 2.80 | 360 |" in out and "Est. USD at list price" in out
+
+
+def test_the_cost_rate_is_the_stated_blend_of_the_opus_list_price() -> None:
+    assert audit.BLENDED_USD_PER_MTOK == pytest.approx(0.9 * 4 + 0.1 * 20)

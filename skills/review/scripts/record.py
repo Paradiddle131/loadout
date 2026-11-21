@@ -121,7 +121,8 @@ def round_line(pairs: list[str]) -> str:
         raise ValueError("v and kit are the scripts' own: record.py adds them")
     if dup := sorted({k for k in keys if keys.count(k) > 1} - REPEATABLE):
         raise ValueError(f"a --round key appears twice: {', '.join(dup)}")
-    return "<!-- loadout" + f":round v={version()} kit={kit()} " + " ".join(f"{k}={v}" for k, v in split) + " -->"
+    return " ".join(["<!-- loadout" + ":round", f"v={version()}", f"kit={kit()}", *(f"{k}={v}" for k, v in split),
+                     "-->"])
 
 
 def names(text: str) -> list[str]:
