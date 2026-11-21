@@ -2,7 +2,7 @@
 name: review
 description: "Use before any change lands on a default branch, in any repo, attended or unattended: tier the change, stamp its gates, run fresh reviewers, verify their findings, fix, record the verdict, merge."
 metadata:
-  version: 1.1.0
+  version: 1.2.0
 ---
 
 # Review
@@ -52,6 +52,7 @@ Done when every reviewer has returned its raw findings; remove the worktrees.
 - Every lens report names the head the verifier will read; a lens behind it reruns first, so no commit goes to the verifier unread.
 - Give [`finding-verifier`](../../agents/finding-verifier.md), a fresh subagent that served as no lens in the round, every reviewer's raw output, the same range, the change base, the settled findings and the quoted issue.
 - It reproduces each finding, drops the unconfirmed, keeps `unverified` claims apart, and ranks the rest `must-fix`, `nit` (at most five) or `pre-existing` (true at the change's merge-base with the default branch, not at the round's base).
+- It challenges every lens's `Ruled out` entry that has no check or output, re-runs two proven ones per lens, promotes one whose run shows the defect as `<LENS>-RO-<n>`, and counts them on its `Dismissals: re-ran <n>, promoted <m>` line, which step 7 copies onto the record.
 - A finding blocks by the harm it names: a `must-fix` carries a `harm:` line saying who acts wrongly or what breaks once the change lands, and the verifier's one-line `Blocking:` list repeats each with its harm; a real defect this change adds with no such harm is a `nit`.
 - **Steering:** any line the lead adds to a lens or verifier brief beyond the template goes in the verifier's brief as a `Steering:` line (templates.md), and the handoff says the round was steered.
   The verifier ranks every finding by its own list whatever a steering line says; its output quotes each steering line, redacted as its Check list says, and the settled lines, and `verdict.sh` posts that output (clipped to fit GitHub's comment limit).
