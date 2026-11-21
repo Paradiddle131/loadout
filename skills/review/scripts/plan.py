@@ -16,7 +16,8 @@ A fix round (--since and --prior) runs only what the fix needs:
   claims-auditor when every path the fix changes is routine;
   the sensitive set (correctness-reviewer, claims-auditor, guardrail-reviewer) when the fix changes a sensitive path;
   the lenses REVIEW.md names for the paths the fix changed, and every --add (pass the first review's again).
-  --prior's `Reviewed:` line must name --since, and --since must not be the change's merge-base with --base.
+  --prior's first `Reviewed:` line must name --since, and --since must come after the change's merge-base.
+--base, when given, must be the remote's default branch (origin/HEAD, else origin/main or origin/master).
   A `Blocking:` id whose prefix names no lens runs the first review's whole set instead.
 Modes (default focused):
   focused  correctness-reviewer first, alone; the other lenses then start in parallel with its findings in their
@@ -51,6 +52,7 @@ PREFIX = {"COR": "correctness-reviewer", "CLM": "claims-auditor", "GRD": "guardr
 BASE = {"routine": [], "standard": ["correctness-reviewer"],
         "sensitive": ["correctness-reviewer", "claims-auditor", "guardrail-reviewer"]}
 VERIFIER = "finding-verifier"
+REVIEWED_LINE = re.compile(r"^[ \t\v\f\r]*Reviewed:")
 REVIEWED = re.compile(r"^[ \t]*Reviewed:[ \t]*`?([0-9a-f]{7,40})`?[ \t]*$")
 
 
@@ -97,7 +99,10 @@ def main() -> int:
     a = p.parse_args()
     if bool(a.since) != bool(a.prior):
         die("a fix round takes both --since <reviewed sha> and --prior <that round's verifier output>")
-    common = (["--base", a.base] if a.base else []) + ["--head", a.head]
+    base = a.base or default_base()
+    if git("rev-parse", "--verify", base + "^{commit}") != git("rev-parse", "--verify", default_base() + "^{commit}"):
+        die(f"--base {base} is not the remote's default branch: the plan rates the whole change against it")
+    common = ["--base", base, "--head", a.head]
     added = {x.strip() for x in a.add.split(",") if x.strip()}
     if unknown := added - set(LENSES):
         die(f"--add names no lens: {', '.join(sorted(unknown))} (lenses: {', '.join(LENSES)})")
@@ -114,12 +119,15 @@ def main() -> int:
         except (OSError, ValueError) as e:
             die(f"--prior is not a verifier output this script can read: {e}")
         since = git("rev-parse", "--verify", a.since + "^{commit}")
-        named_sha = next((m.group(1) for m in (REVIEWED.match(ln) for ln in text.split("\n")) if m), "")
-        if not named_sha or not since.startswith(named_sha) or len(named_sha) < 7:
+        first = next((ln for ln in text.split("\n") if REVIEWED_LINE.match(ln)), "")  # the line blocking.read uses
+        m = REVIEWED.match(first)
+        named_sha = m.group(1) if m else ""
+        if not named_sha or not since.startswith(named_sha):
             die(f"--prior reviewed {named_sha or 'no commit'}, not --since {since}: give the verifier output of the "
                 "round that reviewed --since")
-        if since == git("merge-base", a.base or default_base(), a.head):
-            die("--since is the change's merge-base, so this is a first review: drop --since and --prior")
+        mb = git("merge-base", base, a.head)
+        if subprocess.run(["git", "merge-base", "--is-ancestor", since, mb], capture_output=True).returncode == 0:
+            die("--since is at or before the change's merge-base, so this is a first review: drop --since and --prior")
         prefixes = {x.strip().rsplit("-", 1)[0] for b in items for x in b["ids"].split(",") if x.strip()}
         fix_top, fix_named = tier(common + ["--since", a.since])
         if prefixes - set(PREFIX):

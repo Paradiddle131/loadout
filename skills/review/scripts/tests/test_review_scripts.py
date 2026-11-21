@@ -1148,3 +1148,42 @@ def test_record_refuses_a_round_key_or_value_out_of_shape(pair: str) -> None:
     done = subprocess.run([sys.executable, str(SCRIPTS / "record.py"), "build", "--kind", "review", "--sha", "a" * 40,
                            "--state", "success", "--title", "t", "--round", pair], capture_output=True, text=True)
     assert done.returncode != 0 and "--round pair" in done.stderr
+
+
+def test_plan_refuses_a_since_before_the_merge_base_and_a_base_other_than_the_default(w: World, tmp_path: Path) -> None:
+    base_has(w, {"REVIEW.md": SENSITIVE_MD})
+    w.commit({"guard/check.py": "ok = True\n"})
+    w.commit({"src/other.py": "y = 7\n"})
+    older = w.git(w.repo, "rev-parse", w.git(w.repo, "merge-base", "origin/main", "HEAD") + "^")
+    code, _, err = plan(w, "--mode", "light", "--since", older, "--prior", prior(tmp_path, older, []))
+    assert code == 2 and "merge-base" in err
+    code, _, err = plan(w, "--mode", "light", "--base", "HEAD~1")
+    assert code == 2 and "not the remote's default branch" in err
+
+
+@pytest.mark.parametrize("first", ["Reviewed: (earlier draft)", "Reviewed: (no sha)"])
+def test_plan_reads_the_prior_s_first_reviewed_line_only(w: World, tmp_path: Path, first: str) -> None:
+    r = w.commit({"src/app.py": "x = 2\n"})
+    w.commit({"src/app.py": "x = 3\n"})
+    p = tmp_path / "p.txt"
+    p.write_text(f"VERDICT: FAIL {r}\n{first}\nBlocking: none\n\nReviewed: {r}\n"
+                 'Blocking: [{"ids": "GRD-1", "harm": "a guard is skipped"}]\n### GRD-1\n')
+    code, _, err = plan(w, "--since", r, "--prior", str(p))
+    assert code == 2 and "no commit" in err
+
+
+def test_plan_allows_light_on_a_sensitive_fix_round(w: World, tmp_path: Path) -> None:
+    base_has(w, {"REVIEW.md": SENSITIVE_MD})
+    r = w.commit({"guard/check.py": "ok = True\n"})
+    w.commit({"guard/check.py": "ok = False\n"})
+    code, out, err = plan(w, "--mode", "light", "--since", r, "--prior", prior(tmp_path, r, ["CTL-1"]))
+    assert code == 0, err
+    assert out["first"] == [] and "control-prober" in out["then"]
+
+
+def test_verdict_trims_separators_at_the_ends_of_reviewers(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.run("verdict.sh", "12", *ROUND, "--tier", "standard", "--reviewers",
+                 " , correctness-reviewer ,, finding-verifier , ", "--reviewed", head, "--file", review_file(tmp_path, head))
+    assert done.returncode == 0, done.stderr
+    assert w.comments()[0]["body"].split("\n")[2].endswith("lenses=correctness-reviewer,finding-verifier -->")
