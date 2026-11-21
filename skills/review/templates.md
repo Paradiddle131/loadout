@@ -26,17 +26,24 @@ A reviewer that is not one of the shipped agents gets that agent file's text ahe
 
 ## REVIEW.md
 
-A repo's root `REVIEW.md`, read from the default branch: two headed lists of backticked globs, which `tier.sh` reads.
-`## Sensitive` only adds to the built-in floor; with no `## Routine`, routine is prose documentation outside the sensitive set; any other path is `standard`.
-The reason after ` — ` is optional plain text with no backtick and no `;`; `; lenses: …` comes last, lens names only.
+A repo's root `REVIEW.md`, read from the default branch: three headed lists of backticked globs, which `tier.sh` and `plan.py` read, and an optional `Depth:` line.
+`## Sensitive` only adds to the built-in floor; with no `## Routine`, routine is prose documentation outside the sensitive set; any other path is `standard`; `## Paths` sets a depth or effort for paths that keep their tier.
+The reason after ` — ` is optional plain text with no backtick and no `;`; then, in this order and each at most once: `; lenses: …` (lens names, sensitive lines only), `; depth: none|light|focused|full` and `; effort: <lens>=<level>, …`.
+`Depth: <d>` sets the depth of standard paths (light by default); a line's depth raises its paths anywhere and lowers them only off the sensitive set, and a sensitive line's depth is focused or full.
+An effort clause sets a lens's effort (low, medium, high, xhigh or max) for its paths, the verifier's included.
 
 ```markdown
 # Review
 
+Depth: light
+
 ## Sensitive
 - `<glob>` — <what it guards, one clause>; lenses: <lens>, <lens>
-- `<glob>` — <what it guards, one clause>
+- `<glob>` — <what it guards, one clause>; depth: full
 
 ## Routine
 - `<glob>` — <why no reviewer is needed, one clause>
+
+## Paths
+- `<glob>` — <why its depth or effort differs, one clause>; depth: none; effort: correctness-reviewer=low
 ```

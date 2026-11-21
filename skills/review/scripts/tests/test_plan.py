@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from test_review_scripts import (REVIEW, ROUND, SCRIPTS, World, base_has, env, review_file,  # noqa: F401
-                                 round_fields, w)
+                                 round_fields, template_review_md, w)
 
 PLAN = SCRIPTS / "plan.py"
 RECORD = SCRIPTS / "record.py"
@@ -216,7 +216,7 @@ def test_effort_is_high_for_correctness_and_control_on_sensitive_code(w: World) 
     w.commit({"guard/check.py": "x\n"})
     code, p, err = plan(w)
     assert code == 0, err
-    assert p["effort"] == {COR: "high", CLM: "medium", GRD: "medium", CTL: "high", VER: "high"}
+    assert p["effort"] == {COR: "high", CLM: "medium", GRD: "medium", CTL: "high", VER: "medium"}
 
 
 @pytest.mark.parametrize("files", [{"RULES.md": "x\n"}, {"src/app.py": "x = 2\n"}])
@@ -304,9 +304,15 @@ def test_a_sensitive_line_below_focused_or_out_of_shape_fails_safe(w: World, lin
 
 
 def test_the_template_s_depth_and_effort_lines_parse(w: World) -> None:
-    text = (SCRIPTS.parent / "templates.md").read_text()
-    block = text.split("## REVIEW.md", 1)[1].split("```markdown\n", 1)[1].split("```", 1)[0]
+    block = template_review_md()
     assert "Depth: " in block and "; depth: " in block and "; effort: " in block
+    base_has(w, {"REVIEW.md": block})
+    w.commit({"d/x.py": "x\n"})  # a `## Paths` line: depth none, correctness-reviewer at low effort
+    code, p, err = plan(w, "--depth", "light")
+    assert code == 0 and "cannot be parsed" not in err, err
+    assert (p["floor"], p["effort"][COR]) == ("none", "low")
+    w.commit({"b/y.py": "y\n"})  # a sensitive line raised to full
+    assert plan(w)[1]["floor"] == "full"
 
 
 # Ways around found on the earlier attempt: each is closed.

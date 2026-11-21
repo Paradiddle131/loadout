@@ -30,23 +30,443 @@ Inputs, where each is read from, who controls it, and how a lead-controlled one 
 | Repo (`REVIEW_REPO`, else `origin`'s URL) and the object store | the local clone | the lead | every object is read by a sha GitHub named; the code these scripts run from is stamped as `kit=` on the round line |
 
 Depths, ranked none < light < focused < full; the floor is the highest depth among the changed paths:
-  routine path    none; standard path    light (or the policy's `Depth:`); sensitive path    focused.
+  routine path    none;
+  standard path   light, or the `Depth:` line of REVIEW.md;
+  sensitive path  focused, or that `Depth:` when higher (tiers.py's built-in floor and REVIEW.md's `## Sensitive`).
+  A REVIEW.md line's `; depth: <d>` sets its paths' depth: higher anywhere, lower only on a path that is not
+  sensitive (no line lowers a sensitive path, and a `## Sensitive` line below focused makes REVIEW.md unparsable).
+Lenses by depth (the tier's set: routine claims-auditor; standard correctness-reviewer; sensitive correctness-reviewer,
+claims-auditor, guardrail-reviewer and the lenses REVIEW.md names for the changed paths):
   none     no reviewer: gates only.
-  light    one lens and the verifier: correctness-reviewer, or claims-auditor when every changed path is routine.
-  focused  the tier's set, correctness-reviewer first and alone, then the rest with its findings in their briefs;
-           a fix round reruns only the lenses it answers and those its paths call for.
-  full     the tier's set at once; a fix round reruns the whole set.
+  light    one lens and the verifier: correctness-reviewer, or claims-auditor when the tier is routine.
+  focused  the tier's set, correctness-reviewer first and alone (`first`), then the rest (`then`) with its findings in
+           their briefs.
+  full     the tier's set at once.
+A fix round is a round after the PR's newest trusted review record (the table's "Previous round"); its paths are those
+changed since that record's `reviewed=` commit that the change still changes. In focused it runs each lens a must-fix
+on the record's `Blocking:` line came from (by its id's prefix, PREFIX), the lenses REVIEW.md names for its paths,
+correctness-reviewer when one of its paths is not routine, claims-auditor when every one is, and the sensitive set when
+one is sensitive; an id whose prefix names no lens runs the whole set. In light it reruns the one lens; in full, the
+whole set. The verifier runs on every round with a lens.
+Effort per lens, the highest over the round's paths: a REVIEW.md `; effort: <lens>=<level>` on a line matching the
+path (raising or lowering it), else high for correctness-reviewer and control-prober on a sensitive path that is not
+prose (*.md, *.txt, licence files), else medium. The verifier is medium unless a line sets it. A lens may run above
+its planned effort, never below; the merge guard never reads effort.
 """
 
 from __future__ import annotations
 
+import argparse
+import json
+import os
+import re
+import subprocess
 import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import blocking  # noqa: E402  (the verifier's `Blocking:` line)
+import record  # noqa: E402  (the round's --lens shape)
+import tiers  # noqa: E402  (the paths' tiers and REVIEW.md, as tier.sh reads them)
+
+COR, CLM, GRD, CTL, LEAK = ("correctness-reviewer", "claims-auditor", "guardrail-reviewer", "control-prober",
+                            "leak-hunter")
+VERIFIER = "finding-verifier"
+LENSES = [COR, CLM, GRD, CTL, LEAK]
+PREFIX = {"COR": COR, "CLM": CLM, "GRD": GRD, "CTL": CTL, "LEAK": LEAK}
+TIER_SET = {"routine": [CLM], "standard": [COR], "sensitive": [COR, CLM, GRD]}
+DEPTHS = tiers.DEPTHS
+DRANK = {d: i for i, d in enumerate(DEPTHS)}
+ERANK = {e: i for i, e in enumerate(tiers.EFFORTS)}
+HIGH_ON_CODE = {COR, CTL}
+TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
+MARKER = re.compile(r"<!-- loadout:review((?: [a-z]+=[^\s=]+)+) -->")
+TITLE = re.compile(r"🤖 Review: (pass|fail) \((routine|standard|sensitive) tier\)")
+FIELDS = {"sha", "state", "tier", "reviewed", "depth"}
+ROUND = re.compile("<!-- loadout" r":round((?: [a-z]+=[A-Za-z0-9._,:-]+)+) -->")
+RAW = re.compile(r"<details><summary>[^<\n]*</summary>\n\n(?:Clipped[^\n]*\n\n)?(`{3,})text\n(.*?)\1\n\n</details>",
+                 re.S)
+SHA = re.compile(r"[0-9a-f]{40}")
+REVIEWED_SHA = re.compile(r"^[ \t\v\f\r]*Reviewed:[ \t\v\f\r]*`?([0-9a-f]{7,40})`?[ \t\v\f\r]*$")
+PROSE = [tiers.glob_re(g) for g in tiers.DEFAULT_ROUTINE]
+MAX_PAGES = 30
 
 
-def main() -> int:
-    sys.stderr.write("plan.py: not implemented yet\n")
-    return 2
+class Refused(Exception):
+    """The plan cannot be made, or a round does not cover it: the reason."""
+
+
+def run(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(list(args), capture_output=True, text=True)
+
+
+def git(*args: str) -> str:
+    done = run("git", *args)
+    if done.returncode:
+        raise Refused(f"git {' '.join(args)}: {done.stderr.strip()}")
+    return done.stdout.strip()
+
+
+def is_ancestor(a: str, b: str) -> bool:
+    return run("git", "merge-base", "--is-ancestor", a, b).returncode == 0
+
+
+def gh(endpoint: str) -> object:
+    done = run("gh", "api", endpoint)
+    if done.returncode:
+        why = (done.stderr or done.stdout).strip().splitlines()[-1:] or ["no output"]
+        raise Refused(f"cannot read `{endpoint}` from GitHub: {why[0]}")
+    try:
+        return json.loads(done.stdout)
+    except ValueError:
+        raise Refused(f"`{endpoint}` answered something that is not JSON") from None
+
+
+def repo_name() -> str:
+    if os.environ.get("REVIEW_REPO"):
+        return os.environ["REVIEW_REPO"]
+    url = run("git", "remote", "get-url", "origin").stdout.strip()
+    m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?/*$", url)
+    if not m:
+        raise Refused("no origin remote: set REVIEW_REPO=owner/name")
+    return m.group(1)
+
+
+def current_pr(repo: str) -> str:
+    branch = run("git", "symbolic-ref", "--short", "-q", "HEAD").stdout.strip()
+    got = gh(f"repos/{repo}/pulls?head={repo.split('/')[0]}:{branch}&state=open&per_page=1") if branch else []
+    if not isinstance(got, list) or not got or not isinstance(got[0], dict):
+        raise Refused("no open PR for the current branch: pass --pr <n>")
+    return str(got[0].get("number"))
+
+
+# The change: its paths and the policy at the default branch's tip.
+
+
+class Change:
+    def __init__(self, base: str, head: str) -> None:
+        try:
+            self.mb, self.paths = tiers.changed(base, head)
+        except RuntimeError as exc:
+            raise Refused(str(exc)) from None
+        if not self.paths:
+            raise Refused(f"{head} changes nothing against {base}")
+        self.base, self.head = base, head
+        self.rules, self.broken = tiers.load_rules(base, prog="plan.py")
+        try:
+            imported = tiers.imports(base)
+        except RuntimeError as exc:
+            raise Refused(str(exc)) from None
+        self.rated = tiers.rate(self.paths, self.rules, self.broken, imported)
+        self.tier = tiers.top_tier(self.rated)
+        self.floor = max((self.depth_of(p) for p in self.paths), key=DRANK.get)
+
+    def depth_of(self, path: str) -> str:
+        r, default = self.rated[path], self.rules["depth"]
+        if r["tier"] == "routine":
+            base = "none"
+        elif r["tier"] == "standard":
+            base = default or "light"
+        else:
+            base = max("focused", default or "focused", key=DRANK.get)
+        if not r["depths"]:
+            return base
+        line = max(r["depths"], key=DRANK.get)
+        if r["tier"] == "sensitive":  # raise only: the built-in floor and `## Sensitive` hold
+            return max(base, line, key=DRANK.get)
+        return line
+
+    def tier_of(self, paths: list[str]) -> str:
+        return max((self.rated[p]["tier"] for p in paths), key=tiers.RANK.get)
+
+    def named(self, paths: list[str]) -> set[str]:
+        return {x for p in paths for x in self.rated[p]["lenses"]}
+
+    def tier_set(self, paths: list[str]) -> set[str]:
+        top = self.tier_of(paths)
+        return set(TIER_SET[top]) | (self.named(paths) if top == "sensitive" else set())
+
+    def effort(self, lens: str, paths: list[str]) -> str:
+        def one(p: str) -> str:
+            r = self.rated[p]
+            set_by = [e[lens] for e in r["efforts"] if lens in e]
+            if set_by:
+                return max(set_by, key=ERANK.get)
+            code = not any(g.match(p) for g in PROSE)
+            return "high" if lens in HIGH_ON_CODE and r["tier"] == "sensitive" and code else "medium"
+        return max((one(p) for p in paths), key=ERANK.get)
+
+
+# The PR's newest trusted review record.
+
+
+def body_lines(c: dict) -> list[str]:
+    return (c.get("body") or "").replace("\r\n", "\n").split("\n")
+
+
+def newest_review(comments: list[dict]) -> dict | None:
+    """The newest comment whose second line opens a review marker, by the owner, a member or a collaborator."""
+    newest = None
+    for c in sorted(comments, key=lambda c: (str(c.get("created_at")), c.get("id") or 0)):
+        lines = body_lines(c)
+        if (len(lines) > 1 and re.match(r"\s*<!-- loadout:review\b", lines[1])
+                and c.get("author_association") in TRUSTED):
+            newest = c
+    return newest
+
+
+def record_fields(c: dict) -> dict | None:
+    """The marker's fields, and `round` (the round line's), of a record in verdict.sh's exact shape; else None."""
+    if c.get("updated_at") != c.get("created_at"):
+        return None
+    lines = body_lines(c)
+    m = MARKER.fullmatch(lines[1].strip()) if len(lines) > 1 else None
+    title = TITLE.fullmatch(lines[0].strip())
+    if not m or not title:
+        return None
+    pairs = [kv.split("=", 1) for kv in m.group(1).split()]
+    f = dict(pairs)
+    if (len(f) != len(pairs) or not {"sha", "state", "tier", "reviewed"} <= set(f) <= FIELDS
+            or not SHA.fullmatch(f["sha"]) or not SHA.fullmatch(f["reviewed"]) or f["tier"] not in tiers.RANK
+            or f.get("depth", "none") not in DEPTHS or f["state"] not in ("success", "failure")
+            or {"pass": "success", "fail": "failure"}[title.group(1)] != f["state"] or title.group(2) != f["tier"]):
+        return None
+    rl = ROUND.fullmatch(lines[2].strip()) if len(lines) > 2 else None
+    f["round"] = dict(kv.split("=", 1) for kv in rl.group(1).split() if not kv.startswith("lens=")) if rl else {}
+    return f
+
+
+def prior_round(c: dict | None, change: Change) -> tuple[str, list[dict]] | None:
+    """(reviewed commit, its must-fix items) when `c` can start a fix round of `change`; else None (a first review)."""
+    f = record_fields(c) if c else None
+    if not f or f["tier"] == "routine":
+        return None
+    raw = RAW.search("\n".join(body_lines(c)))
+    if not raw:
+        return None
+    text = raw.group(2)
+    first = next((ln for ln in text.split("\n") if blocking.REVIEWED.match(ln)), "")
+    named = REVIEWED_SHA.match(first)
+    if not named or not f["reviewed"].startswith(named.group(1)):
+        return None
+    try:
+        items = blocking.read(text)
+    except ValueError:
+        return None
+    reviewed = f["reviewed"]
+    if (run("git", "cat-file", "-e", f"{reviewed}^{{commit}}").returncode or reviewed == change.head
+            or not is_ancestor(reviewed, change.head) or is_ancestor(reviewed, change.mb)):
+        return None
+    return reviewed, items
+
+
+# The plan.
+
+
+def ordered(lenses: set[str]) -> list[str]:
+    return sorted(lenses, key=lambda x: (LENSES.index(x) if x in LENSES else len(LENSES), x))
+
+
+def make_plan(change: Change, prior: tuple[str, list[dict]] | None, want: str | None) -> dict:
+    if want is not None and want not in DEPTHS:
+        raise Refused(f"--depth is one of {', '.join(DEPTHS)} (got {want!r})")
+    if want is not None and DRANK[want] < DRANK[change.floor]:
+        raise Refused(f"--depth {want} is below the floor the paths set, {change.floor}: a depth may be raised, never "
+                      "lowered")
+    depth = max(change.floor, want or "none", key=DRANK.get)
+    why = [f"the paths make it {change.tier} with depth floor {change.floor}"]
+    if want and want != change.floor:
+        why.append(f"raised to {depth}")
+    whole = change.tier_set(change.paths)
+    light = {CLM} if change.tier == "routine" else {COR}
+    paths, since, kind = change.paths, None, "first"
+    if prior:
+        fix = [p for p in git("diff", "--name-only", "--no-renames", prior[0], change.head).splitlines()
+               if p in change.rated]
+        if fix:
+            paths, since, kind = fix, prior[0], "fix"
+    if depth == "none":
+        lenses: set[str] = set()
+        why.append("none: gates only")
+    elif depth == "light":
+        lenses = light
+    elif kind == "first" or depth == "full":
+        lenses = whole
+        if kind == "fix":
+            why.append("full: a fix round reruns the whole set")
+    else:
+        prefixes = {x.strip().rsplit("-", 1)[0] for b in prior[1] for x in b["ids"].split(",") if x.strip()}
+        if prefixes - set(PREFIX):
+            lenses = whole
+            why.append("a blocking id's prefix names no lens, so the whole set runs")
+        else:
+            top = change.tier_of(paths)
+            lenses = {PREFIX[x] for x in prefixes} | change.named(paths) | ({CLM} if top == "routine" else {COR})
+            if top == "sensitive":
+                lenses |= set(TIER_SET["sensitive"])
+            why.append("a fix round: the lenses whose must-fix it answers and those its paths call for")
+    run_ = ordered(lenses)
+    first = [COR] if depth == "focused" and COR in run_ and len(run_) > 1 else []
+    then = [x for x in run_ if x not in first]
+    effort = {x: change.effort(x, paths) for x in run_}
+    if run_:
+        set_by = [e[VERIFIER] for p in paths for e in change.rated[p]["efforts"] if VERIFIER in e]
+        effort[VERIFIER] = max(set_by, key=ERANK.get) if set_by else "medium"
+    return {"head": change.head, "tier": change.tier, "floor": change.floor, "depth": depth, "round": kind,
+            "since": since, "first": first, "then": then, "verifier": VERIFIER if run_ else "", "effort": effort,
+            "planned": run_ + ([VERIFIER] if run_ else []), "why": why}
+
+
+def read_pr(repo: str, number: str) -> tuple[Change, list[dict], str]:
+    """The change PR `number` holds, rated against its default branch's tip as GitHub names it, and its comments."""
+    pr = gh(f"repos/{repo}/pulls/{number}")
+    pr = pr if isinstance(pr, dict) else {}
+    head = (pr.get("head") or {}).get("sha")
+    default = ((pr.get("base") or {}).get("repo") or {}).get("default_branch")
+    if not isinstance(head, str) or not SHA.fullmatch(head):
+        raise Refused(f"PR {number} in {repo} shows no head commit")
+    if not isinstance(default, str) or not re.fullmatch(r"[A-Za-z0-9._/-]+", default) or ".." in default:
+        raise Refused(f"PR {number} in {repo} names no default branch")
+    branch = gh(f"repos/{repo}/branches/{default}")
+    tip = ((branch if isinstance(branch, dict) else {}).get("commit") or {}).get("sha")
+    if not isinstance(tip, str) or not SHA.fullmatch(tip):
+        raise Refused(f"GitHub names no tip for {default}")
+    ref = f"refs/remotes/origin/{default}"
+    if run("git", "fetch", "-q", "--force", "origin", f"+refs/heads/{default}:{ref}").returncode:
+        raise Refused(f"cannot fetch {default} from origin")
+    got = run("git", "rev-parse", "-q", "--verify", f"{ref}^{{commit}}").stdout.strip()
+    if got != tip:
+        raise Refused(f"origin's {default} is {got or 'missing'} after a forced fetch, but GitHub names {tip}: run "
+                      "again, from a clone whose origin is the PR's repo")
+    if run("git", "cat-file", "-e", f"{head}^{{commit}}").returncode and run("git", "fetch", "-q", "origin",
+                                                                             head).returncode:
+        raise Refused(f"the PR's head {head} is not in this clone and cannot be fetched")
+    comments: list[dict] = []
+    for page in range(1, MAX_PAGES + 1):
+        got_page = gh(f"repos/{repo}/issues/{number}/comments?per_page=100&page={page}")
+        if not isinstance(got_page, list):
+            raise Refused(f"the comments of PR {number} came back in an unknown shape")
+        comments += [c for c in got_page if isinstance(c, dict)]
+        if len(got_page) < 100:
+            break
+    else:
+        raise Refused(f"PR {number} has more than {MAX_PAGES * 100} comments")
+    return Change(tip, head), comments, default
+
+
+# What verdict.sh records.
+
+
+def check_round(p: dict, reviewers: str, lens_specs: list[str]) -> None:
+    """Refuses a reviewer set missing a planned lens or the verifier, or a planned lens run below its effort."""
+    try:
+        ran = record.names(reviewers)
+        specs = {x["name"]: x for x in (record.lens_spec(s) for s in lens_specs)}
+    except ValueError as exc:
+        raise Refused(str(exc)) from None
+    if missing := [x for x in p["planned"] if x not in ran]:
+        raise Refused(f"the round's plan ({p['depth']}, {p['round']} round) runs {', '.join(p['planned'])}; "
+                      f"--reviewers lacks the planned {', '.join(missing)}: run it, or record no verdict")
+    low = [f"{x} ran at {specs[x]['effort']}, planned {e}" for x, e in p["effort"].items()
+           if x in specs and ERANK[specs[x]["effort"]] < ERANK[e]]
+    if low:
+        raise Refused(f"a planned lens ran below its planned effort ({'; '.join(low)}): an effort may be raised, "
+                      "never lowered")
+
+
+def record_main(a: argparse.Namespace) -> int:
+    repo = repo_name()
+    change, comments, _ = read_pr(repo, a.pr)
+    if a.tier != "routine" and tiers.RANK[a.tier] < tiers.RANK[change.tier]:
+        raise Refused(f"PR {a.pr}'s paths make it {change.tier}, so --tier {a.tier} is too low (tier.sh lists the "
+                      "paths)")
+    if a.routine:
+        if a.depth not in (None, "none"):
+            raise Refused("--tier routine runs no reviewer, so its depth is none")
+        if change.floor != "none":
+            raise Refused(f"the paths set depth floor {change.floor}: a routine record is for a change whose floor is "
+                          "none")
+        pairs = ["depth=none", f"floor={change.floor}", "planned=none"]
+        print(f"head {change.head}\ntier {change.tier}\ndepth none\npairs {' '.join(pairs)}")
+        return 0
+    if a.repost:
+        f = record_fields(newest_review(comments) or {})
+        planned = (f or {}).get("round", {}).get("planned")
+        if not f or f["reviewed"] != a.reviewed or "depth" not in f or not planned:
+            raise Refused("--repost posts the PR's newest trusted review record again, and that record must have "
+                          "reviewed --reviewed and carry its depth and plan: record the round anew")
+        if DRANK[f["depth"]] < DRANK[change.floor]:
+            raise Refused(f"the reposted round ran depth {f['depth']}, below the floor {change.floor} at the head")
+        p = {"planned": [] if planned == "none" else planned.split(","), "effort": {}, "depth": f["depth"],
+             "round": "reposted"}
+        check_round(p, a.reviewers, [])
+        pairs = [f"depth={f['depth']}", f"floor={change.floor}", f"planned={planned}"]
+        print(f"head {change.head}\ntier {change.tier}\ndepth {f['depth']}\npairs {' '.join(pairs)}")
+        return 0
+    p = make_plan(change, prior_round(newest_review(comments), change), a.depth)
+    check_round(p, a.reviewers, a.lens)
+    pairs = [f"depth={p['depth']}", f"floor={p['floor']}", f"planned={','.join(p['planned']) or 'none'}"]
+    print(f"head {change.head}\ntier {change.tier}\ndepth {p['depth']}\npairs {' '.join(pairs)}")
+    return 0
+
+
+def preview_main(a: argparse.Namespace) -> int:
+    repo = repo_name()
+    change, comments, default = read_pr(repo, a.pr or current_pr(repo))
+    p = {"pr": int(a.pr) if a.pr else None, "base": default, "tip": change.base,
+         **make_plan(change, prior_round(newest_review(comments), change), a.depth)}
+    if a.json:
+        print(json.dumps(p))
+        return 0
+    for k in ("tier", "floor", "depth", "round"):
+        print(f"{k}: {p[k]}")
+    print(f"since: {p['since'] or 'none (a first review)'}")
+    for k in ("first", "then"):
+        print(f"{k}: {', '.join(f'{x} ({p['effort'][x]})' for x in p[k]) or 'none'}")
+    print(f"verifier: {p['verifier'] + ' (' + p['effort'][VERIFIER] + ')' if p['verifier'] else 'none'}")
+    print(f"why: {'; '.join(p['why'])}")
+    return 0
+
+
+def floor_main(a: argparse.Namespace) -> int:
+    change = Change(a.base, a.head)
+    print(f"{change.tier} {change.floor}")
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    if argv[:1] in (["record"], ["floor"]):
+        p = argparse.ArgumentParser(prog=f"plan.py {argv[0]}")
+        if argv[0] == "record":
+            p.add_argument("--pr", required=True)
+            p.add_argument("--depth")
+            p.add_argument("--reviewers", default="")
+            p.add_argument("--lens", action="append", default=[])
+            p.add_argument("--reviewed", default="")
+            p.add_argument("--tier", choices=list(tiers.RANK), required=True)
+            p.add_argument("--routine", action="store_true")
+            p.add_argument("--repost", action="store_true")
+        else:
+            p.add_argument("--base", required=True)
+            p.add_argument("--head", required=True)
+        a = p.parse_args(argv[1:])
+        handler = record_main if argv[0] == "record" else floor_main
+    else:
+        p = argparse.ArgumentParser(prog="plan.py")
+        p.add_argument("--pr")
+        p.add_argument("--depth")
+        p.add_argument("--json", action="store_true")
+        a = p.parse_args(argv)
+        handler = preview_main
+    if getattr(a, "pr", None) is not None and not re.fullmatch(r"[0-9]+", a.pr):
+        p.error("--pr is a PR number")
+    try:
+        return handler(a)
+    except Refused as exc:
+        print(f"plan.py: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
