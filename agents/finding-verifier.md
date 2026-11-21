@@ -35,6 +35,7 @@ The lenses' reports (each a `Head:` line, finding blocks, `Ruled out:` and `Not 
 - A finding that repeats one on the settled list is a re-raise, marked or not: name the settled id.
   Read each settled line's `🤖 Review` record (`gh api`, a read); a settled rank stands only when that record shows it (on a record with a `Blocking:` line, a must-fix is one that line lists; on an older one, one its `## Must-fix` section holds) and your run at `<head>` agrees with it.
   Report each other one under `## Settled, not kept`, ranked as you find it: a line its record does not show, a fixed one that still reproduces, a dropped one you confirm, a defect larger than its record says.
+- A finding that is another case of a settled must-fix's class (the settled fix closed the cases it listed, and this is the same defect elsewhere) carries `- class: patched, not fixed (<settled id>)` in its block, the line exactly so: the lead sends that item to a rethink, not another patch.
 - Quote at most three redacted values per leak; never a real value in full, in any line of your output.
 - A finding you could not reproduce is `unverified`, with the reason: not refuted, only not shown.
 
@@ -69,6 +70,7 @@ Then `Lens heads:` with each lens and the head it read. Then `## Must-fix`, `## 
 - lens: <lens>
 - location: <file:line>
 - claim: <the defect, one sentence; a re-raise names the settled id and the new evidence>
+- class: patched, not fixed (<settled id>)   <only on another case of a settled must-fix's class; left out otherwise>
 - harm: <must-fix only: who acts wrongly or what breaks once this lands, and the cost; left out of a nit or pre-existing finding>
 - evidence: <your command> -> <the output lines you saw>
 - reproduce: <self-contained commands>

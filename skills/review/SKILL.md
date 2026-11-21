@@ -66,16 +66,20 @@ Done when every planned lens has returned its raw findings; remove the worktrees
 
 ## 5. Fix, capped
 
-- Send each `must-fix` the verifier's `Blocking:` line lists, with its reproduction, to the worker that wrote the change (if you wrote it, you fix it); a nit is applied only when cheap, and never blocks.
+- Send each `must-fix` the verifier's `Blocking:` line lists, with its reproduction, to the worker that wrote the change (if you wrote it, you fix it).
+- On a sensitive change a fix round changes only what that `Blocking:` line lists; every nit goes to the PR's one nit issue (step 9).
+- On any other change a nit is applied only when cheap, and never blocks.
 - A fix to code covers the finding's class (every place the same defect occurs) with a test that goes red without it; a fix to a claim says less (narrow or delete the sentence) and adds no new completeness claim.
+- A finding the verifier marks `patched, not fixed` (another case of a settled must-fix's class) sends its item to its rethink below, not to another patch; `verdict.sh` prints a notice for it.
 - Then steps 2 to 4 on the new commits only (`<reviewed>..<new head>`), each brief carrying the settled list, built from the earlier `🤖 Review` records: each finding's ids, its rank as that record posted it (on a record with a `Blocking:` line, a must-fix is one that line lists; on an older one, one its `## Must-fix` section holds), and the record's link (templates.md).
   The lenses are what `plan.py` prints, from the PR's newest trusted `🤖 Review` record:
-  - in `focused`, each lens a must-fix on its `Blocking:` line came from, the lenses `REVIEW.md` names for the fix's paths, `correctness-reviewer` when a fix path is not routine, `claims-auditor` when every one is, and the sensitive set when one is sensitive;
-  - in `full`, or when a blocking id's prefix names no lens, the whole set; in `light`, its one lens;
+  - in `focused` and `light`, each lens a must-fix on its `Blocking:` line came from, and `correctness-reviewer`, or `claims-auditor` in its place in `focused` when every fix path is routine;
+  - the depth's first-review set, those lenses with it, when a fix path is one the change did not hold at the record's reviewed commit (a file no earlier round reviewed), or when a blocking id's prefix names no lens;
+  - in `full`, the whole set;
   - the verifier on every round.
-- A cycle is a fix round, a red stamp, or an integrate round (step 6); after the third with a `must-fix` or red stamp still open:
-  - **rethink** once per item, when the findings point at the approach: a fresh worker, a fresh brief carrying them, the count at zero;
-  - **park** otherwise: label the issue `needs-owner`, comment the open findings, take the next item.
+- A cycle is a fix round, a red stamp, or an integrate round (step 6); with a `must-fix` or red stamp still open:
+  - **rethink** once per item, after the third cycle when the findings point at the approach, or at once when a finding is marked `patched, not fixed`: a fresh worker, a fresh brief carrying them, the count at zero;
+  - **park** when the rethink is spent or not called for, after the third cycle or at a `patched, not fixed` mark: label the issue `needs-owner`, comment the open findings, take the next item.
 - Done when no `must-fix` is open, or the item is parked.
 
 ## 6. Integrate and re-gate
@@ -105,7 +109,7 @@ Done when every planned lens has returned its raw findings; remove the worktrees
 
 ## 9. File and brief
 
-- File an issue (the `issue` skill) per unfixed finding: `pre-existing`, `unverified`; one per PR for its unapplied nits; a parked item's `must-fix` findings stay in its `needs-owner` packet, not also in issues.
+- File an issue (the `issue` skill) per unfixed finding: `pre-existing`, `unverified`; one per PR for its unapplied nits (on a sensitive change, every nit); a parked item's `must-fix` findings stay in its `needs-owner` packet, not also in issues.
 - The owner's brief lists sensitive landings first, then unreviewed ones (a `debrief` over several runs follows its own `landings.md`); per item: tier, reviewers run, verdict link, issues filed, and each steering line, quoted with personal or secret values redacted.
 - A decision that weakens how a guardrail is enforced is never the session's: it is a conflict packet on its issue (`ways/guardrails.md`), labelled `needs-owner`.
 - Before the owner sees it, [`handoff-auditor`](../../agents/handoff-auditor.md) checks the handoff and its decisions against the PRs and issues; fix what it confirms.
