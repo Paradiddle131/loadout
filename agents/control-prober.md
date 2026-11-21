@@ -39,4 +39,16 @@ First line `Head: <sha>`, the commit you read. Then a table: control (`file:line
 - status: confirmed | unverified
 ```
 
+Then `Ruled out:`, one entry per suspicion you looked into and cleared, ids `CTL-RO-1`, `CTL-RO-2`, ...:
+
+```
+- <ID> <file:line>: <the suspicion, one line>
+  - check: <a self-contained command, or the lines read as `file:start-end` at the head> | none
+  - output: <the lines it printed or the lines read, verbatim> | none
+```
+
+Each entry is one you actually suspected; a cleared suspicion with no check you can show is written `check: none` and counts as unproven.
+A paraphrase is no output.
+The verifier challenges every unproven entry, re-runs a sample of the rest, and promotes one whose run shows the defect to a finding.
+Nothing ruled out: `Ruled out: none`.
 Last, `Not checked:` with each control you did not probe and why.

@@ -43,4 +43,17 @@ First line `Head: <sha>`, the commit you read. Then one block per finding, most 
 - status: confirmed | unverified
 ```
 
-Then `Backed:` with each claim you confirmed and what backs it. Last, `Not checked:` with each claim you did not reach and why.
+Then `Backed:` with each claim you confirmed and what backs it.
+Then `Ruled out:`, one entry per suspicion you looked into and cleared, ids `CLM-RO-1`, `CLM-RO-2`, ...:
+
+```
+- <ID> <file:line>: <the suspicion, one line>
+  - check: <a self-contained command, or the lines read as `file:start-end` at the head> | none
+  - output: <the lines it printed or the lines read, verbatim> | none
+```
+
+Each entry is a claim you actually suspected, and goes here, not under `Backed:`; a cleared suspicion with no check you can show is written `check: none` and counts as unproven.
+A paraphrase is no output.
+The verifier challenges every unproven entry, re-runs a sample of the rest, and promotes one whose run shows the defect to a finding.
+Nothing ruled out: `Ruled out: none`.
+Last, `Not checked:` with each claim you did not reach and why.
