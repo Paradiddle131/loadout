@@ -33,6 +33,7 @@ A repo's root `REVIEW.md`, read from the default branch: three headed lists of b
 The reason after ` — ` is optional plain text with no backtick and no `;`; then, in this order and each at most once: `; lenses: …` (lens names, sensitive lines only), `; depth: none|light|focused|full` and `; effort: <lens>=<level>, …`.
 `Depth: <d>` sets the depth of standard paths (light by default), and of sensitive paths when it is above focused; a line's depth raises its paths anywhere and lowers them only off the sensitive set, and a sensitive line's depth is focused or full.
 An effort clause sets a lens's effort (low, medium, high, xhigh or max) for its paths, the verifier's included.
+The parser reads every line, code fences included, so keep `Depth:` and the lists out of code examples.
 
 ```markdown
 # Review

@@ -552,14 +552,6 @@ def test_a_depth_line_with_no_value_fails_safe(w: World) -> None:
     assert (p["tier"], p["floor"]) == ("sensitive", "focused")
 
 
-def test_a_depth_line_in_a_fenced_example_is_not_read(w: World) -> None:
-    base_has(w, {"REVIEW.md": "# Review\n\nAn example:\n\n```\nDepth: none\n## Sensitive\n```\n"})
-    w.commit({"src/app.py": "x = 2\n"})
-    code, p, err = plan(w)
-    assert code == 0 and "cannot be parsed" not in err, err
-    assert (p["tier"], p["floor"]) == ("standard", "light")
-
-
 def test_a_fence_inside_a_list_stays_unparsable(w: World) -> None:
     base_has(w, {"REVIEW.md": "## Sensitive\n```\n- `src/**`\n```\n"})
     w.commit({"docs/a.md": "x\n"})
@@ -641,17 +633,27 @@ def test_a_repost_below_the_floor_at_the_head_is_refused(w: World, tmp_path: Pat
     assert done.returncode == 2 and "below the floor full" in done.stderr, done.stderr
 
 
-@pytest.mark.parametrize("review_md, unparsable", [
-    ("# R\n\n```\nan example\n\n## Sensitive\n- `src/**`\n", True),  # never closed: unparsable
-    ("# R\n\n    ```\n    indented code\n\n## Sensitive\n- `src/**`\n", False),  # 4 spaces in: no fence
-    ("# R\n\n```\nDepth: none\n```\n\n## Sensitive\n- `src/**`\n", False),  # a closed example keeps the list
-    ("# R\n\n````\n```\n## Sensitive\n- `src/**`\n", True),  # a shorter inner line leaves it open
+# A fence outside the lists is ordinary text, as it was before depths: it neither opens nor closes anything, so no
+# fence shape can hide a later list.
+@pytest.mark.parametrize("review_md", [
+    "# R\n\n```\nan example\n\n## Sensitive\n- `src/**`\n",  # a fence never closed
+    "# R\n\n    ```\n    indented code\n\n## Sensitive\n- `src/**`\n",  # a fence 4 spaces in
+    "# R\n\n```make check``` runs the gates.\n\n```\nan example\n```\n\n## Sensitive\n- `src/**`\n",  # inline code
+    "# R\n\n```\nan example\n```\n\n## Sensitive\n- `src/**`\n",  # a closed example
 ])
-def test_a_fence_hides_only_what_it_closes_around(w: World, review_md: str, unparsable: bool) -> None:
+def test_a_fence_before_the_lists_hides_none_of_them(w: World, review_md: str) -> None:
     base_has(w, {"REVIEW.md": review_md})
     w.commit({"src/app.py": "x = 2\n"})
     code, p, err = plan(w)
-    assert code == 0 and ("cannot be parsed" in err) is unparsable, err
+    assert code == 0 and "cannot be parsed" not in err, err
     assert (p["tier"], p["floor"]) == ("sensitive", "focused"), (p, err)
     done = w.run("tier.sh")
-    assert done.stdout.split("\n")[0] == "sensitive", done.stdout + done.stderr
+    assert done.stdout.split("\n")[:2] == ["sensitive", "src/app.py"], done.stdout + done.stderr
+
+
+def test_a_repost_without_a_record_is_refused(w: World, tmp_path: Path) -> None:
+    reviewed = w.commit({"src/app.py": "x = 2\n"})
+    merge_main(w)
+    done = repost(w, tmp_path, reviewed)
+    assert done.returncode == 2 and "record the round anew" in done.stderr, done.stderr
+    assert w.writes() == []

@@ -906,6 +906,8 @@ def test_without_githubs_tip_a_routine_change_may_also_record_a_routine_verdict(
     fx.comments(comment(record("gates", sha=head)))
     reason = mcp(fx, r, expectedHeadSha=head)
     assert reason and "git fetch origin main" in reason and "--tier routine" in reason, reason
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, tier="routine", depth="none")))
+    assert mcp(fx, r, expectedHeadSha=head) is None
 
 
 def test_a_floor_check_that_exits_non_zero_refuses_whatever_it_printed(fx: Fx, tmp_path: Path) -> None:

@@ -26,6 +26,7 @@
 # focused). The tier ignores depth and effort:
 # plan.py reads them (its header has the depth rules). A glob without a slash matches the file name at any depth;
 # `**` spans folders, `*` and `?` stay within one. A REVIEW.md this script cannot parse makes every path
-# sensitive, with a warning on stderr. The parser is tiers.py, which plan.py shares.
+# sensitive, with a warning on stderr. The parser reads every line, code fences included, so keep `Depth:` and the
+# lists out of code examples. The parser is tiers.py, which plan.py shares.
 set -euo pipefail
 exec python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tiers.py" "$@"
