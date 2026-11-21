@@ -67,7 +67,7 @@ def parse(text: str) -> dict:
         elif block is None and (t := TOP.match(line)):
             key, val = t.group(1), t.group(2).strip()
             last = None
-            if key == "VERDICT" and out["verdict"] is None:
+            if key == "VERDICT":
                 out["verdict"] = val
             elif key == "Reviewed" and out["reviewed"] is None:
                 out["reviewed"] = val
