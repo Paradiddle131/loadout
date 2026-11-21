@@ -11,6 +11,8 @@ Range: `<merge-base sha>..<head sha>` (on a fix round, `<reviewed sha>..<head sh
 Change base: <the change's merge-base with the default branch, the base `pre-existing` is measured against>
 Settled in earlier rounds: <each finding an earlier `🤖 Review` record ranked or dropped: its ids, its rank as that record posted it, a must-fix being one its `Blocking:` line lists, or on a record older than that line one its `## Must-fix` section holds (a fixed must-fix with its fixing commit), the record's link; none on a first review>
 A finding that repeats a settled one is a re-raise: its claim names the settled id and what changed since.
+Raised this round: <focused depth, the lenses after the first only: the first lens's findings, pasted whole; leave out otherwise>
+A finding that repeats one raised this round is not reported again; report only what it misses, or a different defect at the same place.
 Issue, quoted: <the issue body>
 Done when: <its done-when, quoted>
 Guardrails: the repo's `CLAUDE.md § Guardrails`; review rules: `REVIEW.md` on the default branch.
