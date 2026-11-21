@@ -10,8 +10,10 @@ A repo's own instructions win where they set a different default.
 ## When to delegate
 
 - Delegate every review.
-- Delegate an item's implementation when it runs beside another item, when the lead runs a stronger model or higher effort than its workers would, or for the `review` skill's rethink; a lead on the workers' model and effort builds a lone item itself, and any other lead delegates it, since a worker would re-read what the lead has read, lose what the brief leaves out, and add no judgement.
-- Keep in the main loop a handful of tool calls, one coupled change, and anything a search answers.
+- Keep in the main loop a handful of tool calls, one coupled change, and anything a search answers, whatever the lead's model.
+- A lead on the workers' model and effort builds any other lone item itself, since a worker would re-read what the lead has read, lose what the brief leaves out, and add no judgement.
+- Delegate the rest of an item's implementation: an item that runs beside another, a lone item when the lead runs a stronger or weaker model or effort than its workers would, and the `review` skill's rethink.
+- A lead that builds an item itself writes its done-when on the issue before its first commit, and adds no `Steering:` line to its own change's review briefs; a need to steer goes to the owner as a packet.
 - Run workers in parallel only on items that touch different files; items that share files run one after another.
 
 ## The lead's job

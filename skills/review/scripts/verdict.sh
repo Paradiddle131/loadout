@@ -17,7 +17,7 @@
 #   words or more not made only of blocking.py's filler words. The lead acts on the line (the review skill).
 #   --tier routine needs no reviewer: --reviewers, --reviewed and --file are optional, --result defaults to pass,
 #   the comment says the tier needs gates only, and the session that wrote the change may run it, since the
-#   paths decide the tier.
+#   paths decide the tier. Above routine the author may run it too, posting the verifier's output unedited.
 #
 # Posts `🤖 Review: <result> (<tier> tier)` with, on its second line,
 #   the review marker (lib.sh has the format), with sha=<head>, state, tier=<tier> and reviewed=<sha>
