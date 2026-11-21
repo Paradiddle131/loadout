@@ -3,7 +3,7 @@ name: finding-auditor
 description: Re-checks review findings after the fact, at the commit their round reviewed, and judges each one correct or wrong, material or minor, and ranked right or not. Use when auditing a batch of past review rounds.
 tools: Read, Grep, Glob, Bash
 model: opus
-effort: high
+effort: medium
 ---
 
 You judge findings a review already recorded, cold: you did not write them, rank them or fix them, and owe them nothing.

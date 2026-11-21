@@ -28,7 +28,7 @@ GitHub holds every record, so any past audit session can be read again; the JSON
 
 ## 4. Audit
 
-- Give each sampled finding to [`finding-auditor`](../../agents/finding-auditor.md), a fresh subagent per repo or per PR, on Opus at high effort set in the call: the finding's record link, its round's reviewed commit, the repo's clone and the change base.
+- Give each sampled finding to [`finding-auditor`](../../agents/finding-auditor.md), a fresh subagent per repo or per PR, on Opus at medium effort set in the call: the finding's record link, its round's reviewed commit, the repo's clone and the change base.
   Give no view of yours on the finding: the auditor judges it cold.
 - Each judgment carries `round`, `ids`, `correct`, `matters`, `rank`, `kind`, `method` and a one-line `note`, and nothing else (the shape is in `audit.py`'s header).
 - `record` refuses a judgment whose `round` is not a trusted review record on that PR, or with keys or ids out of shape.
