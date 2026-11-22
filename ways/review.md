@@ -14,7 +14,7 @@ Every change takes it, an urgent one included; the [`review` skill](../skills/re
 4. **Find** (steps 1 and 3): the changed paths and the repo's `REVIEW.md` set the tier and the depth floor (none, light, focused or full), never the author or the size of the change; a script plans the lenses and each one's effort from them, which the lead may raise, never lower; fresh reviewers, one lens each, get the diff and the quoted issue, never the author's summary, and verify by running things.
 5. **Verify and rank** (step 4): a reviewer asked to find problems always finds something, so only a reproduced `must-fix` the verifier lists with the harm it names is acted on.
 6. **Fix, capped** (step 5): one cap counts fix rounds, red stamps and integrate rounds alike, so no item loops forever, and a cap ends an item, never the session.
-   A fix round reruns only the lenses its must-fix findings came from, correctness and the verifier, so a round costs what it answers; the whole set returns when the fix touches a file no earlier round reviewed.
+   A fix round reruns only the lenses its must-fix findings came from, correctness and the verifier, so a round costs what it answers; the whole set returns after a passing record, or when the fix touches a file no earlier round reviewed or one now rated higher, and an instruction file keeps guardrail-reviewer.
    On a sensitive change a fix round changes only the listed must-fix findings, and its nits go to one issue, so a round adds no new surface to review.
    A class found again after its fix goes to a rethink, not another patch.
 7. **Integrate and re-gate** (step 6): the review reads the head with the default branch merged in, so the verdict covers what will land.

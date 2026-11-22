@@ -49,8 +49,10 @@ changed since that record's `reviewed=` commit that the change still changes. In
 must-fix on the record's `Blocking:` line came from (by its id's prefix, PREFIX) and correctness-reviewer, or
 claims-auditor in its place in focused when every fix path is routine. It runs the depth's first-review set, with the
 answered lenses, when a fix path is not among the change's paths at the `reviewed=` commit (against the base that
-commit forked from: a file no earlier round reviewed), or when an id's prefix names no lens. In full it runs the whole
-set. The verifier runs on every round with a lens.
+commit forked from: a file no earlier round reviewed), when a fix path now rates above the record's `tier=`, when the
+record lists no must-fix (`Blocking: none`), or when an id's prefix names no lens. In full it runs the whole set.
+A fix round whose paths hold an instruction or rule file (tiers.py's INSTRUCTION names or a file they import) also runs
+guardrail-reviewer. The verifier runs on every round with a lens.
 Effort per lens, the highest over the round's paths: a REVIEW.md `; effort: <lens>=<level>` on a line matching the
 path (raising or lowering it), else high for correctness-reviewer and control-prober on a sensitive path that is not
 prose (*.md, *.txt, licence files), else medium. The verifier is medium unless a line sets it. A lens may run above
@@ -240,8 +242,8 @@ def record_fields(c: dict) -> dict | None:
     return f
 
 
-def prior_round(c: dict | None, change: Change) -> tuple[str, list[dict]] | None:
-    """(reviewed commit, its must-fix items) when `c` can start a fix round of `change`; else None (a first review)."""
+def prior_round(c: dict | None, change: Change) -> tuple[str, list[dict], str] | None:
+    """(reviewed commit, its must-fix items, its tier) when `c` can start a fix round of `change`; else None (a first review)."""
     f = record_fields(c) if c else None
     if not f or f["tier"] == "routine":
         return None
@@ -261,7 +263,7 @@ def prior_round(c: dict | None, change: Change) -> tuple[str, list[dict]] | None
     if (run("git", "cat-file", "-e", f"{reviewed}^{{commit}}").returncode or reviewed == change.head
             or not is_ancestor(reviewed, change.head) or is_ancestor(reviewed, change.mb)):
         return None
-    return reviewed, items
+    return reviewed, items, f["tier"]
 
 
 # The plan.
@@ -279,7 +281,7 @@ def ordered(lenses: set[str]) -> list[str]:
     return sorted(lenses, key=lambda x: (LENSES.index(x) if x in LENSES else len(LENSES), x))
 
 
-def make_plan(change: Change, prior: tuple[str, list[dict]] | None, want: str | None) -> dict:
+def make_plan(change: Change, prior: tuple[str, list[dict], str] | None, want: str | None) -> dict:
     if want is not None and want not in DEPTHS:
         raise Refused(f"--depth is one of {', '.join(DEPTHS)} (got {want!r})")
     if want is not None and DRANK[want] < DRANK[change.floor]:
@@ -291,13 +293,14 @@ def make_plan(change: Change, prior: tuple[str, list[dict]] | None, want: str | 
         why.append(f"raised to {depth}")
     whole = change.tier_set(change.paths)
     light = {CLM} if change.tier == "routine" else {COR}
-    paths, since, kind, unseen = change.paths, None, "first", []
+    paths, since, kind, unseen, raised = change.paths, None, "first", [], []
     if prior:
         fix = [p for p in git("diff", "--name-only", "--no-renames", prior[0], change.head).splitlines()
                if p in change.rated]
         if fix:
             paths, since, kind = fix, prior[0], "fix"
             unseen = [p for p in fix if p not in reviewed_paths(change, prior[0])]
+            raised = [p for p in fix if tiers.RANK[change.rated[p]["tier"]] > tiers.RANK[prior[2]]]
     first_set = light if depth == "light" else whole
     if depth == "none":
         lenses: set[str] = set()
@@ -310,9 +313,15 @@ def make_plan(change: Change, prior: tuple[str, list[dict]] | None, want: str | 
     else:
         prefixes = {x.strip().rsplit("-", 1)[0] for b in prior[1] for x in b["ids"].split(",") if x.strip()}
         answered = {PREFIX[x] for x in prefixes if x in PREFIX}
-        if prefixes - set(PREFIX):
+        if not prior[1]:
+            lenses = first_set
+            why.append("the previous record passed, so the round answers no must-fix and the whole set runs")
+        elif prefixes - set(PREFIX):
             lenses = first_set | answered
             why.append("a blocking id's prefix names no lens, so the whole set runs")
+        elif raised:
+            lenses = first_set | answered
+            why.append(f"{', '.join(raised)} now rate above the previous record's {prior[2]} tier, so the whole set runs")
         elif unseen:
             lenses = first_set | answered
             why.append(f"the fix touches {', '.join(unseen)}, which no earlier round reviewed, so the whole set runs")
@@ -321,6 +330,11 @@ def make_plan(change: Change, prior: tuple[str, list[dict]] | None, want: str | 
             lenses = answered | ({CLM} if routine_only else {COR})
             why.append("a fix round: the lenses whose must-fix it answers, and "
                        + ("claims-auditor on a documentation-only fix" if routine_only else "correctness-reviewer"))
+    instruction = [p for p in paths
+                   if p.rsplit("/", 1)[-1].lower() in tiers.INSTRUCTION or change.rated[p]["imported_by"]]
+    if kind == "fix" and lenses and instruction and GRD not in lenses:
+        lenses = lenses | {GRD}
+        why.append(f"guardrail-reviewer for the instruction files {', '.join(instruction)}")
     run_ = ordered(lenses)
     first = [COR] if depth == "focused" and COR in run_ and len(run_) > 1 else []
     then = [x for x in run_ if x not in first]

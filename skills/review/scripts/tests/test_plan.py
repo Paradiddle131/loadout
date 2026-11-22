@@ -713,3 +713,37 @@ def test_a_repost_without_a_record_is_refused(w: World, tmp_path: Path) -> None:
     done = repost(w, tmp_path, reviewed)
     assert done.returncode == 2 and "record the round anew" in done.stderr, done.stderr
     assert w.writes() == []
+
+
+# Fix rounds the narrowing does not reach: each widens the plan.
+
+
+def test_a_round_after_a_passing_record_runs_the_whole_set(w: World, tmp_path: Path) -> None:
+    sha = w.commit({"cloud/hooks/x.sh": "x\n"})
+    assert verdict(w, tmp_path, sha, SENSITIVE + [VER], "sensitive", "PASS").returncode == 0
+    head = w.commit({"cloud/hooks/x.sh": "exit 0\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted(SENSITIVE)
+    done = verdict(w, tmp_path, head, [COR, VER], "sensitive", "PASS")
+    assert done.returncode == 2 and GRD in done.stderr
+
+
+@pytest.mark.parametrize("path", ["AGENTS.md", "skills/x/SKILL.md", "docs/policy.md"])
+def test_a_fix_round_to_an_instruction_file_runs_guardrail_reviewer(w: World, tmp_path: Path, path: str) -> None:
+    if path == "docs/policy.md":  # a file an instruction file on the default branch imports
+        base_has(w, {"CLAUDE.md": "@docs/policy.md\n", "docs/policy.md": "## Guardrails\n"})
+    first_round(w, tmp_path, {path: "## Guardrails\n- never deploy\n"}, "sensitive", SENSITIVE + [VER], ids=("COR-1",))
+    w.commit({path: "## Guardrails\n- deploy when convenient\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted([COR, GRD])
+
+
+def test_a_fix_path_raised_above_the_records_tier_runs_the_whole_set(w: World, tmp_path: Path) -> None:
+    first_round(w, tmp_path, {"src/app.py": "x = 2\n"}, "standard", [COR, VER], ids=("COR-1",))
+    merge_main(w, {"REVIEW.md": "## Sensitive\n- `src/**`; lenses: leak-hunter\n"})
+    w.commit({"src/app.py": "x = 3\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["tier"] == "sensitive" and sorted(lenses_of(p)) == sorted(SENSITIVE + [LEAK])
