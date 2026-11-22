@@ -61,6 +61,7 @@ Set both on every delegation and in every agent definition (`model` and `effort`
 - The lead resolves mechanical conflicts in the shared files it owns; a conflict inside a worker's code goes back to that worker.
 - A fix round goes back to the same worker, resumed or messaged (it keeps its context), with the verified findings verbatim; when it cannot be resumed, a fresh worker gets the original brief plus those findings.
 - The fix round's brief restates the `review` skill's fix rule: a code fix covers the finding's class with a test that goes red without it, and a claim's fix says less, adding no new completeness claim.
+- On a sensitive change the brief also says the round changes only what the verifier's `Blocking:` line lists, every nit going to the PR's one nit issue; on any other change, a nit only when cheap.
 - After three review-and-fix cycles on one item, stop: rethink the approach from a fresh brief, or park it for the owner (the `needs-owner` label, the findings as its last comment, as the `autopilot` skill does) and take the next item.
 
 ## Review

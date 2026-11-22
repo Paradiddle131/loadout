@@ -4,6 +4,9 @@
   blocking.py <file>   prints how many must-fix findings the line lists; exits 2 with the reason when the line
                        is missing or malformed, names an id no `###` heading outside a code fence opens with, or a listed
                        finding names no harm
+  blocking.py --patched <file>
+                       prints `<ids> <settled id>` for each finding block, outside a code fence, holding the verifier's
+                       `- class: patched, not fixed (<settled id>)` line: a re-raise of a settled must-fix's class
 
 The line is the one right after the output's first `Reviewed:` line (agents/finding-verifier.md § Output):
   Blocking: none
@@ -75,9 +78,35 @@ def read(text: str) -> list[dict]:
     return items
 
 
+PATCHED = re.compile(rf"^{WS}*-{WS}+class:{WS}*patched, not fixed{WS}*\(`?([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-[0-9]+)`?\){WS}*$")
+
+
+def patched(text: str) -> list[tuple[str, str]]:
+    """(the block's ids, the settled id) for each finding block outside a code fence marked `patched, not fixed`."""
+    found, fence, ids = [], None, ""
+    for ln in text.split("\n"):
+        mark = re.match(r"\s*(`{3,}|~{3,})", ln)
+        if mark:
+            fence = None if fence and mark.group(1)[0] == fence[0] else (fence or mark.group(1))
+        elif fence is None and ln.startswith("###"):
+            ids = ln.lstrip("#").strip()
+        elif fence is None and ids and (m := PATCHED.match(ln)):
+            found.append((ids.replace(" ", ""), m.group(1)))
+    return found
+
+
 def main() -> int:
+    if len(sys.argv) == 3 and sys.argv[1] == "--patched":
+        try:
+            text = open(sys.argv[2], encoding="utf-8", errors="replace", newline="").read()
+        except OSError as e:
+            sys.stderr.write(f"{e}\n")
+            return 2
+        for ids, settled in patched(text):
+            print(ids, settled)
+        return 0
     if len(sys.argv) != 2:
-        sys.stderr.write("usage: blocking.py <verifier output>\n")
+        sys.stderr.write("usage: blocking.py [--patched] <verifier output>\n")
         return 2
     try:
         items = read(open(sys.argv[1], encoding="utf-8", errors="replace", newline="").read())
