@@ -78,7 +78,7 @@ def read(text: str) -> list[dict]:
     return items
 
 
-PATCHED = re.compile(rf"^{WS}*-{WS}+class:{WS}*patched, not fixed{WS}*\(`?([A-Za-z0-9_-]+)`?\){WS}*$")
+PATCHED = re.compile(rf"^{WS}*-{WS}+class:{WS}*patched, not fixed{WS}*\(`?([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-[0-9]+)`?\){WS}*$")
 
 
 def patched(text: str) -> list[tuple[str, str]]:

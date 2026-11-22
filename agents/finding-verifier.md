@@ -70,7 +70,7 @@ Then `Lens heads:` with each lens and the head it read. Then `## Must-fix`, `## 
 - lens: <lens>
 - location: <file:line>
 - claim: <the defect, one sentence; a re-raise names the settled id and the new evidence>
-- class: patched, not fixed (<settled id>)
+- class: patched, not fixed (<settled id>)   <a re-raise of a settled must-fix's class only; left out otherwise>
 - harm: <must-fix only: who acts wrongly or what breaks once this lands, and the cost; left out of a nit or pre-existing finding>
 - evidence: <your command> -> <the output lines you saw>
 - reproduce: <self-contained commands>

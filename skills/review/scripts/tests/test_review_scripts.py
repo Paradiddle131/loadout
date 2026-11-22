@@ -1336,6 +1336,8 @@ def test_verdict_notices_a_finding_the_verifier_marks_patched_not_fixed(w: World
     BLOCKING,  # no marker
     BLOCKING + "```\n### COR-9\n" + PATCHED + "```\n",  # a marker inside a code fence is quoted, not the verifier's
     BLOCKING + "- class: patched (COR-1)\n",  # not the fixed shape
+    BLOCKING + "- class: patched, not fixed (none)\n",  # a filler, not a finding id
+    BLOCKING + "- class: patched, not fixed (-)\n",  # a filler, not a finding id
 ])
 def test_verdict_prints_no_notice_without_the_marker(w: World, tmp_path: Path, text: str) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
