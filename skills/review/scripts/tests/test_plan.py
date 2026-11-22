@@ -479,7 +479,7 @@ def test_a_fix_round_runs_no_review_md_lens_its_blocking_line_does_not_name(w: W
     w.commit({"lib/x.py": "y\n"})
     code, p, err = plan(w)
     assert code == 0, err
-    assert lenses_of(p) == [COR]
+    assert lenses_of(p) == [COR, GRD]  # leak-hunter was planned and ran; guardrail-reviewer for a sensitive path
 
 
 @pytest.mark.parametrize("fix", [{"src/new.py": "x\n"}, {"src/new.py": "x\n", "cloud/hooks/x.sh": "y\n"}])
@@ -747,3 +747,59 @@ def test_a_fix_path_raised_above_the_records_tier_runs_the_whole_set(w: World, t
     code, p, err = plan(w)
     assert code == 0, err
     assert p["tier"] == "sensitive" and sorted(lenses_of(p)) == sorted(SENSITIVE + [LEAK])
+
+
+# A fix round also plans every lens the first-review plan for its paths holds that the previous round did not plan,
+# and guardrail-reviewer on any sensitive fix path; imports are read from the tip and the head.
+
+
+def test_a_lead_raised_tier_does_not_hide_a_lens_the_round_never_planned(w: World, tmp_path: Path) -> None:
+    first_round(w, tmp_path, {"src/app.py": "x = 2\n"}, "sensitive", [COR, VER], ids=("COR-1",))
+    merge_main(w, {"REVIEW.md": "## Sensitive\n- `src/**`; lenses: leak-hunter\n"})
+    w.commit({"src/app.py": "x = 3\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted(SENSITIVE + [LEAK])
+
+
+def test_a_policy_rise_inside_a_sensitive_change_plans_the_newly_named_lens(w: World, tmp_path: Path) -> None:
+    first_round(w, tmp_path, {"RULES.md": "x\n", "src/app.py": "x = 2\n"}, "sensitive", SENSITIVE + [VER],
+                ids=("COR-1",))
+    merge_main(w, {"REVIEW.md": "## Sensitive\n- `src/**`; lenses: leak-hunter\n"})
+    w.commit({"src/app.py": "x = 3\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted([COR, GRD, LEAK])
+
+
+def test_a_fix_to_a_file_the_change_imports_runs_guardrail_reviewer(w: World, tmp_path: Path) -> None:
+    first_round(w, tmp_path, {"AGENTS.md": "@docs/policy.md\n", "docs/policy.md": "## Guardrails\n- never deploy\n"},
+                "sensitive", SENSITIVE + [VER], ids=("COR-1",))
+    w.commit({"docs/policy.md": "## Guardrails\n- deploy when convenient\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["round"] == "fix" and GRD in lenses_of(p)
+
+
+def test_a_fix_to_a_rule_file_review_md_lists_runs_guardrail_reviewer(w: World, tmp_path: Path) -> None:
+    base_has(w, {"REVIEW.md": "## Sensitive\n- `FEEDBACK.md`; lenses: guardrail-reviewer\n"})
+    first_round(w, tmp_path, {"FEEDBACK.md": "- never post data\n"}, "sensitive", SENSITIVE + [VER], ids=("COR-1",))
+    w.commit({"FEEDBACK.md": "- post anything\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted([COR, GRD])
+
+
+def test_a_record_with_no_planned_list_plans_the_whole_set(w: World, tmp_path: Path) -> None:
+    # The whole first-review set of the change, leak-hunter for src/** included, though the fix touches only the hook.
+    base_has(w, {"REVIEW.md": "## Sensitive\n- `src/**`; lenses: leak-hunter\n"})
+    first_round(w, tmp_path, SENSITIVE_PAIR, "sensitive", SENSITIVE + [LEAK, VER], ids=("GRD-1",))
+    cs = w.comments()
+    lines = cs[-1]["body"].split("\n")
+    lines[2] = " ".join(x for x in lines[2].split() if not x.startswith("planned="))
+    cs[-1]["body"] = "\n".join(lines)
+    (w.fx / "comments.json").write_text(json.dumps(cs))
+    w.commit({"cloud/hooks/x.sh": "y\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted(SENSITIVE + [LEAK])
