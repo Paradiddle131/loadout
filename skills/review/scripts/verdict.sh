@@ -34,6 +34,7 @@
 #   The line after `Reviewed:` must be the verifier's `Blocking:` line (blocking.py has the shape and its limits):
 #   `none` for a PASS; for a FAIL the must-fix findings it lists, each heading a `###` block below, with a harm of two
 #   words or more not made only of blocking.py's filler words. The lead acts on the line (the review skill).
+#   A finding block's `- class: patched, not fixed (<settled id>)` line prints a notice on stderr, never a refusal.
 #   --tier routine needs no reviewer: --reviewers, --reviewed and --file are optional, --result defaults to pass,
 #   the comment says the tier needs gates only, and the session that wrote the change may run it, since the
 #   paths decide the tier. It is accepted whenever the paths' depth floor is none (a routine change, or a standard
@@ -119,6 +120,12 @@ if [ "$tier" != routine ]; then
     pass:0 | fail:*) ;;
     *) die "the verifier says PASS but its \`Blocking:\` line lists $blocking must-fix finding(s); rerun the verifier." ;;
   esac
+  # A re-raise of a settled must-fix's class: a notice, not a refusal (the review skill sends the item to its rethink).
+  patched=$(python3 "$here/blocking.py" --patched "$file" 2>/dev/null || true)
+  while read -r ids settled; do
+    [ -n "$ids" ] || continue
+    echo "notice: the verifier marks $ids patched, not fixed (it re-raises the class of settled $settled): send the item to its rethink (the review skill, step 5), not another patch." >&2
+  done <<<"$patched"
   # The round's cost and shape: checked here, before anything is read from GitHub or posted.
   why=$(mktemp)
   round_out=$(python3 "$here/record.py" review-round --reviewers "$reviewers" --cycle "$cycle" --dupes "$dupes" \

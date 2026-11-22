@@ -1317,3 +1317,29 @@ def test_verdict_routine_takes_no_repost(w: World) -> None:
     w.commit({"docs/a.md": "x\n"})
     done = w.verdict("12", "--tier", "routine", "--repost")
     assert done.returncode == 2 and "--repost" in done.stderr and w.writes() == []
+
+
+PATCHED = "- class: patched, not fixed (COR-1)\n"
+
+
+def test_verdict_notices_a_finding_the_verifier_marks_patched_not_fixed(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    text = BLOCKING.replace("### COR-1", "### COR-2").replace("- harm:", PATCHED + "- harm:")
+    done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head,
+                     "--file", review_file(tmp_path, head, "FAIL", text, blocking=BLOCKING_LINE.replace("COR-1", "COR-2")))
+    assert done.returncode == 0, done.stderr  # a notice, not a refusal: the record is posted
+    assert "notice: the verifier marks COR-2 patched, not fixed" in done.stderr and "settled COR-1" in done.stderr
+    assert "rethink" in done.stderr and len(w.comments()) == 1
+
+
+@pytest.mark.parametrize("text", [
+    BLOCKING,  # no marker
+    BLOCKING + "```\n### COR-9\n" + PATCHED + "```\n",  # a marker inside a code fence is quoted, not the verifier's
+    BLOCKING + "- class: patched (COR-1)\n",  # not the fixed shape
+])
+def test_verdict_prints_no_notice_without_the_marker(w: World, tmp_path: Path, text: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head,
+                     "--file", review_file(tmp_path, head, "FAIL", text))
+    assert done.returncode == 0, done.stderr
+    assert "notice:" not in done.stderr
