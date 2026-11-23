@@ -19,7 +19,7 @@ It is a pitch: short, plain English, visual, and built around **attention**, mea
   It is a recap by number: the attention part keeps its items, order and full lines, and a question about a change `landings.md` lists in full points to that change's line.
   The closing slide may hold more than three lines, one per question; past about six questions, continue on a second closing slide.
   Strongly suggested, not required: leave it out when nothing waits on the owner.
-- **Plain English for a reader outside the work**, by the standing rule on reports: process metadata stays in the PRs and issues, and every term the deck or page shows gets a gloss on screen where it appears (a few words beside it, or a tooltip): of the standing rule's two forms a debrief uses only the tooltip, and it has no glossary slide or block.
+- **Plain English for a reader outside the work**, by the standing rule on reports, with one departure: process metadata stays in the PRs and issues, and every term the deck or page shows is glossed in place, a few words beside it on screen where it appears; in a debrief that gloss takes the place of the rule's glossary line, and there is no glossary slide or block. A tooltip may add detail but is never a term's only gloss, since a presented, exported or touch-read deck never shows one.
 
 ## The form
 
