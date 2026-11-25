@@ -24,7 +24,7 @@ Inputs, where each is read from, who controls it, and how a lead-controlled one 
 | Policy | `REVIEW.md` at the tip, parsed by tiers.py (tier.sh's parser), and the instruction imports of the tip and of the head (which can only add) | the default branch on the remote | the change's own `REVIEW.md` is never read; an unparsable one rates every path sensitive; no line lowers a path below the built-in floor or below `## Sensitive` |
 | Previous round | `gh api repos/<r>/issues/<n>/comments`, paged by hand: the newest review-marker comment by the owner, a member or a collaborator | a trusted record on the PR | used only when unedited, in verdict.sh's exact shape, above routine, its raw output's first `Reviewed:` naming its `reviewed=`, its `Blocking:` line readable, and `reviewed=` an ancestor of the head and not of the merge-base; else a first review (the widest plan); an older record is never used in its place; untrusted authors are ignored |
 | Answered lenses | that record's `Blocking:` ids, by prefix | a trusted record | an id whose prefix names no lens plans the whole set |
-| Previously planned lenses | that record's round line, `planned=` | a trusted record | a record with none plans the whole set |
+| Previously planned lenses | the round lines' `planned=` of every trusted review record on the PR above routine, joined | trusted records | a record with none plans the whole set |
 | Reviewed paths | `git diff --name-only --no-renames $(git merge-base <tip> <reviewed>) <reviewed>` | that record's `reviewed=` and GitHub's tip | a fix path outside them plans the whole set |
 | `--depth` | the lead's argument | the lead | the depth is the higher of it and the floor; one below the floor refuses |
 | `--reviewers`, `--lens` | the lead's arguments to verdict.sh | the lead | must cover every planned lens and the verifier, each planned lens at its planned effort or above; extra lenses are accepted |
@@ -49,8 +49,8 @@ A fix round is a round after the PR's newest trusted review record (the table's 
 changed since that record's `reviewed=` commit that the change still changes. In focused and light it runs each lens a
 must-fix on the record's `Blocking:` line came from (by its id's prefix, PREFIX) and correctness-reviewer, or
 claims-auditor in its place in focused when every fix path is routine; guardrail-reviewer when a fix path is
-sensitive; and every lens the first-review plan for the fix paths holds that the record's `planned=` does not (all
-of the depth's first-review set when it has no `planned=`). It runs the depth's first-review set, with the answered
+sensitive; and every lens the first-review plan for the fix paths holds that no earlier record's `planned=` holds (all
+of the depth's first-review set when one has no `planned=`). It runs the depth's first-review set, with the answered
 lenses, when the record passed (`Blocking: none`), when a fix path is not among the change's paths at the `reviewed=`
 commit (against the base that commit forked from: a file no earlier round reviewed), or when an id's prefix names no
 lens. In full it runs the whole set.
@@ -244,9 +244,13 @@ def record_fields(c: dict) -> dict | None:
     return f
 
 
-def prior_round(c: dict | None, change: Change) -> tuple[str, list[dict], set[str] | None] | None:
-    """(reviewed commit, its must-fix items, the lenses its round line's `planned=` holds, None when it has none) when
-    `c` can start a fix round of `change`; else None (a first review)."""
+def prior_round(c: dict | None, change: Change,
+                comments: list[dict] = ()) -> tuple[str, list[dict], set[str] | None] | None:
+    """(reviewed commit, its must-fix items, the lenses any earlier round planned, None when a round has no `planned=`)
+    when `c` can start a fix round of `change`; else None (a first review).
+
+    The planned lenses are the union of `planned=` over every trusted review record above routine in `comments` and
+    `c` itself, so a lens an earlier round ran is not added back because the newest, narrowed round left it out."""
     f = record_fields(c) if c else None
     if not f or f["tier"] == "routine":
         return None
@@ -266,8 +270,16 @@ def prior_round(c: dict | None, change: Change) -> tuple[str, list[dict], set[st
     if (run("git", "cat-file", "-e", f"{reviewed}^{{commit}}").returncode or reviewed == change.head
             or not is_ancestor(reviewed, change.head) or is_ancestor(reviewed, change.mb)):
         return None
-    planned = f["round"].get("planned")
-    return reviewed, items, None if planned is None else set(planned.split(",")) - {"none"}
+    union: set[str] = set()
+    for one in [*(x for x in comments if x.get("author_association") in TRUSTED), c]:
+        g = record_fields(one)
+        if not g or g["tier"] == "routine":
+            continue
+        planned = g["round"].get("planned")
+        if planned is None:
+            return reviewed, items, None
+        union |= set(planned.split(",")) - {"none"}
+    return reviewed, items, union
 
 
 # The plan.
@@ -336,8 +348,7 @@ def make_plan(change: Change, prior: tuple[str, list[dict], set[str] | None] | N
             own = change.tier_set(paths) if depth != "light" else {CLM} if change.tier_of(paths) == "routine" else {COR}
             new = first_set if prior[2] is None else own - prior[2]
             if new - lenses:
-                why.append(f"{', '.join(ordered(new - lenses))}, which the fix's paths plan and the previous round did "
-                           "not")
+                why.append(f"{', '.join(ordered(new - lenses))}, which the fix's paths plan and no earlier round did")
             lenses = lenses | new
     run_ = ordered(lenses)
     first = [COR] if depth == "focused" and COR in run_ and len(run_) > 1 else []
@@ -437,7 +448,7 @@ def record_main(a: argparse.Namespace) -> int:
         pairs = [f"depth={f['depth']}", f"floor={change.floor}", f"planned={planned}"]
         print(f"head {change.head}\ntier {change.tier}\ndepth {f['depth']}\npairs {' '.join(pairs)}")
         return 0
-    p = make_plan(change, prior_round(newest_review(comments), change), a.depth)
+    p = make_plan(change, prior_round(newest_review(comments), change, comments), a.depth)
     check_round(p, a.reviewers, a.lens)
     pairs = [f"depth={p['depth']}", f"floor={p['floor']}", f"planned={','.join(p['planned']) or 'none'}"]
     print(f"head {change.head}\ntier {change.tier}\ndepth {p['depth']}\npairs {' '.join(pairs)}")
@@ -448,7 +459,7 @@ def preview_main(a: argparse.Namespace) -> int:
     repo = repo_name()
     change, comments, default = read_pr(repo, a.pr or current_pr(repo))
     p = {"pr": int(a.pr) if a.pr else None, "base": default, "tip": change.base,
-         **make_plan(change, prior_round(newest_review(comments), change), a.depth)}
+         **make_plan(change, prior_round(newest_review(comments), change, comments), a.depth)}
     if a.json:
         print(json.dumps(p))
         return 0

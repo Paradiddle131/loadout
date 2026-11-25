@@ -803,3 +803,56 @@ def test_a_record_with_no_planned_list_plans_the_whole_set(w: World, tmp_path: P
     code, p, err = plan(w)
     assert code == 0, err
     assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted(SENSITIVE + [LEAK])
+
+
+# A narrowed fix round stays narrow on the next one, and the guards that keep it safe are pinned.
+
+PAIR = {"cloud/hooks/x.sh": "x\n", "src/app.py": "x = 5\n"}
+
+
+def test_a_third_round_on_the_same_reviewed_file_stays_narrow(w: World, tmp_path: Path) -> None:
+    """A lens the first round ran and the second dropped is not added back on the third."""
+    first_round(w, tmp_path, PAIR, "sensitive", SENSITIVE + [VER], ids=("GRD-1",))
+    r2 = w.commit({"cloud/hooks/x.sh": "y\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert sorted(lenses_of(p)) == sorted([COR, GRD])
+    assert verdict(w, tmp_path, r2, [COR, GRD, VER], "sensitive", "FAIL", ("GRD-2",)).returncode == 0
+    w.commit({"cloud/hooks/x.sh": "z\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert sorted(lenses_of(p)) == sorted([COR, GRD]), p["why"]
+
+
+def test_a_review_md_lens_does_not_return_on_the_third_round(w: World, tmp_path: Path) -> None:
+    base_has(w, {"REVIEW.md": "## Sensitive\n- `skills/review/**`; lenses: guardrail-reviewer, control-prober\n"})
+    first_round(w, tmp_path, {"skills/review/scripts/plan.py": "x\n"}, "sensitive", SENSITIVE + [CTL, VER],
+                ids=("COR-1",))
+    r2 = w.commit({"skills/review/scripts/plan.py": "y\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert verdict(w, tmp_path, r2, p["planned"], "sensitive", "FAIL", ("COR-2",)).returncode == 0
+    w.commit({"skills/review/scripts/plan.py": "z\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert CTL not in lenses_of(p) and CLM not in lenses_of(p), p["why"]
+
+
+def test_a_fix_touching_a_sensitive_and_a_standard_path_runs_guardrail_reviewer(w: World, tmp_path: Path) -> None:
+    first_round(w, tmp_path, PAIR, "sensitive", SENSITIVE + [VER], ids=("CLM-1",))
+    head = w.commit({"cloud/hooks/x.sh": "y\n", "src/app.py": "x = 6\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert GRD in lenses_of(p)
+    done = verdict(w, tmp_path, head, [COR, CLM, VER], "sensitive")
+    assert done.returncode == 2 and GRD in done.stderr, done.stderr
+
+
+def test_an_id_naming_no_lens_keeps_the_lens_another_id_answers(w: World, tmp_path: Path) -> None:
+    first_round(w, tmp_path, {"src/app.py": "x = 2\n"}, "standard", [COR, CLM, VER], ids=("ODD-1", "CLM-1"))
+    head = w.commit({"src/app.py": "x = 3\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert (p["depth"], CLM in lenses_of(p)) == ("light", True), p
+    done = verdict(w, tmp_path, head, [COR, VER], "standard")
+    assert done.returncode == 2 and CLM in done.stderr, done.stderr

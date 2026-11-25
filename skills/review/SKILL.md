@@ -74,7 +74,7 @@ Done when every planned lens has returned its raw findings; remove the worktrees
 - Then steps 2 to 4 on the new commits only (`<reviewed>..<new head>`), each brief carrying the settled list, built from the earlier `🤖 Review` records: each finding's ids, its rank as that record posted it (on a record with a `Blocking:` line, a must-fix is one that line lists; on an older one, one its `## Must-fix` section holds), and the record's link (templates.md).
   The lenses are what `plan.py` prints, from the PR's newest trusted `🤖 Review` record:
   - in `focused` and `light`, each lens a must-fix on its `Blocking:` line came from, and `correctness-reviewer`, or `claims-auditor` in its place in `focused` when every fix path is routine;
-  - `guardrail-reviewer` too when a fix path is sensitive, and every lens the first-review plan for the fix paths holds that the record's round did not plan;
+  - `guardrail-reviewer` too when a fix path is sensitive, and every lens the first-review plan for the fix paths holds that no earlier round of the PR planned;
   - the depth's first-review set, those lenses with it, when the record passed (`Blocking: none`), when a fix path is one the change did not hold at the record's reviewed commit (a file no earlier round reviewed), or when a blocking id's prefix names no lens;
   - in `full`, the whole set;
   - the verifier on every round.
