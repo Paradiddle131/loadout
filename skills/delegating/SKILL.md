@@ -27,6 +27,7 @@ A repo's own instructions win where they set a different default.
 ## Briefing and isolation
 
 - Write each brief from [BRIEF.md](BRIEF.md), restating every guardrail and rule that binds the item.
+- Before work starts on a check meant to catch every way around a rule (a guard, a lint, a policy check), answer on the item's issue whether the approach can see every case it must catch (what it reads, and what lives elsewhere); a check whose input cannot hold a case is redesigned or scoped down before the first review round, not patched case by case.
 - One worktree and one branch per item, the branch named for what it does under the repo's branch rule; the lead merges it into the item's PR branch.
 - The worker's worktree comes from the delegation tool's isolation option (`isolation: worktree`, which branches from the default branch, not the lead's head) where it has one, else the lead makes it with `git worktree add -b <branch>`.
 - A reviewer works read-only in a detached worktree at the head under review; the shipped review agents make and remove their own.
