@@ -168,7 +168,8 @@ def stamp(rf: dict) -> dict:
 
 def raw_output(body: str) -> str:
     """The verifier's output that verdict.sh put under <details>, in a fence of three or more backticks."""
-    m = re.search(r"<details><summary>[^<]*</summary>\s*\n(?:Clipped[^\n]*\n\s*\n)?(`{3,})[a-z]*\n", body)
+    m = re.search(r"<details><summary>[^<]*</summary>\s*\n(?:Clipped[^\n]*\n\s*\n)?(?:Escaped for GitHub[^\n]*\n\s*\n)?"
+                  r"(`{3,})[a-z]*\n", body)
     if not m:
         return ""
     end = body.find("\n" + m.group(1) + "\n", m.end() - 1)

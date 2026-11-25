@@ -657,3 +657,36 @@ def test_a_repost_without_a_record_is_refused(w: World, tmp_path: Path) -> None:
     done = repost(w, tmp_path, reviewed)
     assert done.returncode == 2 and "record the round anew" in done.stderr, done.stderr
     assert w.writes() == []
+
+
+def test_a_record_whose_output_was_escaped_still_starts_a_fix_round(w: World, tmp_path: Path) -> None:
+    """An escape note above the raw output (record.py's, for what GitHub would change) keeps the record readable."""
+    sha = w.commit({"src/app.py": "x = 2\n"})
+    blocking, text = must_fix("COR-1")
+    out = tmp_path / "escaped.txt"
+    out.write_text(f"VERDICT: FAIL {sha}\nReviewed: {sha}\n{blocking}\n\n{text}- evidence: `a​b` and `(?<![a])`\n")
+    done = w.verdict("12", "--tier", "standard", "--reviewers", f"{COR}, {VER}", "--reviewed", sha,
+                     "--file", str(out), "--cycle", "1", "--dupes", "0", "--nits", "0",
+                     "--lens", f"{COR} model=opus effort=high tokens=10 seconds=1 findings=1",
+                     "--lens", f"{VER} model=opus effort=high tokens=10 seconds=1 findings=1", cost=False)
+    assert done.returncode == 0, done.stderr
+    assert "Escaped for GitHub, which would change them: 2 place(s)" in w.comments()[-1]["body"]
+    w.commit({"src/app.py": "x = 3\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert (p["round"], p["since"]) == ("fix", sha), p
+
+
+def test_the_audit_reads_the_raw_output_of_an_escaped_record(tmp_path: Path) -> None:
+    sys.path.insert(0, str(SCRIPTS.parent.parent / "review-audit" / "scripts"))
+    import audit  # noqa: PLC0415
+
+    sha = "a" * 40
+    out = tmp_path / "o.txt"
+    out.write_text(f"VERDICT: PASS {sha}\nReviewed: {sha}\nBlocking: none\n- `a​b`\n")
+    body = subprocess.run([sys.executable, str(RECORD), "build", "--kind", "review", "--sha", sha, "--state",
+                           "success", "--tier", "standard", "--reviewed", sha, "--title", "🤖 Review: pass (standard tier)",
+                           "--file", str(out), "--details", "Reviewer output (raw)"],
+                          capture_output=True, text=True, check=True).stdout
+    assert "Escaped for GitHub" in body
+    assert audit.raw_output(body).startswith(f"VERDICT: PASS {sha}\n")

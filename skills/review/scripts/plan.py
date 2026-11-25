@@ -86,7 +86,8 @@ MARKER = re.compile(r"<!-- loadout:review((?: [a-z]+=[^\s=]+)+) -->")
 TITLE = re.compile(r"🤖 Review: (pass|fail) \((routine|standard|sensitive) tier\)")
 FIELDS = {"sha", "state", "tier", "reviewed", "depth"}
 ROUND = re.compile("<!-- loadout" r":round((?: [a-z]+=[A-Za-z0-9._,:-]+)+) -->")
-RAW = re.compile(r"<details><summary>[^<\n]*</summary>\n\n(?:Clipped[^\n]*\n\n)?(`{3,})text\n(.*?)\1\n\n</details>",
+RAW = re.compile(r"<details><summary>[^<\n]*</summary>\n\n(?:Clipped[^\n]*\n\n)?(?:Escaped for GitHub[^\n]*\n\n)?"
+                 r"(`{3,})text\n(.*?)\1\n\n</details>",
                  re.S)
 SHA = re.compile(r"[0-9a-f]{40}")
 REVIEWED_SHA = re.compile(r"^[ \t\v\f\r]*Reviewed:[ \t\v\f\r]*`?([0-9a-f]{7,40})`?[ \t\v\f\r]*$")
