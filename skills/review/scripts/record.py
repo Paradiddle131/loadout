@@ -6,6 +6,7 @@
                   [--file <raw output>] [--details <summary>]
     prints the body: the title, the marker line, the round line, the lines, and the raw output under <details> in
     a fence longer than any backtick run in it, clipped (with a note) so the whole body fits GitHub's comment limit.
+    The lines and the raw output are escaped first (escape() below), so GitHub stores the body as it is sent.
   record.py review-round --reviewers <names> --cycle <n> --dupes <n> --nits <n> --mustfix <n>
                   --lens "<name> model=<m> effort=<e> tokens=<n> seconds=<n> findings=<n>"... [--dismissals <file>]
     checks a review round's cost and shape and prints, one per line, the --round pairs (first line, blank-separated)
@@ -36,6 +37,7 @@ import json
 import re
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
 COMMENT_MAX = 65536  # GitHub's limit on a comment body, in characters
@@ -233,6 +235,43 @@ def review_round(a: argparse.Namespace) -> list[str]:
     return [" ".join(pairs), *table]
 
 
+# What GitHub changes in a comment body as it stores it, code fences included (measured on a posted comment):
+# it deletes format characters (zero-width spaces and joiners, bidirectional controls, the soft hyphen, the BOM),
+# breaks the line at U+0085, U+2028 and U+2029, writes control characters as `^G`, turns no-break and other wide
+# spaces into a plain space, and drops the `!` of `<![`. Each such character is written as `\u{XXXX}` instead, a
+# literal `\u{` as `\u{5C}u{` so the escape reads back unambiguously, and the body GitHub stores is the one sent.
+ESCAPED = re.compile(r"\\u\{|<!\[|[^\x20-\x7e\t\n]")  # candidates; escape() keeps those GitHub keeps
+
+
+def changed_by_github(ch: str) -> bool:
+    """A character GitHub deletes or rewrites: a format or control character, or a space or line break that is
+    not a plain space or a newline (Unicode categories Cf, Cc, Zs, Zl, Zp)."""
+    cat = unicodedata.category(ch)
+    return ch not in " \t\n" and (cat in ("Cf", "Cc", "Zl", "Zp") or cat == "Zs")
+
+
+def escape(text: str) -> tuple[str, int]:
+    """`text` with every character GitHub would change written as `\\u{XXXX}` (above); and how many were."""
+    text = text.replace("\r\n", "\n")
+    n = 0
+
+    def one(m: re.Match[str]) -> str:
+        nonlocal n
+        got = m.group(0)
+        if got == "\\u{":
+            n += 1
+            return "\\u{5C}u{"
+        if got == "<![":
+            n += 1
+            return "<\\u{21}["
+        if not changed_by_github(got):
+            return got
+        n += 1
+        return f"\\u{{{ord(got):X}}}"
+
+    return ESCAPED.sub(one, text), n
+
+
 def build(a: argparse.Namespace) -> str:
     if not SHA.fullmatch(a.sha) or (a.reviewed and not SHA.fullmatch(a.reviewed)):
         sys.exit("record.py: a sha must be 40 hex characters")
@@ -250,16 +289,21 @@ def build(a: argparse.Namespace) -> str:
         third = round_line(a.round)
     except (OSError, ValueError) as exc:
         sys.exit(f"record.py: {exc}")
-    head = "\n".join([a.title, marker, third, "", *a.line]) + "\n"
-    raw = open(a.file, encoding="utf-8", errors="replace").read() if a.file else ""
+    lines = [escape(ln) for ln in a.line]
+    head = "\n".join([a.title, marker, third, "", *(ln for ln, _ in lines)]) + "\n"
+    raw = open(a.file, encoding="utf-8", errors="replace", newline="").read() if a.file else ""
     if not raw.strip():
         return head
+    raw, n = escape(raw)
+    n += sum(k for _, k in lines)
+    escaped = (f"Escaped for GitHub, which would change them: {n} place(s), each written as `\\u{{XXXX}}`.\n\n"
+               if n else "")
     fence = "```"
     while fence in raw:
         fence += "`"
 
     def body(text: str, note: str = "") -> str:
-        return (head + f"\n<details><summary>{a.details}</summary>\n\n" + note + fence + "text\n" + text
+        return (head + f"\n<details><summary>{a.details}</summary>\n\n" + note + escaped + fence + "text\n" + text
                 + ("" if text.endswith("\n") else "\n") + fence + "\n\n</details>\n")
 
     out, keep = body(raw), len(raw)

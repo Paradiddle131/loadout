@@ -11,6 +11,7 @@ State lives in $STUB_DIR:
   `{"name", "commit": {"sha"}}`; with neither, that call fails as an HTTP 404 does.
 STUB_FAIL=<text>: a call whose endpoint contains it fails the way gh does on an HTTP error.
 STUB_MANGLE=1: a comment read back by id differs from the one posted.
+A posted body is stored as GitHub stores one (stored() below, measured on a real comment), unless STUB_VERBATIM=1.
 STUB_SLEEP=<seconds>: every call waits that long first (a slow GitHub).
 """
 
@@ -68,10 +69,30 @@ def load(name: str, default: object) -> object:
     return json.loads(p.read_text()) if p.exists() else default
 
 
+def stored(body: str) -> str:
+    """What GitHub keeps of a posted comment body, code fences included, as measured on a posted comment."""
+    import unicodedata
+
+    def one(ch: str) -> str:
+        cp = ord(ch)
+        if ch in "\x85\u2028\u2029":
+            return "\n"
+        if cp < 0x20 and ch not in "\t\n\r":
+            return "^" + chr(cp + 64)
+        if unicodedata.category(ch) == "Zs" and ch != " ":
+            return " "
+        if unicodedata.category(ch) == "Cf" and not 0xE0000 <= cp <= 0xE007F:
+            return ""
+        return ch
+
+    return "".join(one(ch) for ch in body).replace("<![", "<[")
+
+
 comments = load("comments.json", [])
 if method == "POST" and re.search(r"/issues/\d+/comments$", ep):
     n = ep.split("/")[-2]
-    new = {"id": 1000 + len(comments), "body": fields["body"], "author_association": "OWNER",
+    body = fields["body"] if os.environ.get("STUB_VERBATIM") else stored(fields["body"])
+    new = {"id": 1000 + len(comments), "body": body, "author_association": "OWNER",
            "created_at": f"2000-01-01T00:{len(comments):02d}:00Z",
            "html_url": f"https://github.com/example-owner/example-repo/pull/{n}#issuecomment-{1000 + len(comments)}"}
     new["updated_at"] = new["created_at"]
