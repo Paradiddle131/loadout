@@ -1107,9 +1107,11 @@ def test_verdict_refuses_a_missing_repeated_or_impossible_dismissals_line(w: Wor
 @pytest.mark.parametrize("line", ["Dismissals: re-ran two, promoted 1", "Dismissals: none", "Dismissals: re-ran 2"])
 def test_verdict_refuses_a_malformed_dismissals_line(w: World, tmp_path: Path, line: str) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head,
-                     "--file", review_file(tmp_path, head, text=f"No findings.\n{line}\n"))
-    assert done.returncode == 2 and "Dismissals line" in done.stderr and w.writes() == []
+    out = tmp_path / "out.txt"  # the malformed line is the header's only one, so its own refusal must fire
+    out.write_text(f"VERDICT: PASS {head}\nReviewed: {head}\nBlocking: none\n{line}\n\nNo findings.\n")
+    done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head, "--file", str(out))
+    assert done.returncode == 2 and "Dismissals line is not `Dismissals: re-ran" in done.stderr, done.stderr
+    assert w.writes() == []
 
 
 def test_verdict_routine_carries_the_version_kit_and_depth_only(w: World) -> None:
