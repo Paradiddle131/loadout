@@ -75,8 +75,6 @@ def stored(body: str) -> str:
 
     def one(ch: str) -> str:
         cp = ord(ch)
-        if ch in "\x85\u2028\u2029":
-            return "\n"
         if cp < 0x20 and ch not in "\t\n\r":
             return "^" + chr(cp + 64)
         if unicodedata.category(ch) == "Zs" and ch != " ":
