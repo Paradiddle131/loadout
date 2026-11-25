@@ -5,13 +5,17 @@
 # Usage: verdict.sh <pr> --tier routine|standard|sensitive [--result pass|fail] \
 #          --reviewers "<names>" --reviewed <sha> --file <verifier output> \
 #          --cycle <n> --dupes <n> --nits <n> --lens "<name> model=<m> effort=<e> tokens=<n> seconds=<n> findings=<n>"... \
-#          [--depth none|light|focused|full] [--repost] [--dry-run]
+#          [--depth none|light|focused|full] [--owner "<the owner's words>"] [--repost] [--dry-run]
 #   The round's plan is plan.py's, computed here from what GitHub names (the PR's head, its default branch and that
 #   branch's tip, the PR's newest trusted review record) and REVIEW.md on that tip; plan.py's header has the rules and
 #   the table of its inputs. --depth raises the plan's depth above the paths' floor, never below it. Above routine,
 #   --reviewers must name every planned lens and finding-verifier, and each planned lens's --lens effort must be at
 #   least its planned effort; extra lenses are accepted. The depth goes on the marker (depth=), and depth, floor and
 #   planned on the round line.
+#   --owner quotes the owner's instruction that set this round's depth (the review skill's owner override): --depth is
+#   then taken as given (light, focused or full), below the floor too; the marker carries override=<depth>, which
+#   the merge guard accepts below the floor, and the record quotes the words. A --repost carries the reposted
+#   record's override= and takes no --owner.
 #   --reviewers is every agent that ran in the round, the verifier included, split by commas or blanks.
 #   --cycle (1 for a first review), --dupes (findings the verifier merged), --nits and one --lens per agent named in
 #   --reviewers, no other, say what the round cost and found (required above routine; record.py review-round checks
@@ -53,8 +57,8 @@
 set -euo pipefail
 export LC_ALL=C # grep's [[:space:]] and blocking.py's blanks agree only in the C locale
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-usage='usage: verdict.sh <pr> --tier routine|standard|sensitive [--result pass|fail] --reviewers "<names>" --reviewed <sha> --file <verifier output> --cycle <n> --dupes <n> --nits <n> --lens "<name> model=<m> effort=<e> tokens=<n> seconds=<n> findings=<n>"... [--depth <d>] [--repost] [--dry-run]'
-pr='' tier='' result='' reviewers='' reviewed='' file='' cycle='' dupes='' nits='' repost='' depth=''
+usage='usage: verdict.sh <pr> --tier routine|standard|sensitive [--result pass|fail] --reviewers "<names>" --reviewed <sha> --file <verifier output> --cycle <n> --dupes <n> --nits <n> --lens "<name> model=<m> effort=<e> tokens=<n> seconds=<n> findings=<n>"... [--depth <d>] [--owner "<words>"] [--repost] [--dry-run]'
+pr='' tier='' result='' reviewers='' reviewed='' file='' cycle='' dupes='' nits='' repost='' depth='' owner='' has_owner=''
 lens=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -67,6 +71,7 @@ while [ $# -gt 0 ]; do
     --dupes) dupes=${2:-}; shift 2 ;;
     --nits) nits=${2:-}; shift 2 ;;
     --depth) depth=${2:-}; shift 2 ;;
+    --owner) owner=${2:-}; has_owner=1; shift 2 ;;
     --lens) lens+=(--lens "${2:-}"); shift 2 ;;
     --repost) repost=--repost; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -147,7 +152,7 @@ cd "$(git rev-parse --show-toplevel 2>/dev/null)" || die "run verdict.sh from a 
 head=$(pr_head "$pr")
 default=$(pr_default_branch "$pr")
 # The plan: plan.py reads its own inputs from GitHub and force-fetches the default branch's tip GitHub names.
-plan_args=(record --pr "$pr" --tier "$tier" ${depth:+--depth "$depth"})
+plan_args=(record --pr "$pr" --tier "$tier" ${depth:+--depth "$depth"} ${has_owner:+--owner "$owner"})
 if [ "$tier" = routine ]; then
   plan_args+=(--routine)
 else
@@ -159,9 +164,9 @@ plan_out=$(python3 "$here/plan.py" ${plan_args[@]+"${plan_args[@]}"} 2>"$why") |
   die "${reason#plan.py: }"
 }
 rm -f "$why"
-plan_head='' plan_depth='' plan_pairs=''
+plan_head='' plan_depth='' plan_pairs='' plan_override=''
 while read -r k v; do
-  case "$k" in head) plan_head=$v ;; depth) plan_depth=$v ;; pairs) plan_pairs=$v ;; esac
+  case "$k" in head) plan_head=$v ;; depth) plan_depth=$v ;; pairs) plan_pairs=$v ;; override) plan_override=$v ;; esac
 done <<<"$plan_out"
 [ "$plan_head" = "$head" ] || die "PR $pr's head moved while the plan was read: run again"
 for c in "$head" ${reviewed:+"$reviewed"}; do
@@ -205,6 +210,11 @@ state=failure
 lines=(--line "- Head commit: \`$head\`" --line "- Reviewed commit: \`$reviewed\`$merged_note"
   --line "- Tier from the paths: $computed" --line "- Depth: $plan_depth (${plan_pairs// /, })"
   --line "- Reviewers: ${reviewers:-none}")
+if [ -n "$plan_override" ] && [ -n "$repost" ]; then
+  lines+=(--line "- Owner override: depth $plan_override, carried from the reposted round's record, which quotes the owner")
+elif [ -n "$plan_override" ]; then
+  lines+=(--line "- Owner override: depth $plan_override, by the owner's words: \"$owner\"")
+fi
 [ "$tier" != routine ] || lines+=(--line "- The routine tier needs gates only: no reviewer was required.")
 round=()
 read -r -a plan_pair_list <<<"$plan_pairs"
@@ -220,6 +230,7 @@ if [ -n "$round_out" ]; then
 fi
 for p in ${plan_pair_list[@]+"${plan_pair_list[@]}"}; do round+=(--round "$p"); done
 build_record --kind review --sha "$head" --state "$state" --tier "$tier" --reviewed "$reviewed" --depth "$plan_depth" \
+  ${plan_override:+--override "$plan_override"} \
   ${round[@]+"${round[@]}"} \
   --title "🤖 Review: $result ($tier tier)" ${lines[@]+"${lines[@]}"} ${file:+--file "$file"} \
   --details "Reviewer output (raw)" >"$tmp/body.md"

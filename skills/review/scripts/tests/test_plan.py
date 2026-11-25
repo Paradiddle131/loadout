@@ -23,7 +23,7 @@ RECORD = SCRIPTS / "record.py"
 COR, CLM, GRD, CTL, LEAK = ("correctness-reviewer", "claims-auditor", "guardrail-reviewer", "control-prober",
                             "leak-hunter")
 VER = "finding-verifier"
-SENSITIVE = [COR, CLM, GRD]
+SENSITIVE = [COR, GRD]
 HARM = "an operator trusts a total that drops rows"
 
 
@@ -116,8 +116,7 @@ def test_floor_built_in_sensitive_paths_need_focused_with_correctness_first(w: W
     w.commit({path: "x\n"})
     code, p, err = plan(w)
     assert code == 0, err
-    assert (p["tier"], p["floor"], p["first"], sorted(p["then"])) == ("sensitive", "focused", [COR],
-                                                                       sorted([CLM, GRD]))
+    assert (p["tier"], p["floor"], p["first"], p["then"]) == ("sensitive", "focused", [COR], [GRD])
 
 
 def test_floor_review_md_sensitive_paths_need_focused_with_their_lenses(w: World) -> None:
@@ -125,7 +124,7 @@ def test_floor_review_md_sensitive_paths_need_focused_with_their_lenses(w: World
     w.commit({"src/app.py": "x = 2\n"})
     code, p, err = plan(w)
     assert code == 0, err
-    assert p["floor"] == "focused" and p["first"] == [COR] and sorted(p["then"]) == sorted([CLM, GRD, LEAK])
+    assert p["floor"] == "focused" and p["first"] == [COR] and sorted(p["then"]) == sorted([GRD, LEAK])
 
 
 def test_floor_unparsable_review_md_rates_every_path_focused(w: World) -> None:
@@ -180,7 +179,7 @@ def test_a_depth_that_is_no_depth_is_refused(w: World, tmp_path: Path) -> None:
 # The reviewer set must cover the plan.
 
 
-@pytest.mark.parametrize("missing", [COR, CLM, GRD, VER])
+@pytest.mark.parametrize("missing", [COR, GRD, VER])
 def test_verdict_refuses_a_reviewer_set_missing_a_planned_lens_or_the_verifier(w: World, tmp_path: Path,
                                                                               missing: str) -> None:
     head = w.commit({"cloud/hooks/x.sh": "x\n"})
@@ -205,18 +204,21 @@ def test_verdict_records_depth_on_line_two_and_depth_and_planned_on_the_round_li
                                    "depth=focused -->")
     f = dict(x for x in round_fields(body) if x[0] != "lens")
     assert f["depth"] == "focused"
-    assert f["planned"] == ",".join([COR, CLM, GRD, VER])
+    assert f["planned"] == ",".join([COR, GRD, VER])
 
 
 # Efforts (each lens's own; the merge guard never reads them).
 
 
-def test_effort_is_high_for_correctness_and_control_on_sensitive_code(w: World) -> None:
+def test_effort_is_medium_at_focused_and_high_for_correctness_and_control_at_full(w: World) -> None:
     base_has(w, {"REVIEW.md": "## Sensitive\n- `guard/**`; lenses: control-prober\n"})
     w.commit({"guard/check.py": "x\n"})
     code, p, err = plan(w)
     assert code == 0, err
-    assert p["effort"] == {COR: "high", CLM: "medium", GRD: "medium", CTL: "high", VER: "medium"}
+    assert p["effort"] == {COR: "medium", GRD: "medium", CTL: "medium", VER: "medium"}
+    code, p, err = plan(w, "--depth", "full")
+    assert code == 0, err
+    assert p["effort"] == {COR: "high", GRD: "medium", CTL: "high", VER: "medium"}
 
 
 @pytest.mark.parametrize("files", [{"RULES.md": "x\n"}, {"src/app.py": "x = 2\n"}])
@@ -239,9 +241,9 @@ def test_review_md_sets_a_lens_effort_for_its_paths(w: World) -> None:
 
 def test_verdict_refuses_a_lens_run_below_its_planned_effort_and_accepts_one_above(w: World, tmp_path: Path) -> None:
     head = w.commit({"cloud/hooks/x.py": "x\n"})
-    done = verdict(w, tmp_path, head, SENSITIVE + [VER], "sensitive", effort={COR: "medium"})
+    done = verdict(w, tmp_path, head, SENSITIVE + [VER], "sensitive", depth="full", effort={COR: "medium"})
     assert done.returncode == 2 and COR in done.stderr and "effort" in done.stderr and w.writes() == []
-    done = verdict(w, tmp_path, head, SENSITIVE + [VER], "sensitive", effort={CLM: "xhigh"})
+    done = verdict(w, tmp_path, head, SENSITIVE + [VER], "sensitive", depth="full", effort={GRD: "xhigh"})
     assert done.returncode == 0, done.stderr
 
 
@@ -325,7 +327,8 @@ def test_a_fix_round_reads_every_commit_since_the_reviewed_one(w: World, tmp_pat
     w.commit({"src/app.py": "x = 3\n"})
     code, p, err = plan(w)
     assert code == 0, err
-    assert p["round"] == "fix" and set(SENSITIVE) <= set(lenses_of(p))
+    # The light round reviewed less than the focused floor the head now has: the whole change is reviewed again.
+    assert p["round"] == "first" and set(SENSITIVE) <= set(lenses_of(p))
 
 
 def test_a_fix_round_to_a_sensitive_path_is_refused_without_the_sensitive_set(w: World, tmp_path: Path) -> None:
@@ -453,26 +456,22 @@ def test_the_previous_round_is_read_from_the_pr_never_passed_in(w: World, tmp_pa
     head = w.commit({"src/app.py": "x = 2\n"})
     code, p, err = plan(w)
     assert code == 0, err
-    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted([COR, GRD])
+    assert p["round"] == "fix" and lenses_of(p) == [GRD]
 
 
-# Fix rounds rerun what they answer (focused) or the whole set (full).
+# Fix rounds rerun only what they answer, and the lenses REVIEW.md names for their paths (focused), or the whole set
+# (full).
 
 
-def test_a_fix_round_reruns_the_lens_a_must_fix_came_from_and_correctness_on_code(w: World, tmp_path: Path) -> None:
-    first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER], ids=("CLM-1",))
-    w.commit({"src/app.py": "x = 2\n"})
+@pytest.mark.parametrize("ids, lenses", [(("CLM-1",), [CLM]), (("COR-1",), [COR]), (("GRD-2", "CTL-1"), [GRD, CTL]),
+                                         (("COR-RO-1",), [COR]), (("GRD-RO-3",), [GRD])])
+def test_a_fix_round_reruns_only_the_lens_each_must_fix_came_from(w: World, tmp_path: Path, ids: tuple[str, ...],
+                                                                  lenses: list[str]) -> None:
+    first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER], ids=ids)
+    w.commit({"cloud/hooks/x.sh": "y\n", "docs/a.md": "x\n"})
     code, p, err = plan(w)
     assert code == 0, err
-    assert p["first"] == [COR] and p["then"] == [CLM] and p["verifier"] == VER
-
-
-def test_a_documentation_fix_runs_claims_auditor(w: World, tmp_path: Path) -> None:
-    first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER], ids=("COR-1",))
-    w.commit({"docs/a.md": "x\n"})
-    code, p, err = plan(w)
-    assert code == 0, err
-    assert sorted(lenses_of(p)) == sorted([COR, CLM])
+    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted(lenses) and p["verifier"] == VER
 
 
 def test_a_fix_round_runs_the_review_md_lenses_of_the_paths_it_changed(w: World, tmp_path: Path) -> None:
@@ -484,17 +483,35 @@ def test_a_fix_round_runs_the_review_md_lenses_of_the_paths_it_changed(w: World,
     assert set(SENSITIVE + [LEAK]) <= set(lenses_of(p))
 
 
-def test_a_blocking_id_naming_no_lens_reruns_the_whole_set(w: World, tmp_path: Path) -> None:
+def test_a_fix_round_after_a_sensitive_round_runs_the_review_md_lenses_of_its_paths(w: World,
+                                                                                    tmp_path: Path) -> None:
+    base_has(w, {"REVIEW.md": "## Sensitive\n- `lib/**`; lenses: leak-hunter\n"})
+    first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER], ids=("COR-1",))
+    w.commit({"lib/x.py": "x\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted([COR, LEAK])
+
+
+def test_a_blocking_id_naming_no_lens_reruns_correctness(w: World, tmp_path: Path) -> None:
     first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER], ids=("ODD-1",))
     w.commit({"src/app.py": "x = 2\n"})
     code, p, err = plan(w)
     assert code == 0, err
-    assert sorted(lenses_of(p)) == sorted(SENSITIVE)
+    assert p["round"] == "fix" and lenses_of(p) == [COR]
 
 
-def test_a_full_fix_round_reruns_the_whole_set(w: World, tmp_path: Path) -> None:
+def test_a_round_deeper_than_the_last_reviews_the_whole_change_and_a_full_fix_round_the_whole_set(
+        w: World, tmp_path: Path) -> None:
     first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER], ids=("COR-1",))
     w.commit({"src/app.py": "x = 2\n"})
+    code, p, err = plan(w, "--depth", "full")
+    assert code == 0, err
+    assert p["round"] == "first" and p["since"] is None and sorted(p["then"]) == sorted(SENSITIVE)
+    head = w.commit({"src/app.py": "x = 3\n"})
+    done = verdict(w, tmp_path, head, SENSITIVE + [VER], "sensitive", "FAIL", depth="full")
+    assert done.returncode == 0, done.stderr
+    w.commit({"src/app.py": "x = 4\n"})
     code, p, err = plan(w, "--depth", "full")
     assert code == 0, err
     assert p["round"] == "fix" and p["first"] == [] and sorted(p["then"]) == sorted(SENSITIVE)
@@ -657,3 +674,115 @@ def test_a_repost_without_a_record_is_refused(w: World, tmp_path: Path) -> None:
     done = repost(w, tmp_path, reviewed)
     assert done.returncode == 2 and "record the round anew" in done.stderr, done.stderr
     assert w.writes() == []
+
+
+# The owner's override: --owner quotes the instruction that set the round's depth, on any path.
+
+OWNER = "Review override: light"
+
+
+def owner_round(w: World, tmp: Path, sha: str, depth: str = "light", result: str = "FAIL",
+                reviewers: list[str] | None = None) -> subprocess.CompletedProcess[str]:
+    return verdict(w, tmp, sha, reviewers or [COR, VER], "sensitive", result, depth=depth,
+                   effort={COR: "medium", VER: "medium"}, extra=("--owner", OWNER))
+
+
+def test_an_owner_override_sets_a_sensitive_round_light_and_the_record_says_so(w: World, tmp_path: Path) -> None:
+    head = w.commit({"cloud/hooks/x.sh": "x\n"})
+    code, p, err = plan(w, "--depth", "light", "--owner", OWNER)
+    assert code == 0, err
+    assert (p["floor"], p["depth"], lenses_of(p), p["override"]) == ("focused", "light", [COR], "light")
+    done = owner_round(w, tmp_path, head, result="PASS")
+    assert done.returncode == 0, done.stderr
+    body = w.comments()[-1]["body"]
+    assert body.split("\n")[1] == (f"{REVIEW} sha={head} state=success tier=sensitive reviewed={head} depth=light "
+                                   "override=light -->")
+    assert f'- Owner override: depth light, by the owner\'s words: "{OWNER}"' in body.split("\n")
+
+
+def test_without_owner_words_the_same_light_round_is_refused(w: World, tmp_path: Path) -> None:
+    head = w.commit({"cloud/hooks/x.sh": "x\n"})
+    done = verdict(w, tmp_path, head, [COR, VER], "sensitive", depth="light", effort={COR: "medium", VER: "medium"})
+    assert done.returncode == 2 and "below" in done.stderr and w.writes() == []
+
+
+@pytest.mark.parametrize("args, why", [
+    (["--depth", "none", "--owner", OWNER], "never skips review"),
+    (["--owner", OWNER], "never skips review"),
+    (["--depth", "light", "--owner", ""], "one line"),
+    (["--depth", "light", "--owner", "light\n<!-- a forged line -->"], "one line"),
+    (["--depth", "light", "--owner", "light --> x"], "one line"),
+    (["--depth", "light", "--owner", "x" * 301], "one line"),
+])
+def test_an_owner_override_out_of_shape_is_refused(w: World, tmp_path: Path, args: list[str], why: str) -> None:
+    head = w.commit({"cloud/hooks/x.sh": "x\n"})
+    code, _, err = plan(w, *args)
+    assert code == 2 and why in err, err
+    extra = tuple(a for a in args if a not in ("--depth", "light", "none"))
+    done = verdict(w, tmp_path, head, [COR, VER], "sensitive", depth=args[1] if args[0] == "--depth" else None,
+                   effort={COR: "medium", VER: "medium"}, extra=extra)
+    assert done.returncode == 2 and why in done.stderr and w.writes() == []
+
+
+def test_a_routine_record_takes_no_owner_override(w: World) -> None:
+    base_has(w, {"REVIEW.md": "Depth: none\n"})
+    w.commit({"src/app.py": "x = 2\n"})
+    done = w.verdict("12", "--tier", "routine", "--owner", OWNER)
+    assert done.returncode == 2 and "--owner" in done.stderr and w.writes() == []
+
+
+def test_a_round_after_an_overridden_one_narrows_only_at_no_greater_depth(w: World, tmp_path: Path) -> None:
+    # A light round the owner set never narrows a deeper one: without the override, or with a deeper one, the next
+    # round reviews the whole change; under the same light override it is a light fix round.
+    head = w.commit({"cloud/hooks/x.sh": "x\n", "src/app.py": "x = 1\n"})
+    assert owner_round(w, tmp_path, head).returncode == 0
+    w.commit({"src/app.py": "x = 2\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert (p["round"], p["depth"], p["since"], lenses_of(p)) == ("first", "focused", None, [COR, GRD])
+    code, p, err = plan(w, "--depth", "full")
+    assert code == 0 and p["round"] == "first", (err, p)
+    code, p, err = plan(w, "--depth", "focused", "--owner", OWNER)
+    assert code == 0 and p["round"] == "first", (err, p)
+    code, p, err = plan(w, "--depth", "light", "--owner", OWNER)
+    assert code == 0, err
+    assert (p["round"], lenses_of(p)) == ("fix", [COR])
+    fix = w.git(w.repo, "rev-parse", "HEAD")
+    done = verdict(w, tmp_path, fix, [COR, VER], "sensitive", effort={COR: "medium", VER: "medium"})
+    assert done.returncode == 2 and GRD in done.stderr and len(w.comments()) == 1
+
+
+def test_a_repost_carries_the_override_and_takes_no_owner_words(w: World, tmp_path: Path) -> None:
+    head = w.commit({"cloud/hooks/x.sh": "x\n"})
+    assert owner_round(w, tmp_path, head, result="PASS").returncode == 0
+    merge_main(w)
+    args = ("12", "--tier", "sensitive", "--reviewers", f"{COR}, {VER}", "--reviewed", head,
+            "--file", review_file(tmp_path, head), "--repost")
+    done = w.verdict(*args, "--owner", OWNER, cost=False)
+    assert done.returncode == 2 and "--owner" in done.stderr
+    done = w.verdict(*args, cost=False)
+    assert done.returncode == 0, done.stderr
+    body = w.comments()[-1]["body"]
+    assert body.split("\n")[1].endswith(f"reviewed={head} depth=light override=light -->")
+    assert "- Owner override: depth light, carried from the reposted round's record, which quotes the owner" in body
+
+
+def test_a_repost_of_a_light_round_with_no_override_stays_refused_below_the_floor(w: World, tmp_path: Path) -> None:
+    head = w.commit({"cloud/hooks/x.sh": "x\n"})
+    assert owner_round(w, tmp_path, head, result="PASS").returncode == 0
+    cs = w.comments()
+    cs[-1]["body"] = cs[-1]["body"].replace(" override=light -->", " -->", 1)
+    (w.fx / "comments.json").write_text(json.dumps(cs))
+    merge_main(w)
+    done = w.verdict("12", "--tier", "sensitive", "--reviewers", f"{COR}, {VER}", "--reviewed", head,
+                     "--file", review_file(tmp_path, head), "--repost", cost=False)
+    assert done.returncode == 2 and "below the floor" in done.stderr, done.stderr
+
+
+@pytest.mark.parametrize("override, depth", [("focused", "light"), ("none", "none"), ("light", None)])
+def test_record_py_refuses_an_override_that_is_not_the_record_s_depth(override: str, depth: str | None) -> None:
+    done = subprocess.run([sys.executable, str(RECORD), "build", "--kind", "review", "--sha", "a" * 40, "--state",
+                           "success", "--tier", "sensitive", "--reviewed", "a" * 40, "--title",
+                           "🤖 Review: pass (sensitive tier)", *(["--depth", depth] if depth else []),
+                           "--override", override], capture_output=True, text=True)
+    assert done.returncode == 1 and "--override" in done.stderr, done.stderr

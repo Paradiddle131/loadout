@@ -801,6 +801,36 @@ def test_a_record_s_depth_is_checked_against_a_lab_policy_too(fx: Fx, tmp_path: 
     assert reason and "full" in reason, reason
 
 
+# The owner's override (verdict.sh --owner): a record whose override= names its own depth passes below the floor.
+
+
+def test_an_owner_override_naming_the_record_s_depth_merges_below_the_floor(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"})
+    body = record("review", sha=head, tier="sensitive", depth="light").replace(" depth=light -->",
+                                                                                " depth=light override=light -->", 1)
+    fx.comments(comment(record("gates", sha=head)), comment(body))
+    assert mcp(fx, r, expectedHeadSha=head) is None
+
+
+@pytest.mark.parametrize("marker", [" depth=light override=focused -->", " depth=light override=none -->",
+                                    " depth=light override= -->", " depth=light override=light override=light -->"])
+def test_an_override_that_does_not_name_the_record_s_depth_refuses(fx: Fx, tmp_path: Path, marker: str) -> None:
+    r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"})
+    body = record("review", sha=head, tier="sensitive", depth="light").replace(" depth=light -->", marker, 1)
+    fx.comments(comment(record("gates", sha=head)), comment(body))
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and ("malformed" in reason or "depth light" in reason), reason
+
+
+def test_an_override_never_lowers_the_tier(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"})
+    body = record("review", sha=head, tier="standard", depth="light").replace(" depth=light -->",
+                                                                               " depth=light override=light -->", 1)
+    fx.comments(comment(record("gates", sha=head)), comment(body))
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "tier" in reason, reason
+
+
 @pytest.mark.parametrize("body", [
     record("review").replace(" -->", " depth=deep -->", 1),
     record("review").replace(" -->", " depth= -->", 1),

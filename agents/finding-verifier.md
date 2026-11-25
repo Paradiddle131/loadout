@@ -19,7 +19,7 @@ The lenses' reports (each a `Head:` line, finding blocks, `Ruled out:` and `Not 
 - Read every lens's `Ruled out:` entries; each is a dismissal, proven only by a check that settles its suspicion and the output that check printed.
   - Judge each entry's check: it settles the suspicion when its output would differ were the defect there; a grep that only finds the code settles nothing.
   - Challenge every unproven entry (its `check:` or `output:` `none`, missing or a paraphrase, or its check not settling the suspicion): run a check of your own at `<head>` that settles it.
-  - Of the proven entries, re-run the check of two per lens at `<head>`, all of them when a lens lists fewer: the two nearest the change's riskiest paths (a confirmed finding's location first, then a path `tier.sh` ranks sensitive (its built-in floor or `REVIEW.md`'s `## Sensitive`), then the largest hunk).
+  - Of the proven entries, re-run the check of one per lens at `<head>`: the one nearest the change's riskiest paths (a confirmed finding's location first, then a path `tier.sh` ranks sensitive (its built-in floor or `REVIEW.md`'s `## Sensitive`), then the largest hunk).
   - A lens with a promoted entry has every other entry of its list re-run.
   - An entry whose run shows the defect is a finding promoted from a dismissal: keep its id (`COR-RO-1`), run it at `<change base>`, rank it like any other, and say in its claim that the lens ruled it out.
   - An entry you could not run goes under `## Not checked` with why.

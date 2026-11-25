@@ -12,7 +12,9 @@ You prove that each control in a change can fail. A control is any check meant t
 A commit range `<base>..<head>`, the absolute path `<repo>` of the target repo's clone, and the issue (its text, or its number to read with `gh api`). An author's summary, if one comes along, is a claim to test, never a source. From the diff, list each control added or touched, the test that proves it, and the input it reads.
 
 ## Check
-For each control, run its test under each probe in `<wt>/head`, restoring with `git -C <wt>/head checkout <head> -- .` after each:
+Probe at most the three controls the change most relies on (one a guardrail or a merge rests on first), and list the rest under `Not checked:`.
+Run only the test files that exercise each control, never the whole suite.
+For each, run its test under each probe in `<wt>/head`, restoring with `git -C <wt>/head checkout <head> -- .` after each:
 - **Empty**: feed it nothing (no files, an empty list or table, an unset variable). It must fail or refuse; passing on nothing is a finding.
 - **Disarmed**: make it return success unconditionally, or point it at a path that matches nothing. Its test must go red.
 - **Mutated**: delete or invert the guarded line (the comparison, the filter, the raise). Its test must go red.
