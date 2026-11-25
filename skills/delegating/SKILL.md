@@ -14,6 +14,8 @@ A repo's own instructions win where they set a different default.
 - A lead on the workers' model and effort builds any other lone item itself, since a worker would re-read what the lead has read, lose what the brief leaves out, and add no judgement.
 - Delegate the rest of an item's implementation: an item that runs beside another, a lone item when the lead runs a stronger or weaker model or effort than its workers would, and the `review` skill's rethink.
 - A lead that builds an item itself writes its done-when on the issue before its first commit, and adds no `Steering:` line to its own change's review briefs; a need to steer goes to the owner as a packet.
+- Before work starts on a check meant to catch every way around a rule (a guard, a lint, a policy check), whoever builds it, the lead answers in the item's issue body, which every reviewer brief quotes, whether the approach can see every case it must catch (what it reads, and what lives elsewhere).
+  A check whose input cannot hold a case is redesigned before the first review round, not patched case by case; scoping down a check that enforces a guardrail, so it misses cases, is a conflict packet on its issue, labelled `needs-owner` (`ways/guardrails.md`).
 - Run workers in parallel only on items that touch different files; items that share files run one after another.
 
 ## The lead's job
@@ -27,7 +29,6 @@ A repo's own instructions win where they set a different default.
 ## Briefing and isolation
 
 - Write each brief from [BRIEF.md](BRIEF.md), restating every guardrail and rule that binds the item.
-- Before work starts on a check meant to catch every way around a rule (a guard, a lint, a policy check), answer on the item's issue whether the approach can see every case it must catch (what it reads, and what lives elsewhere); a check whose input cannot hold a case is redesigned or scoped down before the first review round, not patched case by case.
 - One worktree and one branch per item, the branch named for what it does under the repo's branch rule; the lead merges it into the item's PR branch.
 - The worker's worktree comes from the delegation tool's isolation option (`isolation: worktree`, which branches from the default branch, not the lead's head) where it has one, else the lead makes it with `git worktree add -b <branch>`.
 - A reviewer works read-only in a detached worktree at the head under review; the shipped review agents make and remove their own.

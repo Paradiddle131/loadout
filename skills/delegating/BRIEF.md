@@ -29,7 +29,7 @@ Do not edit the shared files (<README, architecture document, manifests, registr
 
 Checks to run before you finish: <each command>. Quote each command and its output; "tests pass" is not a result.
 A reviewer will attack this hardest on: <the central risk>.
-Can it converge: <only for a check meant to catch every way around a rule: what the check reads, and whether every case it must catch shows there; the lead's answer, also on the issue; leave out otherwise>.
+Can it converge: <only for a check meant to catch every way around a rule: what the check reads, and whether every case it must catch shows there; the lead's answer, as the issue body holds it; leave out otherwise>.
 
 Reply with:
 1. What you did, file by file.
