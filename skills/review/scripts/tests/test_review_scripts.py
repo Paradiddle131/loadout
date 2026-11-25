@@ -148,6 +148,45 @@ def test_shellcheck_clean() -> None:
     assert done.returncode == 0, done.stdout + done.stderr
 
 
+# The oldest Python the review path's scripts must parse under: 3.11, a host `python3` they have run on.
+OLDEST_PYTHON = "3.11"
+REPO_ROOT = SCRIPTS.parents[2]
+
+
+def review_python_files() -> list[Path]:
+    """Every Python file the review path runs: its scripts, their tests, the merge guard and the version check."""
+    found = sorted(SCRIPTS.glob("*.py")) + sorted((SCRIPTS / "tests").glob("*.py"))
+    found += [REPO_ROOT / "cloud/hooks/merge-guard.py", REPO_ROOT / "bin/check-review-version"]
+    return found
+
+
+def test_review_python_files_listed() -> None:
+    files = review_python_files()
+    assert {"plan.py", "record.py", "tiers.py", "blocking.py", "merge-guard.py"} <= {f.name for f in files}
+    assert all(f.is_file() for f in files), [str(f) for f in files if not f.is_file()]
+
+
+@pytest.mark.skipif(UVX is None, reason="uvx not installed")
+def test_review_scripts_parse_on_oldest_python() -> None:
+    """Each file compiles under the oldest supported Python (nothing is written: compile() only parses)."""
+    assert UVX
+    code = ("import sys\n"
+            "bad = []\n"
+            "for f in sys.argv[1:]:\n"
+            "    try:\n"
+            "        compile(open(f, encoding='utf-8').read(), f, 'exec')\n"
+            "    except SyntaxError as e:\n"
+            "        bad.append(f'{f}:{e.lineno}: {e.msg}')\n"
+            "print(sys.version_info[:2])\n"
+            "print('\\n'.join(bad))\n"
+            "sys.exit(1 if bad else 0)\n")
+    done = subprocess.run([UVX, "-q", "-p", OLDEST_PYTHON, "python", "-I", "-c", code]
+                          + [str(f) for f in review_python_files()],
+                          capture_output=True, text=True, timeout=240, cwd=SCRIPTS)
+    assert done.stdout.startswith(f"({OLDEST_PYTHON.replace('.', ', ')})"), done.stdout + done.stderr
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
 # gate_stamp.sh
 
 
