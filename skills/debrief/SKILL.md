@@ -19,7 +19,7 @@ It is a pitch: short, plain English, visual, and built around **attention**, mea
   It is a recap by number: the attention part keeps its items, order and full lines, and a question about a change `landings.md` lists in full points to that change's line.
   The closing slide may hold more than three lines, one per question; past about six questions, continue on a second closing slide.
   Strongly suggested, not required: leave it out when nothing waits on the owner.
-- **Plain English for a reader outside the work**, by the standing rule on reports: process metadata stays in the PRs and issues, and every term the deck or page shows gets a gloss.
+- **Plain English for a reader outside the work**, by the standing rule on reports, with one departure: process metadata stays in the PRs and issues, and every term the deck or page shows is glossed in place, a few words beside it on screen where it appears; in a debrief that gloss takes the place of the rule's glossary line, and there is no glossary slide or block. A tooltip may add detail but is never a term's only gloss, since a presented, exported or touch-read deck never shows one.
 
 ## The form
 
@@ -27,7 +27,9 @@ It is a pitch: short, plain English, visual, and built around **attention**, mea
   Start from the host's slide-deck artifact type where it lists one, else build the deck as one HTML page of slides.
 - **Fallback:** when no deck can be made, build one page under the same slide rule, block by block, and publish it as usual.
 - Chart whatever a picture carries better than words: progress along a path, counts by state, time or wakes spent.
+- A run's line carries when it started and ended as a span on its time (`02:07–03:13`), not a column of its own.
 - Choose the look fresh for each debrief, from its content; a repo's own design system applies where it has one.
+  Backgrounds may alternate tones; keep the light ones off near-white, easy on the eyes.
 - Build it in the scratchpad, never in the target repo, and publish it as an artifact (with no artifact tool, send the file); the chat reply is a line or two and the link, since the artifact is the answer.
 
 ## Steps
