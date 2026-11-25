@@ -148,7 +148,7 @@ def test_shellcheck_clean() -> None:
     assert done.returncode == 0, done.stdout + done.stderr
 
 
-# The oldest Python the review path's scripts must parse under: the cloud image's default `python3`.
+# The oldest Python the review path's scripts must parse under: 3.11, a host `python3` they have run on.
 OLDEST_PYTHON = "3.11"
 REPO_ROOT = SCRIPTS.parents[2]
 
