@@ -29,7 +29,7 @@ Inputs, where each is read from, who controls it, and how a lead-controlled one 
 | Default branch tip | `gh api repos/<r>/branches/<name>`, `.commit.sha`; then `git fetch --force origin +refs/heads/<name>:refs/remotes/origin/<name>` | GitHub (the sha), the remote (the objects) | the forced fetch overwrites a locally moved ref; a fetched tip other than GitHub's sha refuses |
 | Changed paths | `git diff --name-only --no-renames $(git merge-base <tip> <head>) <head>` | the two shas above | computed from content-addressed commits only |
 | Policy | `REVIEW.md` at the tip, parsed by tiers.py (tier.sh's parser), and the tip's instruction imports | the default branch on the remote | the change's own `REVIEW.md` is never read; an unparsable one rates every path sensitive; no line lowers a path below the built-in floor or below `## Sensitive` |
-| Previous round | `gh api repos/<r>/issues/<n>/comments`, paged by hand: the newest review-marker comment by the owner, a member or a collaborator | a trusted record on the PR | used only when unedited, in verdict.sh's exact shape, above routine, its raw output's first `Reviewed:` naming its `reviewed=`, its `Blocking:` line readable, and `reviewed=` an ancestor of the head and not of the merge-base; else a first review (the widest plan); an older record is never used in its place; untrusted authors are ignored |
+| Previous round | `gh api repos/<r>/issues/<n>/comments`, paged by hand: the newest review-marker comment by the owner, a member or a collaborator | a trusted record on the PR | used only when unedited, with no `override=` unless this round carries an override too, in verdict.sh's exact shape, above routine, its raw output's first `Reviewed:` naming its `reviewed=`, its `Blocking:` line readable, and `reviewed=` an ancestor of the head and not of the merge-base; else a first review (the widest plan); an older record is never used in its place; untrusted authors are ignored |
 | Answered lenses | that record's `Blocking:` ids, by prefix | a trusted record | an id whose prefix names no lens plans the whole set |
 | `--depth` | the lead's argument | the lead | the depth is the higher of it and the floor; one below the floor refuses |
 | `--override`, `--override-from`, `--override-quote` | the lead's arguments, copying the owner's instruction | the owner, through the lead | all three or none; it replaces the depth and efforts, and goes on the marker (`override=`), the round line (`override=`, `overridefrom=`) and in the record's body with the quote, so the merge guard and an audit see it; nothing checks that the owner said it but the quote on the record |
@@ -293,10 +293,15 @@ def record_fields(c: dict) -> dict | None:
     return f
 
 
-def prior_round(c: dict | None, change: Change) -> tuple[str, list[dict]] | None:
-    """(reviewed commit, its must-fix items) when `c` can start a fix round of `change`; else None (a first review)."""
+def prior_round(c: dict | None, change: Change, override: dict | None = None) -> tuple[str, list[dict]] | None:
+    """(reviewed commit, its must-fix items) when `c` can start a fix round of `change`; else None (a first review).
+
+    A round the owner overrode starts a fix round only for a round under an override too: with no override the
+    defaults stand, so the next round is a first review of the whole change."""
     f = record_fields(c) if c else None
     if not f or f["tier"] == "routine":
+        return None
+    if f.get("override") and not override:
         return None
     raw = RAW.search("\n".join(body_lines(c)))
     if not raw:
@@ -481,7 +486,7 @@ def record_main(a: argparse.Namespace) -> int:
         print(f"head {change.head}\ntier {change.tier}\ndepth {f['depth']}\npairs {' '.join(pairs)}"
               + (f"\noverride {carried}" if carried else ""))
         return 0
-    p = make_plan(change, prior_round(newest_review(comments), change), a.depth, override)
+    p = make_plan(change, prior_round(newest_review(comments), change, override), a.depth, override)
     check_round(p, a.reviewers, a.lens)
     pairs = [f"depth={p['depth']}", f"floor={p['floor']}", f"planned={','.join(p['planned']) or 'none'}"]
     if override:
@@ -502,7 +507,7 @@ def preview_main(a: argparse.Namespace) -> int:
     override = read_override(a)
     change, comments, default = read_pr(repo, a.pr or current_pr(repo))
     p = {"pr": int(a.pr) if a.pr else None, "base": default, "tip": change.base,
-         **make_plan(change, prior_round(newest_review(comments), change), a.depth, override)}
+         **make_plan(change, prior_round(newest_review(comments), change, override), a.depth, override)}
     if a.json:
         print(json.dumps(p))
         return 0

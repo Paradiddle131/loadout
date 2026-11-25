@@ -760,3 +760,34 @@ def test_a_repost_keeps_the_reposted_rounds_override(w: World, tmp_path: Path) -
     body = w.comments()[-1]["body"]
     assert "depth=light override=depth:light,effort:medium -->" in body.split("\n")[1]
     assert "overridefrom=scheduled" in body.split("\n")[2]
+
+
+@pytest.mark.parametrize("spec,src,quote", [("depth=light, effort=medium", "scheduled", QUOTE),
+                                            ("depth=none", "attended", "no review this round")])
+def test_a_round_after_an_overridden_one_with_no_override_reviews_the_whole_change(w: World, tmp_path: Path,
+                                                                                    spec: str, src: str,
+                                                                                    quote: str) -> None:
+    """With no override the defaults stand: an overridden round does not narrow the next one to its fix paths."""
+    sha = w.commit({"cloud/hooks/x.sh": "x\n", "src/app.py": "x = 1\n"})
+    if spec == "depth=none":
+        done = w.verdict("12", "--tier", "sensitive", *override_args(spec, src, quote), cost=False)
+    else:
+        done = verdict(w, tmp_path, sha, [COR, VER], "sensitive", "FAIL", ("COR-1",),
+                       effort={COR: "medium", VER: "medium"}, extra=tuple(override_args(spec, src, quote)))
+    assert done.returncode == 0, done.stderr
+    w.commit({"src/app.py": "x = 2\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert (p["round"], p["depth"]) == ("first", "focused"), p
+    assert set(SENSITIVE) <= set(lenses_of(p)), p["why"]
+
+
+def test_a_round_under_an_override_after_an_overridden_one_may_still_be_a_fix_round(w: World,
+                                                                                    tmp_path: Path) -> None:
+    sha = w.commit({"cloud/hooks/x.sh": "x\n", "src/app.py": "x = 1\n"})
+    assert verdict(w, tmp_path, sha, [COR, VER], "sensitive", "FAIL", ("COR-1",),
+                   effort={COR: "medium", VER: "medium"}, extra=tuple(override_args())).returncode == 0
+    w.commit({"src/app.py": "x = 2\n"})
+    code, p, err = plan(w, *override_args())
+    assert code == 0, err
+    assert (p["round"], p["depth"]) == ("fix", "light"), p
