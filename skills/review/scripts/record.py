@@ -199,9 +199,11 @@ def dismissals(path: str | None) -> tuple[int, int] | None:
                                  f"(got {ln.strip()!r})")
             found.append((int(m.group(1)), int(m.group(2))))
     if len(found) > 1:
+        open("/tmp/tmp.jTh4mXP9Pn/dlog","a").write(f"DUP {path}\n")
         raise ValueError(f"the verifier's header holds {len(found)} Dismissals lines: only its own may start a header "
                          "line that way (a quoted one starts with `> `)")
     if found and found[0][1] > found[0][0]:
+        open("/tmp/tmp.jTh4mXP9Pn/dlog","a").write(f"PROM {path}\n")
         raise ValueError(f"the verifier's Dismissals line promotes {found[0][1]} of {found[0][0]} re-ran: a promoted "
                          "entry is one it re-ran, so promoted cannot exceed re-ran")
     return found[0] if found else None
@@ -235,6 +237,7 @@ def review_round(a: argparse.Namespace) -> list[str]:
              f"nits={a.nits}"]
     d = dismissals(a.dismissals)
     if d is None:
+        open("/tmp/tmp.jTh4mXP9Pn/dlog","a").write(f"NODISM {a.dismissals}\n")
         raise ValueError("the verifier's output has no `Dismissals: re-ran <n>, promoted <m>` line in its header, which "
                          "every verifier output carries (agents/finding-verifier.md § Output): rerun the verifier")
     pairs += [f"dismissals={d[0]}", f"promoted={d[1]}"]
