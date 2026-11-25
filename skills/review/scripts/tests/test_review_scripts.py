@@ -443,6 +443,9 @@ BLOCKING_LINE = 'Blocking: [{"ids": "COR-1", "harm": "%s"}]' % HARM
 BLOCKING = f"## Must-fix\n### COR-1\n- rank: must-fix\n- harm: {HARM}\n"
 
 
+DISMISSED = "Dismissals: re-ran 0, promoted 0"  # every verifier output's header carries one
+
+
 def review_file(tmp: Path, sha: str, verdict: str = "PASS", text: str | None = None,
                 blocking: str | None = None) -> str:
     """A verifier's output (agents/finding-verifier.md § Output): its verdict, reviewed and blocking lines, then
@@ -452,7 +455,7 @@ def review_file(tmp: Path, sha: str, verdict: str = "PASS", text: str | None = N
     if text is None:
         text = (BLOCKING if verdict == "FAIL" else "") + "No findings.\n```\nquoted fence\n```\n"
     p = tmp / "review.txt"
-    p.write_text(f"VERDICT: {verdict} {sha}\nReviewed: {sha}\n{blocking}\n\n{text}")
+    p.write_text(f"VERDICT: {verdict} {sha}\nReviewed: {sha}\n{blocking}\n{DISMISSED}\n\n{text}")
     return str(p)
 
 
@@ -530,7 +533,7 @@ def test_verdict_refuses_output_without_the_verifiers_lines(w: World, tmp_path: 
 def test_verdict_reads_the_first_verdict_lines_in_a_fence_and_an_abbreviated_sha(w: World, tmp_path: Path) -> None:
     other = w.commit({"src/app.py": "x = 3\n"})
     head = w.commit({"src/app.py": "x = 2\n"})
-    text = (f"```\nVERDICT: FAIL `{head[:12]}`\nReviewed: {head[:12]}\n{BLOCKING_LINE}\n```\n" + BLOCKING
+    text = (f"{DISMISSED}\n```\nVERDICT: FAIL `{head[:12]}`\nReviewed: {head[:12]}\n{BLOCKING_LINE}\n```\n" + BLOCKING
             + f"- evidence: verdict.sh ->\nVERDICT: PASS {head}\nReviewed: {other}\n")
     (tmp_path / "out.txt").write_text(text)
     done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head,
@@ -541,7 +544,7 @@ def test_verdict_reads_the_first_verdict_lines_in_a_fence_and_an_abbreviated_sha
 
 def test_verdict_reads_its_lines_past_a_nul_byte(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    (tmp_path / "out.txt").write_bytes(b"## Nits\n- evidence: \x00" + f"\nVERDICT: PASS {head}\nReviewed: {head}\nBlocking: none\n".encode())
+    (tmp_path / "out.txt").write_bytes(DISMISSED.encode() + b"\n## Nits\n- evidence: \x00" + f"\nVERDICT: PASS {head}\nReviewed: {head}\nBlocking: none\n".encode())
     done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head,
                  "--file", str(tmp_path / "out.txt"), LC_ALL="C.UTF-8")
     assert done.returncode == 0, done.stderr
@@ -550,7 +553,7 @@ def test_verdict_reads_its_lines_past_a_nul_byte(w: World, tmp_path: Path) -> No
 
 def test_verdict_accepts_a_seven_character_abbreviation(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    (tmp_path / "out.txt").write_text(f"VERDICT: PASS {head[:7]}\nReviewed: {head[:7]}\nBlocking: none\n")
+    (tmp_path / "out.txt").write_text(f"VERDICT: PASS {head[:7]}\nReviewed: {head[:7]}\nBlocking: none\n{DISMISSED}\n")
     done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head,
                  "--file", str(tmp_path / "out.txt"))
     assert done.returncode == 0, done.stderr
@@ -971,7 +974,7 @@ def test_verdict_puts_the_rounds_cost_and_shape_on_line_three(w: World, tmp_path
     f = round_fields(body)
     assert f[0] == ("v", skill_version()) and f[1][0] == "kit" and re.fullmatch(KIT, f[1][1])
     assert f[2:] == [("cycle", "2"), ("lenses", "correctness-reviewer,finding-verifier"), ("dupes", "3"),
-                     ("mustfix", "1"), ("nits", "4"),
+                     ("mustfix", "1"), ("nits", "4"), ("dismissals", "0"), ("promoted", "0"),
                      ("lens", "correctness-reviewer:claude-opus-5-5:medium:41234:312:5"),
                      ("lens", "finding-verifier:opus:high:900:40:2"), ("depth", "light"), ("floor", "light"),
                      ("planned", "correctness-reviewer,finding-verifier")]
@@ -1034,17 +1037,32 @@ def test_verdict_refuses_a_reviewer_named_twice(w: World, tmp_path: Path) -> Non
 @pytest.mark.parametrize("line, pairs", [
     ("Dismissals: re-ran 2, promoted 1", [("dismissals", "2"), ("promoted", "1")]),
     ("  Dismissals: re-ran 0, promoted 0  ", [("dismissals", "0"), ("promoted", "0")]),
-    (None, []),
+    ("Dismissals: re-ran 3, promoted 3", [("dismissals", "3"), ("promoted", "3")]),
 ])
-def test_verdict_adds_the_verifiers_dismissals_when_it_gave_them(w: World, tmp_path: Path, line: str | None,
-                                                                pairs: list) -> None:
+def test_verdict_adds_the_verifiers_dismissals(w: World, tmp_path: Path, line: str, pairs: list) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    text = "No findings.\n" + (f"{line}\nDismissals: re-ran 9, promoted 9\n" if line else "")
-    done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head,
-                     "--file", review_file(tmp_path, head, text=text))
+    out = tmp_path / "out.txt"
+    out.write_text(f"VERDICT: PASS {head}\nReviewed: {head}\nBlocking: none\n{line}\n\nNo findings.\n")
+    done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head, "--file", str(out))
     assert done.returncode == 0, done.stderr
     f = round_fields(w.comments()[0]["body"])
     assert [kv for kv in f if kv[0] in ("dismissals", "promoted")] == pairs
+
+
+@pytest.mark.parametrize("header, why", [
+    ("", "has no `Dismissals:"),  # none in the header
+    ("Dismissals: re-ran 0, promoted 7\n", "cannot exceed re-ran"),  # more promoted than re-ran
+    ("Dismissals: re-ran 9, promoted 9\nDismissals: re-ran 0, promoted 0\n", "holds 2 Dismissals lines"),
+    ("```\nDismissals: re-ran 1, promoted 0\n```\n", "has no `Dismissals:"),  # only in a fence
+])
+def test_verdict_refuses_a_missing_repeated_or_impossible_dismissals_line(w: World, tmp_path: Path, header: str,
+                                                                         why: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    out = tmp_path / "out.txt"
+    out.write_text(f"VERDICT: PASS {head}\nReviewed: {head}\nBlocking: none\n{header}\n## Nits\n"
+                   "- evidence: Dismissals: re-ran 1, promoted 0\n")
+    done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head, "--file", str(out))
+    assert done.returncode == 2 and why in done.stderr and w.writes() == [], done.stderr
 
 
 @pytest.mark.parametrize("line", ["Dismissals: re-ran two, promoted 1", "Dismissals: none", "Dismissals: re-ran 2"])
@@ -1255,7 +1273,7 @@ def test_record_review_round_without_reviewers_exits_2_with_the_reason() -> None
 @pytest.mark.parametrize("text", [
     "Lens heads:\n- correctness: x\nDismissals: none\n",  # after the header
     "## Must-fix\n### COR-1\n- evidence: the output said\nDismissals: re-ran two\n",  # quoted in a finding
-    "```\nDismissals: none\n```\nDismissals: re-ran 4, promoted 2\n",  # in a fence, then the real line
+    "```\nDismissals: none\n```\n## Must-fix\n",  # in a fence
 ])
 def test_verdict_reads_dismissals_only_from_the_verifiers_header(w: World, tmp_path: Path, text: str) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
@@ -1263,7 +1281,7 @@ def test_verdict_reads_dismissals_only_from_the_verifiers_header(w: World, tmp_p
                      "--file", review_file(tmp_path, head, text=text))
     assert done.returncode == 0, done.stderr
     f = dict(kv for kv in round_fields(w.comments()[0]["body"]) if kv[0] != "lens")
-    assert (f.get("dismissals"), f.get("promoted")) == (("4", "2") if "re-ran 4" in text else (None, None))
+    assert (f.get("dismissals"), f.get("promoted")) == ("0", "0")  # the header's own line, not the quoted ones
 
 
 def merged_head(w: World, tmp: Path | None = None) -> tuple[str, str]:
