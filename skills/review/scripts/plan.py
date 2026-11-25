@@ -424,7 +424,8 @@ def preview_main(a: argparse.Namespace) -> int:
         print(f"{k}: {p[k]}")
     print(f"since: {p['since'] or 'none (a first review)'}")
     for k in ("first", "then"):
-        print(f"{k}: {', '.join(f'{x} ({p['effort'][x]})' for x in p[k]) or 'none'}")
+        shown = ", ".join(f"{x} ({p['effort'][x]})" for x in p[k])
+        print(f"{k}: {shown or 'none'}")
     print(f"verifier: {p['verifier'] + ' (' + p['effort'][VERIFIER] + ')' if p['verifier'] else 'none'}")
     print(f"why: {'; '.join(p['why'])}")
     return 0
