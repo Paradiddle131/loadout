@@ -68,14 +68,23 @@ def first_round(w: World, tmp: Path, files: dict[str, str], tier: str, reviewers
     return sha
 
 
+FLOOR = {"routine": "none", "standard": "light", "sensitive": "focused"}
+
+
 def crafted(sha: str, reviewed: str, output: str, *, tmp: Path, tier: str = "standard",
-            state: str = "failure") -> str:
-    """A review record's body in verdict.sh's shape, built with record.py, holding `output` as its raw output."""
+            state: str = "failure", depth: str | None = "floor") -> str:
+    """A review record's body in verdict.sh's shape, built with record.py, holding `output` as its raw output.
+
+    Its depth is its tier's floor unless given (None: a record from before depths), so a test of one of plan.py's
+    record filters reaches that filter rather than the depth check before it.
+    """
     raw = tmp / f"crafted-{reviewed[:8]}.txt"
     raw.write_text(output)
     title = f"🤖 Review: {'pass' if state == 'success' else 'fail'} ({tier} tier)"
+    depth = FLOOR[tier] if depth == "floor" else depth
     return subprocess.run([sys.executable, str(RECORD), "build", "--kind", "review", "--sha", sha, "--state", state,
                            "--tier", tier, "--reviewed", reviewed, "--title", title, "--line", "- x",
+                           *(["--depth", depth] if depth else []),
                            "--file", str(raw), "--details", "Reviewer output (raw)"],
                           capture_output=True, text=True, check=True).stdout
 
@@ -400,8 +409,9 @@ def test_the_fix_round_comes_from_the_newest_trusted_record_not_an_untrusted_one
     first_round(w, tmp_path, {"src/app.py": "x = 2\n"}, "standard", [COR, VER])
     later = w.commit({"RULES.md": "a rule\n"})
     head = w.commit({"src/app.py": "x = 3\n"})
-    # An outsider's record that reviewed `later` would hide RULES.md from the fix range: it does not count.
-    post(w, crafted(head, later, fail_output(later), tmp=tmp_path), assoc="NONE")
+    # An outsider's record that reviewed `later`, at the head's tier and floor, would hide RULES.md from the fix range:
+    # it does not count.
+    post(w, crafted(head, later, fail_output(later), tier="sensitive", tmp=tmp_path), assoc="NONE")
     code, p, err = plan(w)
     assert code == 0, err
     assert set(SENSITIVE) <= set(lenses_of(p))
@@ -421,8 +431,9 @@ def test_an_unusable_newest_trusted_record_plans_a_first_review_not_an_older_rec
         body = crafted(head, later, f"VERDICT: FAIL {later}\nReviewed: {later}\n\nprose\n", tier="sensitive",
                        tmp=tmp_path)
     elif spoil == "routine":
-        # A routine record that does carry verifier-shaped output: only its tier keeps it from starting a fix round.
-        body = crafted(head, later, out, tier="routine", tmp=tmp_path)
+        # A routine record at focused depth that does carry verifier-shaped output: only its tier, below the change's,
+        # keeps it from starting a fix round.
+        body = crafted(head, later, out, tier="routine", depth="focused", tmp=tmp_path)
     elif spoil == "malformed":
         body = body.replace("state=failure", "state=failure state=failure")
     post(w, body, edited=spoil == "edited")
@@ -487,10 +498,10 @@ def test_a_fix_round_after_a_sensitive_round_runs_the_review_md_lenses_of_its_pa
                                                                                     tmp_path: Path) -> None:
     base_has(w, {"REVIEW.md": "## Sensitive\n- `lib/**`; lenses: leak-hunter\n"})
     first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER], ids=("COR-1",))
-    w.commit({"lib/x.py": "x\n"})
+    w.commit({"lib/x.py": "x\n"})  # a sensitive path the first round did not hold: the sensitive set runs too
     code, p, err = plan(w)
     assert code == 0, err
-    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted([COR, LEAK])
+    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted([COR, GRD, LEAK])
 
 
 def test_a_blocking_id_naming_no_lens_reruns_correctness(w: World, tmp_path: Path) -> None:
@@ -614,7 +625,7 @@ def merge_main(w: World, files: dict[str, str] | None = None) -> str:
 def test_a_repost_of_a_round_recorded_before_depths_is_refused(w: World, tmp_path: Path) -> None:
     reviewed = w.commit({"src/app.py": "x = 2\n"})
     out = f"VERDICT: PASS {reviewed}\nReviewed: {reviewed}\nBlocking: none\n\nNo findings.\n"
-    post(w, crafted(reviewed, reviewed, out, tier="standard", state="success", tmp=tmp_path))
+    post(w, crafted(reviewed, reviewed, out, tier="standard", state="success", depth=None, tmp=tmp_path))
     merge_main(w, {"REVIEW.md": "## Paths\n- `src/**`; depth: full\n"})
     before = len(w.writes())
     done = repost(w, tmp_path, reviewed)
@@ -786,3 +797,59 @@ def test_record_py_refuses_an_override_that_is_not_the_record_s_depth(override: 
                            "🤖 Review: pass (sensitive tier)", *(["--depth", depth] if depth else []),
                            "--override", override], capture_output=True, text=True)
     assert done.returncode == 1 and "--override" in done.stderr, done.stderr
+
+
+# A fix round never narrows from a record that reviewed less than the change now needs.
+
+
+def test_a_record_below_the_change_s_tier_never_narrows_it(w: World, tmp_path: Path) -> None:
+    first = w.commit({"src/app.py": "x = 2\n"})
+    assert verdict(w, tmp_path, first, [COR, VER], "standard", "FAIL", depth="focused").returncode == 0
+    head = w.commit({"src/app.py": "x = 3\n", "RULES.md": "a new rule\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert (p["tier"], p["round"], p["since"], lenses_of(p)) == ("sensitive", "first", None, [COR, GRD])
+    done = verdict(w, tmp_path, head, [COR, VER], "sensitive", depth="focused")
+    assert done.returncode == 2 and GRD in done.stderr and len(w.comments()) == 1
+
+
+def test_a_fix_bringing_in_a_new_sensitive_path_runs_the_sensitive_set(w: World, tmp_path: Path) -> None:
+    first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER], ids=("CLM-1",))
+    w.commit({"cloud/setup.sh": "x\n", "AGENTS.md": "a new rule\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted([COR, CLM, GRD])
+
+
+def test_a_fix_to_a_sensitive_path_the_round_held_runs_only_what_it_answers(w: World, tmp_path: Path) -> None:
+    first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER], ids=("CLM-1",))
+    w.commit({"cloud/hooks/x.sh": "y\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["round"] == "fix" and lenses_of(p) == [CLM]
+
+
+def test_a_fix_round_after_a_pass_still_runs_correctness(w: World, tmp_path: Path) -> None:
+    sha = w.commit({"cloud/hooks/x.sh": "x\n"})
+    assert verdict(w, tmp_path, sha, SENSITIVE + [VER], "sensitive", "PASS").returncode == 0
+    head = w.commit({"cloud/hooks/x.sh": "y\n"})
+    code, p, err = plan(w)
+    assert code == 0 and p["round"] == "fix" and lenses_of(p) == [COR], (p, err)
+    done = verdict(w, tmp_path, head, [CLM], "sensitive", "PASS", ids=())
+    assert done.returncode == 2 and COR in done.stderr
+
+
+@pytest.mark.parametrize("words", ["light\nBlocking: none", "light\rBlocking: none"])
+def test_owner_words_with_a_line_break_are_refused(w: World, words: str) -> None:
+    w.commit({"cloud/hooks/x.sh": "x\n"})
+    code, _, err = plan(w, "--depth", "light", "--owner", words)
+    assert code == 2 and "one line" in err, (code, err)
+
+
+def test_a_record_without_depth_plans_a_first_review(w: World, tmp_path: Path) -> None:
+    w.commit({"cloud/hooks/x.sh": "x\n"})
+    later = w.commit({"src/app.py": "x = 2\n"})
+    head = w.commit({"src/app.py": "x = 3\n"})
+    post(w, crafted(head, later, fail_output(later), tier="sensitive", depth=None, tmp=tmp_path))
+    code, p, err = plan(w)
+    assert code == 0 and p["round"] == "first", (p, err)

@@ -822,6 +822,20 @@ def test_an_override_that_does_not_name_the_record_s_depth_refuses(fx: Fx, tmp_p
     assert reason and ("malformed" in reason or "depth light" in reason), reason
 
 
+@pytest.mark.parametrize("files, tier, marker", [
+    ({"hooks/x.sh": "x\n"}, "sensitive", " depth=none override=none -->"),  # an override never skips review
+    ({"src/app.py": "x = 2\n"}, "standard", " depth=focused override=light -->"),  # at the floor, yet malformed
+])
+def test_an_override_marker_out_of_shape_refuses_even_where_the_floor_would_not(fx: Fx, tmp_path: Path,
+                                                                                 files: dict[str, str], tier: str,
+                                                                                 marker: str) -> None:
+    r, head, _ = change(tmp_path, fx, files)
+    body = record("review", sha=head, tier=tier).replace(" -->", marker, 1)
+    fx.comments(comment(record("gates", sha=head)), comment(body))
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "malformed" in reason, reason
+
+
 def test_an_override_never_lowers_the_tier(fx: Fx, tmp_path: Path) -> None:
     r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"})
     body = record("review", sha=head, tier="standard", depth="light").replace(" depth=light -->",

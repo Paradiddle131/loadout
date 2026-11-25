@@ -45,13 +45,13 @@ guardrail-reviewer and the lenses REVIEW.md names for the changed paths):
   focused  the tier's set, correctness-reviewer first and alone (`first`), then the rest (`then`) with its findings in
            their briefs.
   full     the tier's set at once.
-A fix round is a round after the PR's newest trusted review record (the table's "Previous round") whose depth is at
-least this round's (a round below it, such as one the owner overrode lighter, never narrows a deeper one); its paths
-are those changed since that record's `reviewed=` commit that the change still changes. In focused it runs each lens
-a must-fix on the record's `Blocking:` line came from (by its id's first part, PREFIX, so a promoted dismissal
-`COR-RO-1` is correctness-reviewer's; a part that names no lens, correctness-reviewer) and the lenses REVIEW.md names
-for its paths, nothing else. In light it reruns the one lens; in full, the whole set. The verifier runs on every round
-with a lens.
+A fix round is a round after the PR's newest trusted review record (the table's "Previous round") whose tier and
+depth are at least this round's (a round below either, such as one the owner overrode lighter, never narrows a deeper
+one); its paths are those changed since that record's `reviewed=` commit that the change still changes. In focused it
+runs each lens a must-fix on the record's `Blocking:` line came from (by its id's first part, PREFIX, so a promoted
+dismissal `COR-RO-1` is correctness-reviewer's; a part that names no lens, correctness-reviewer), the lenses REVIEW.md
+names for its paths, and the sensitive set when it brings in a sensitive path the reviewed round's diff did not hold.
+In light it reruns the one lens; in full, the whole set. The verifier runs on every round with a lens.
 Effort per lens, the highest over the round's paths: a REVIEW.md `; effort: <lens>=<level>` on a line matching the
 path (raising or lowering it), else high for correctness-reviewer and control-prober at depth full on a sensitive path
 that is not prose (*.md, *.txt, licence files), else medium. The verifier is medium unless a line sets it. A lens may
@@ -243,9 +243,13 @@ def record_fields(c: dict) -> dict | None:
 
 
 def prior_round(c: dict | None, change: Change) -> tuple[str, list[dict], str] | None:
-    """(reviewed commit, its must-fix items, its depth) when `c` can start a fix round of `change`; else None."""
+    """(reviewed commit, its must-fix items, its depth) when `c` can start a fix round of `change`; else None.
+
+    A record below the change's tier (a routine one included) never starts one: it reviewed less than the change now
+    needs.
+    """
     f = record_fields(c) if c else None
-    if not f or f["tier"] == "routine" or f.get("depth") not in DRANK:
+    if not f or tiers.RANK[f["tier"]] < tiers.RANK[change.tier] or f.get("depth") not in DRANK:
         return None
     raw = RAW.search("\n".join(body_lines(c)))
     if not raw:
@@ -322,6 +326,10 @@ def make_plan(change: Change, prior: tuple[str, list[dict], str] | None, want: s
         prefixes = {x.strip().split("-", 1)[0] for b in prior[1] for x in b["ids"].split(",") if x.strip()}
         lenses = {PREFIX.get(x, COR) for x in prefixes} | change.named(paths) or {COR}
         why.append("a fix round: the lenses whose must-fix it answers and those REVIEW.md names for its paths")
+        covered = set(git("diff", "--name-only", "--no-renames", change.mb, since).splitlines())
+        if any(change.rated[x]["tier"] == "sensitive" for x in paths if x not in covered):
+            lenses |= set(TIER_SET["sensitive"])
+            why.append("the fix brings in a sensitive path the reviewed round did not hold, so the sensitive set runs")
     run_ = ordered(lenses)
     first = [COR] if depth == "focused" and COR in run_ and len(run_) > 1 else []
     then = [x for x in run_ if x not in first]
