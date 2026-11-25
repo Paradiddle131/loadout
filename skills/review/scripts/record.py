@@ -25,7 +25,7 @@ scripts run from, `-dirty` appended when that clone has uncommitted changes to t
 agents or cloud/hooks, and `none` when the scripts are not where a clone of the collection keeps them (a copied
 skill); never the repo under review. Keys are lowercase letters; values are letters, digits and . _ , - : only;
 only `lens` may repeat. A review round adds cycle, lenses, dupes, mustfix, nits, one lens=<name>:<model>:<effort>:
-<tokens>:<seconds>:<findings> per agent, and dismissals and promoted when the verifier gave them (a re-post:
+<tokens>:<seconds>:<findings> per agent, and dismissals and promoted from the verifier's one header line (a re-post:
 repost=1, lenses and mustfix only); a review record also carries depth, floor and planned (plan.py's: the depth
 the round ran at, the paths' floor, and the planned lenses with the verifier, or `none`), and, on a round the owner
 overrode, override (`depth:<d>,effort:<e>`, either part alone, as on the marker) and overridefrom (attended or
@@ -171,13 +171,15 @@ def lens_spec(spec: str) -> dict:
 
 
 def dismissals(path: str | None) -> tuple[int, int] | None:
-    """(re-ran, promoted) from the first `Dismissals:` line of the verifier's header; None when it has none.
+    """(re-ran, promoted) from the `Dismissals:` line of the verifier's header; None when it has none.
 
     The header is the output's lines before its `Lens heads:` line or its first `##` heading, outside code fences: a
-    `Dismissals:` line quoted in a finding below, or in a fence, is never read.
+    `Dismissals:` line quoted in a finding below, or in a fence, is never read. ValueError for a malformed line, a
+    second one in the header (only the verifier's own may stand there), or more promoted than re-ran.
     """
     if not path:
         return None
+    found: list[tuple[int, int]] = []
     fence = ""
     for ln in open(path, encoding="utf-8", errors="replace").read().split("\n"):
         if m := re.match(r"\s*(`{3,}|~{3,})", ln):
@@ -189,14 +191,20 @@ def dismissals(path: str | None) -> tuple[int, int] | None:
         if fence:
             continue
         if re.match(r"\s*(Lens heads:|##)", ln):
-            return None
+            break
         if DISMISSALS.match(ln):
             m = DISMISSALS_LINE.fullmatch(ln)
             if not m:
                 raise ValueError(f"the verifier's Dismissals line is not `Dismissals: re-ran <n>, promoted <m>` "
                                  f"(got {ln.strip()!r})")
-            return int(m.group(1)), int(m.group(2))
-    return None
+            found.append((int(m.group(1)), int(m.group(2))))
+    if len(found) > 1:
+        raise ValueError(f"the verifier's header holds {len(found)} Dismissals lines: only its own may start a header "
+                         "line that way (a quoted one starts with `> `)")
+    if found and found[0][1] > found[0][0]:
+        raise ValueError(f"the verifier's Dismissals line promotes {found[0][1]} of {found[0][0]} re-ran: a promoted "
+                         "entry is one it re-ran, so promoted cannot exceed re-ran")
+    return found[0] if found else None
 
 
 def review_round(a: argparse.Namespace) -> list[str]:
@@ -225,8 +233,11 @@ def review_round(a: argparse.Namespace) -> list[str]:
     lenses.sort(key=lambda x: who.index(x["name"]))
     pairs = [f"cycle={a.cycle}", f"lenses={','.join(who)}", f"dupes={a.dupes}", f"mustfix={a.mustfix}",
              f"nits={a.nits}"]
-    if (d := dismissals(a.dismissals)) is not None:
-        pairs += [f"dismissals={d[0]}", f"promoted={d[1]}"]
+    d = dismissals(a.dismissals)
+    if d is None:
+        raise ValueError("the verifier's output has no `Dismissals: re-ran <n>, promoted <m>` line in its header, which "
+                         "every verifier output carries (agents/finding-verifier.md § Output): rerun the verifier")
+    pairs += [f"dismissals={d[0]}", f"promoted={d[1]}"]
     pairs += [f"lens={x['name']}:{x['model']}:{x['effort']}:{x['tokens']}:{x['seconds']}:{x['findings']}"
               for x in lenses]
     round_line(pairs)  # the same check build makes, before anything is posted

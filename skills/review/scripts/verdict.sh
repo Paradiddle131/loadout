@@ -19,7 +19,8 @@
 #   them and refuses a malformed or missing value): model and effort as the agent call set them, tokens and seconds
 #   as the harness printed the agent's usage when it returned (its total tokens; its duration in ms / 1000, rounded),
 #   findings what it raised (for the verifier, what it kept). The must-fix count comes from the `Blocking:` line, and
-#   the verifier's first `Dismissals: re-ran <n>, promoted <m>` line, when it has one, adds both numbers.
+#   the verifier's `Dismissals: re-ran <n>, promoted <m>` line adds both numbers: an output whose header lacks it, holds
+#   two, or promotes more than it re-ran is refused.
 #   They go on the record's round line (record.py has its shape; the merge guard ignores it) and in a table below.
 #   --repost posts an earlier round's verdict again on a head that differs from --reviewed only by clean merges of the
 #   default branch (the same --reviewers and output): no agent ran, so it takes no --cycle, --dupes, --nits or --lens,
