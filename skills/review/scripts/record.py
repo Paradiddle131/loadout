@@ -2,7 +2,8 @@
 """Builds and compares the PR comments gate_stamp.sh and verdict.sh post as records (lib.sh has the format).
 
   record.py build --kind gates|review --sha <head> --state success|failure --title <first line>
-                  [--tier <tier>] [--reviewed <sha>] [--depth <d>] [--round <key=value>]... [--line <markdown line>]...
+                  [--tier <tier>] [--reviewed <sha>] [--depth <d>] [--override <o>] [--round <key=value>]...
+                  [--line <markdown line>]...
                   [--file <raw output>] [--details <summary>]
     prints the body: the title, the marker line, the round line, the lines, and the raw output under <details> in
     a fence longer than any backtick run in it, clipped (with a note) so the whole body fits GitHub's comment limit.
@@ -26,7 +27,9 @@ skill); never the repo under review. Keys are lowercase letters; values are lett
 only `lens` may repeat. A review round adds cycle, lenses, dupes, mustfix, nits, one lens=<name>:<model>:<effort>:
 <tokens>:<seconds>:<findings> per agent, and dismissals and promoted when the verifier gave them (a re-post:
 repost=1, lenses and mustfix only); a review record also carries depth, floor and planned (plan.py's: the depth
-the round ran at, the paths' floor, and the planned lenses with the verifier, or `none`).
+the round ran at, the paths' floor, and the planned lenses with the verifier, or `none`), and, on a round the owner
+overrode, override (`depth:<d>,effort:<e>`, either part alone, as on the marker) and overridefrom (attended or
+scheduled).
 """
 
 from __future__ import annotations
@@ -52,6 +55,8 @@ COUNT = re.compile(r"0|[1-9][0-9]*")
 LENS_KEYS = ("model", "effort", "tokens", "seconds", "findings")
 DISMISSALS = re.compile(r"^[ \t\v\f\r]*Dismissals:")
 DISMISSALS_LINE = re.compile(r"[ \t\v\f\r]*Dismissals: re-ran (0|[1-9][0-9]*), promoted (0|[1-9][0-9]*)[ \t\v\f\r]*")
+OVERRIDE = re.compile(r"depth:(none|light|focused|full)(,effort:(low|medium|high|xhigh|max))?|"
+                      r"effort:(low|medium|high|xhigh|max)")
 WATCHED = ("skills/review", "agents", "cloud/hooks")  # what a `-dirty` kit means: these changed, uncommitted
 
 
@@ -245,6 +250,10 @@ def build(a: argparse.Namespace) -> str:
         marker += f" reviewed={a.reviewed}"
     if a.depth:
         marker += f" depth={a.depth}"
+    if a.override:
+        if not OVERRIDE.fullmatch(a.override) or not a.depth:
+            sys.exit("record.py: --override is `depth:<d>,effort:<e>` (either part alone), on a record with --depth")
+        marker += f" override={a.override}"
     marker += " -->"
     try:
         third = round_line(a.round)
@@ -295,6 +304,7 @@ def main() -> int:
     b.add_argument("--tier", choices=["routine", "standard", "sensitive"])
     b.add_argument("--reviewed")
     b.add_argument("--depth", choices=["none", "light", "focused", "full"])
+    b.add_argument("--override")
     b.add_argument("--round", action="append", default=[])
     b.add_argument("--line", action="append", default=[])
     b.add_argument("--file")

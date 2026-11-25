@@ -657,3 +657,106 @@ def test_a_repost_without_a_record_is_refused(w: World, tmp_path: Path) -> None:
     done = repost(w, tmp_path, reviewed)
     assert done.returncode == 2 and "record the round anew" in done.stderr, done.stderr
     assert w.writes() == []
+
+
+# The owner's override: depth and effort from the owner's instruction, recorded with its source.
+
+QUOTE = "Review override: depth=light, effort=medium"
+
+
+def override_args(spec: str = "depth=light, effort=medium", src: str = "scheduled", quote: str = QUOTE) -> list[str]:
+    return ["--override", spec, "--override-from", src, "--override-quote", quote]
+
+
+def test_an_override_lowers_a_sensitive_round_to_its_depth_and_effort(w: World) -> None:
+    w.commit({"cloud/hooks/x.sh": "x\n"})
+    code, p, err = plan(w, *override_args())
+    assert code == 0, err
+    assert (p["floor"], p["depth"], lenses_of(p), p["verifier"]) == ("focused", "light", [COR], VER)
+    assert set(p["effort"].values()) == {"medium"}
+
+
+def test_an_override_raises_too(w: World) -> None:
+    w.commit({"src/app.py": "x = 2\n"})
+    code, p, err = plan(w, *override_args("depth=full effort=max", "attended", "review this one at full, max effort"))
+    assert code == 0, err
+    assert (p["depth"], sorted(lenses_of(p))) == ("full", [COR])
+    assert set(p["effort"].values()) == {"max"}
+
+
+def test_without_an_override_the_floor_and_efforts_stand(w: World) -> None:
+    w.commit({"cloud/hooks/x.sh": "x\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert (p["depth"], p["effort"][COR], p["override"]) == ("focused", "high", None)
+
+
+@pytest.mark.parametrize("args,why", [
+    (["--override", "depth=light"], "together"),
+    (override_args("none", "scheduled", "Review override: none"), "no override"),
+    (override_args("depth=tiny"), "depth=<"),
+    (override_args("depth=light depth=none"), "each once"),
+    (override_args(src="memory"), "attended or scheduled"),
+    (override_args(quote="Review override: depth=none"), "same override"),
+    (override_args(quote="please go lighter"), "same override"),
+    (override_args(src="attended", quote=" "), "one line"),
+    (override_args() + ["--depth", "full"], "decides it alone"),
+])
+def test_a_malformed_override_is_refused(w: World, args: list[str], why: str) -> None:
+    w.commit({"cloud/hooks/x.sh": "x\n"})
+    code, _, err = plan(w, *args)
+    assert code == 2 and why in err, err
+
+
+def test_verdict_records_the_override_and_its_source(w: World, tmp_path: Path) -> None:
+    head = w.commit({"cloud/hooks/x.sh": "x\n"})
+    done = verdict(w, tmp_path, head, [COR, VER], "sensitive", effort={COR: "medium", VER: "medium"},
+                   extra=tuple(override_args()))
+    assert done.returncode == 0, done.stderr
+    body = w.comments()[-1]["body"]
+    assert body.split("\n")[1] == (f"{REVIEW} sha={head} state=success tier=sensitive reviewed={head} "
+                                   "depth=light override=depth:light,effort:medium -->")
+    f = dict(x for x in round_fields(body) if x[0] != "lens")
+    assert (f["depth"], f["floor"], f["override"], f["overridefrom"]) == ("light", "focused",
+                                                                         "depth:light,effort:medium", "scheduled")
+    assert f'- Override: depth:light,effort:medium, by the owner\'s instruction (scheduled): "{QUOTE}"' in body
+
+
+def test_verdict_refuses_the_same_light_round_without_an_override(w: World, tmp_path: Path) -> None:
+    head = w.commit({"cloud/hooks/x.sh": "x\n"})
+    done = verdict(w, tmp_path, head, [COR, VER], "sensitive", effort={COR: "medium", VER: "medium"})
+    assert done.returncode == 2 and "lacks the planned" in done.stderr, done.stderr
+    assert w.comments() == []
+
+
+def test_verdict_records_an_override_of_depth_none_with_no_reviewer(w: World) -> None:
+    head = w.commit({"cloud/hooks/x.sh": "x\n"})
+    done = w.verdict("12", "--tier", "sensitive",
+                     *override_args("depth=none", "attended", "merge this one without a review"), cost=False)
+    assert done.returncode == 0, done.stderr
+    body = w.comments()[-1]["body"]
+    assert body.split("\n")[1] == (f"{REVIEW} sha={head} state=success tier=sensitive reviewed={head} "
+                                   "depth=none override=depth:none -->")
+    assert "No reviewer ran: the owner's override sets depth none." in body
+
+
+def test_verdict_refuses_no_reviewer_above_routine_without_an_override(w: World) -> None:
+    w.commit({"cloud/hooks/x.sh": "x\n"})
+    done = w.verdict("12", "--tier", "sensitive", cost=False)
+    assert done.returncode == 2 and "needs a reviewer" in done.stderr, done.stderr
+
+
+def test_a_repost_keeps_the_reposted_rounds_override(w: World, tmp_path: Path) -> None:
+    head = w.commit({"cloud/hooks/x.sh": "x\n"})
+    done = verdict(w, tmp_path, head, [COR, VER], "sensitive", effort={COR: "medium", VER: "medium"},
+                   extra=tuple(override_args()))
+    assert done.returncode == 0, done.stderr
+    w.main_moves({"README.md": "moved\n"})
+    w.git(w.repo, "merge", "-q", "--no-edit", "origin/main")
+    w.push()
+    done = w.verdict("12", "--tier", "sensitive", "--reviewers", f"{COR}, {VER}", "--reviewed", head,
+                     "--file", str(tmp_path / "review.txt"), "--repost", cost=False)
+    assert done.returncode == 0, done.stderr
+    body = w.comments()[-1]["body"]
+    assert "depth=light override=depth:light,effort:medium -->" in body.split("\n")[1]
+    assert "overridefrom=scheduled" in body.split("\n")[2]

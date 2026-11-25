@@ -30,12 +30,13 @@ ID = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
 
 
 def record(kind: str, sha: str = HEAD, state: str = "success", tier: str = "standard",
-           depth: str | None = None) -> str:
+           depth: str | None = None, override: str | None = None) -> str:
     if kind == "gates":
         title, extra = f"🤖 Gates: {state}", []
     else:
         title = f"🤖 Review: {'pass' if state == 'success' else 'fail'} ({tier} tier)"
         extra = ["--tier", tier, "--reviewed", sha] + (["--depth", depth] if depth else [])
+        extra += ["--override", override] if override else []
     return subprocess.run([sys.executable, str(RECORD), "build", "--kind", kind, "--sha", sha, "--state", state,
                            "--title", title, *extra, "--line", "- Head commit: x"],
                           capture_output=True, text=True, check=True).stdout
@@ -791,6 +792,48 @@ def test_a_record_at_or_above_the_floor_merges(fx: Fx, tmp_path: Path, depth: st
     fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, tier="sensitive",
                                                                    depth=depth)))
     assert mcp(fx, r, expectedHeadSha=head) is None
+
+
+# The owner's override (verdict.sh --override): a record below the floor counts only when it names that depth.
+
+
+@pytest.mark.parametrize("depth", ["none", "light"])
+def test_a_record_below_the_floor_merges_when_the_owner_overrode_that_depth(fx: Fx, tmp_path: Path,
+                                                                           depth: str) -> None:
+    r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"})
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, tier="sensitive",
+                                                                   depth=depth, override=f"depth:{depth}")))
+    assert mcp(fx, r, expectedHeadSha=head) is None
+
+
+@pytest.mark.parametrize("override", ["effort:low", "depth:focused", "depth:none,effort:low"])
+def test_an_override_that_names_another_depth_does_not_lower_the_floor(fx: Fx, tmp_path: Path,
+                                                                     override: str) -> None:
+    r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"})
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, tier="sensitive",
+                                                                   depth="light", override=override)))
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "depth light" in reason and "focused" in reason, reason
+
+
+def test_an_override_does_not_lower_the_tier(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"})
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, tier="standard",
+                                                                   depth="light", override="depth:light")))
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "standard tier" in reason, reason
+
+
+@pytest.mark.parametrize("body", [
+    record("review", depth="light").replace(" -->", " override=depth:tiny -->", 1),
+    record("review", depth="light").replace(" -->", " override= -->", 1),
+    record("review").replace(" -->", " override=depth:light -->", 1),  # an override with no depth on the record
+    record("review", depth="light").replace(" -->", " override=depth:light override=depth:none -->", 1),
+])
+def test_a_malformed_override_refuses(fx: Fx, clone: Path, body: str) -> None:
+    fx.comments(comment(record("gates")), comment(body))
+    reason = mcp(fx, clone, expectedHeadSha=HEAD)
+    assert reason and "malformed" in reason, reason
 
 
 def test_a_record_s_depth_is_checked_against_a_lab_policy_too(fx: Fx, tmp_path: Path) -> None:

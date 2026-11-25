@@ -17,7 +17,8 @@ back on the PRs, and sums both up. GitHub holds every record; the JSONL files ar
       prints the batch's numbers: rounds, passes, convergence, lens yield and, from the audits, how often a
       checkable finding was wrong or mattered and a must-fix was ranked too high, each with its 95% interval,
       and how many findings were ranked too low, the findings by the effort their lens ran at and the rounds by depth
-      (`unstamped` for a round line without them); "merged without a pass" reads the review record the merge
+      (`unstamped` for a round line without them), and the rounds the owner overrode, by override and where it was
+      given; "merged without a pass" reads the review record the merge
       guard saw at merge time, not the gates record or the tier. Then the rounds by the review path's version
       (`v` on each record's round line, `unstamped` without one) and the reviewers' tokens and seconds per PR,
       repo, day and month, with an estimated cost at list price (BLENDED_USD_PER_MTOK has the rate).
@@ -55,7 +56,7 @@ MARKER = re.compile(r"<!-- loadout:(gates|review|audit)((?: [a-z_]+=[^\s=]+)+) -
 TITLE = {"gates": re.compile(r"🤖 Gates: (success|failure)"),
          "review": re.compile(r"🤖 Review: (pass|fail) \((routine|standard|sensitive) tier\)"),
          "audit": re.compile(r"🤖 Audit: \d+ findings? re-checked \(session [A-Za-z0-9._-]{1,64}\)")}
-FIELDS = {"gates": {"sha", "state"}, "review": {"sha", "state", "tier", "reviewed", "depth"},
+FIELDS = {"gates": {"sha", "state"}, "review": {"sha", "state", "tier", "reviewed", "depth", "override"},
           "audit": {"session", "backfill"}}
 DEPTHS = ("none", "light", "focused", "full")  # the review skill's plan.py ranks them
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -266,6 +267,8 @@ def harvest(a: argparse.Namespace) -> int:
                         "lenses": rf.get("lens", []),
                         "depth": f.get("depth") or (rf["depth"] if isinstance(rf.get("depth"), str) else None),
                         "floor": rf["floor"] if isinstance(rf.get("floor"), str) else None,
+                        "override": f.get("override"),
+                        "override_from": rf["overridefrom"] if isinstance(rf.get("overridefrom"), str) else None,
                         "planned": (None if not isinstance(rf.get("planned"), str)
                                     else [] if rf["planned"] == "none" else rf["planned"].split(",")),
                         "tokens": sum(x["tokens"] for x in rf.get("lens", [])),
@@ -457,6 +460,8 @@ def summarize(d: Path, session: str | None) -> dict:
         "lens": {k: dict(v) for k, v in sorted(lens.items())},
         "effort": {k: dict(v) for k, v in sorted(effort.items())},
         "depth": dict(sorted(Counter(r.get("depth") or UNSTAMPED for r in rounds).items())),
+        "override": dict(sorted(Counter(f"{r['override']} ({r.get('override_from') or 'unknown'})"
+                                        for r in rounds if r.get("override")).items())),
         "audited": len(audits),
         "wrong": wilson(sum(j["correct"] == "no" for j in checkable), len(checkable)),
         "matters": wilson(sum(j.get("matters") == "yes" for j in checkable), len(checkable)),
@@ -554,6 +559,9 @@ def summary(a: argparse.Namespace) -> int:
         print(f"| {k} | {v.get('must_fix', 0)} | {v.get('other', 0)} |")
     print("\n| Depth | Rounds |\n|---|---|")
     for k, v in s["depth"].items():
+        print(f"| {k} | {v} |")
+    print("\n| Owner override | Rounds |\n|---|---|")
+    for k, v in (s["override"] or {"none": 0}).items():
         print(f"| {k} | {v} |")
     print("\n| Needs a look | Rounds | Must-fix per round | Why |\n|---|---|---|---|")
     for c in s["attention"]:

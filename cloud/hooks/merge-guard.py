@@ -8,12 +8,13 @@ The merge tool: any MCP server's `merge_pull_request` may merge a PR only when i
 (skills/review/scripts/gate_stamp.sh) and newest review record (skills/review/scripts/verdict.sh), PR comments
 by the owner, a member or a collaborator whose first line is `🤖 Gates: <state>` or `🤖 Review: <result>
 (<tier> tier)` and second the marker `<!-- loadout:<gates|review> sha=<head> state=success|failure [tier=..]
-[reviewed=..] [depth=..] -->`, are unedited, well formed, agree with their first line and name the PR's current head
+[reviewed=..] [depth=..] [override=..] -->`, are unedited, well formed, agree with their first line and name the PR's current head
 as a success. In a local clone holding the head and the default branch GitHub names, the review skill's
 `plan.py floor` (tier.sh's tier and the paths' depth floor) runs against that branch's tip as GitHub's branches API
 names it when the clone holds that commit, else against `origin/<that branch>`; a review below the paths' tier
-refuses, as does a record that carries a `depth` below the floor (a record without `depth` is judged on its tier
-alone), and so does a check that fails or runs out of time; with no such clone the check is skipped. When the floor
+refuses, as does a record that carries a `depth` below the floor unless its `override` names that depth (the owner's
+instruction, which verdict.sh records with its source; a record without `depth` is judged on its tier alone), and so
+does a check that fails or runs out of time; with no such clone the check is skipped. When the floor
 is `none` and it was computed against GitHub's tip, no review record is needed: the gates record alone lets the merge
 go when the newest trusted review record is absent, for an older head, or an unedited, well-formed success; an
 edited, malformed or failing one holds the merge. The merge must name the head checked (`expectedHeadSha`), so
@@ -60,7 +61,10 @@ OWNER_MERGES = "owner-merges"  # a PR label: the merge is the owner's alone
 MARKER = re.compile(r"<!-- loadout:(gates|review)((?: [a-z]+=[^\s=]+)+) -->")
 TITLE = {"gates": re.compile(r"🤖 Gates: (success|failure)"),
          "review": re.compile(r"🤖 Review: (pass|fail) \((routine|standard|sensitive) tier\)")}
-FIELDS = {"gates": {"sha", "state"}, "review": {"sha", "state", "tier", "reviewed", "depth"}}
+FIELDS = {"gates": {"sha", "state"}, "review": {"sha", "state", "tier", "reviewed", "depth", "override"}}
+# A review marker's override= value (verdict.sh writes it from the owner's instruction): depth and/or effort.
+OVERRIDE = re.compile(r"(?:depth:(none|light|focused|full))(?:,effort:(?:low|medium|high|xhigh|max))?|"
+                      r"effort:(?:low|medium|high|xhigh|max)")
 RANK = {"routine": 0, "standard": 1, "sensitive": 2}
 DEPTH = {"none": 0, "light": 1, "focused": 2, "full": 3}
 PLAN_PY = ROOT / "skills/review/scripts/plan.py"
@@ -175,7 +179,8 @@ def record_problem(kind: str, c: dict, head: str) -> tuple[str, dict]:
     if (len(fields) != len(pairs) or not {"sha", "state"} <= set(fields) <= FIELDS[kind]
             or not all(re.fullmatch(r"[0-9a-f]{40}", s) for s in shas)
             or (kind == "review" and fields.get("tier") not in RANK)
-            or ("depth" in fields and fields["depth"] not in DEPTH)):
+            or ("depth" in fields and fields["depth"] not in DEPTH)
+            or ("override" in fields and ("depth" not in fields or not OVERRIDE.fullmatch(fields["override"])))):
         return f"{where} has a malformed marker", {}
     state = fields["state"]
     said = title.group(1) if kind == "gates" else {"pass": "success", "fail": "failure"}[title.group(1)]
@@ -239,6 +244,12 @@ def paths_rating(repo: str, head: str, base: object, cwd: str) -> tuple[str, str
         why = (done.stderr.strip().splitlines() or ["no output"])[-1]
         raise Unreadable(f"tier.sh failed on the head (plan.py floor): {why}")
     return out[0], out[1], pinned
+
+
+def overridden(review: dict) -> bool:
+    """Whether a review record's `override=` names its own depth: the owner set the round below the floor."""
+    m = OVERRIDE.fullmatch(review.get("override", ""))
+    return bool(m and m.group(1) == review.get("depth"))
 
 
 def check_merge(repo: str | None, number: str | None, expected: str | None, cwd: str = ".",
@@ -307,7 +318,7 @@ def check_merge(repo: str | None, number: str | None, expected: str | None, cwd:
             problems.append(hint.lstrip("; ") if unpinned_none and review["tier"] == "routine" else
                             f"the review is {review['tier']} tier, but the head's paths make it {tier} "
                             "(skills/review/scripts/tier.sh); review it at that tier")
-        elif "depth" in review and DEPTH[review["depth"]] < DEPTH[floor]:
+        elif "depth" in review and DEPTH[review["depth"]] < DEPTH[floor] and not overridden(review):
             problems.append(f"the review is depth {review['depth']}, but the head's paths need depth {floor} "
                             "(skills/review/scripts/plan.py); review it at that depth")
     if problems:

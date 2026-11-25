@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """Plans a review round from a PR's paths and the repo's policy: its depth, its lenses in order and each lens's effort.
 
-  plan.py [--pr <n>] [--depth none|light|focused|full] [--json]
+  plan.py [--pr <n>] [--depth none|light|focused|full] [<override>] [--json]
       the lead's preview: what verdict.sh will require of the round it records for PR <n> (the current branch's
       open PR when --pr is left out); --depth raises the depth, never lowers it below the floor.
-  plan.py record --pr <n> [--depth <d>] --reviewers <names> --lens "<name> ... effort=<e> ..."...
+  plan.py record --pr <n> [--depth <d>] [<override>] --reviewers <names> --lens "<name> ... effort=<e> ..."...
       what verdict.sh runs: the same plan, then refuses a reviewer set missing a planned lens or the verifier, or a
-      planned lens run below its planned effort; prints the marker's depth and the round line's pairs.
+      planned lens run below its planned effort; prints the marker's depth (and override) and the round line's pairs.
+  <override> is --override "depth=<d>, effort=<e>" --override-from attended|scheduled --override-quote "<words>":
+      the owner's explicit instruction, never the lead's choice (the review skill, step 1). It sets the round's depth
+      (below the floor or above it, on any path) and/or every planned lens's and the verifier's effort, in place of
+      the paths, REVIEW.md and --depth; the lenses are those that depth plans for the tier. --override-from says where
+      the owner gave it: in an attended session (`attended`; the quote is their words there) or in a scheduled task's
+      prompt (`scheduled`; the quote is that prompt's `Review override: ...` line, which must give the same override).
+      `Review override: none` in a prompt means no override: pass no --override.
   plan.py floor --base <ref> --head <ref>
       what the merge guard runs, like tier.sh: the tier and the depth floor of the paths, from a local clone.
 
@@ -25,6 +32,7 @@ Inputs, where each is read from, who controls it, and how a lead-controlled one 
 | Previous round | `gh api repos/<r>/issues/<n>/comments`, paged by hand: the newest review-marker comment by the owner, a member or a collaborator | a trusted record on the PR | used only when unedited, in verdict.sh's exact shape, above routine, its raw output's first `Reviewed:` naming its `reviewed=`, its `Blocking:` line readable, and `reviewed=` an ancestor of the head and not of the merge-base; else a first review (the widest plan); an older record is never used in its place; untrusted authors are ignored |
 | Answered lenses | that record's `Blocking:` ids, by prefix | a trusted record | an id whose prefix names no lens plans the whole set |
 | `--depth` | the lead's argument | the lead | the depth is the higher of it and the floor; one below the floor refuses |
+| `--override`, `--override-from`, `--override-quote` | the lead's arguments, copying the owner's instruction | the owner, through the lead | all three or none; it replaces the depth and efforts, and goes on the marker (`override=`), the round line (`override=`, `overridefrom=`) and in the record's body with the quote, so the merge guard and an audit see it; nothing checks that the owner said it but the quote on the record |
 | `--reviewers`, `--lens` | the lead's arguments to verdict.sh | the lead | must cover every planned lens and the verifier, each planned lens at its planned effort or above; extra lenses are accepted |
 | `--pr` | the lead's argument | the lead | names the PR the record is posted on, so it can only describe that PR |
 | Repo (`REVIEW_REPO`, else `origin`'s URL) and the object store | the local clone | the lead | every object is read by a sha GitHub named; the code these scripts run from is stamped as `kit=` on the round line |
@@ -84,7 +92,10 @@ HIGH_ON_CODE = {COR, CTL}
 TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
 MARKER = re.compile(r"<!-- loadout:review((?: [a-z]+=[^\s=]+)+) -->")
 TITLE = re.compile(r"🤖 Review: (pass|fail) \((routine|standard|sensitive) tier\)")
-FIELDS = {"sha", "state", "tier", "reviewed", "depth"}
+FIELDS = {"sha", "state", "tier", "reviewed", "depth", "override"}
+OVERRIDE_FROM = ("attended", "scheduled")
+OVERRIDE_LINE = re.compile(r"\s*Review override:\s*(.*?)\s*")
+COMPACT = re.compile(r"(depth:(?:none|light|focused|full))?(?:(?<=[a-z]),)?(effort:(?:low|medium|high|xhigh|max))?")
 ROUND = re.compile("<!-- loadout" r":round((?: [a-z]+=[A-Za-z0-9._,:-]+)+) -->")
 RAW = re.compile(r"<details><summary>[^<\n]*</summary>\n\n(?:Clipped[^\n]*\n\n)?(`{3,})text\n(.*?)\1\n\n</details>",
                  re.S)
@@ -96,6 +107,50 @@ MAX_PAGES = 30
 
 class Refused(Exception):
     """The plan cannot be made, or a round does not cover it: the reason."""
+
+
+def parse_override(spec: str) -> dict:
+    """`depth=<d>` and/or `effort=<e>`, split by commas or blanks, each once, into {"depth": d, "effort": e}."""
+    if spec.strip().lower() == "none":
+        raise Refused("an override of `none` means no override: leave --override out, and the defaults stand")
+    out: dict = {}
+    for part in (x for x in re.split(r"[,\s]+", spec.strip()) if x):
+        k, _, v = part.partition("=")
+        allowed = DEPTHS if k == "depth" else tiers.EFFORTS if k == "effort" else ()
+        if v not in allowed or k in out:
+            raise Refused(f"--override is `depth=<{'|'.join(DEPTHS)}>` and/or `effort=<{'|'.join(tiers.EFFORTS)}>`, "
+                          f"each once (got {spec!r})")
+        out[k] = v
+    if not out:
+        raise Refused(f"--override names no depth and no effort (got {spec!r})")
+    return out
+
+
+def compact(o: dict) -> str:
+    """The override as the marker and the round line carry it: `depth:<d>,effort:<e>`, either part alone."""
+    return ",".join(f"{k}:{o[k]}" for k in ("depth", "effort") if k in o)
+
+
+def read_override(a: argparse.Namespace) -> dict | None:
+    """The owner's override from --override, --override-from and --override-quote (all or none), checked."""
+    given = [x for x in (a.override, a.override_from, a.override_quote) if x is not None]
+    if not given:
+        return None
+    if len(given) != 3:
+        raise Refused("an override takes --override, --override-from and --override-quote together: the owner's "
+                      "instruction, where they gave it, and their words")
+    o = parse_override(a.override)
+    if a.override_from not in OVERRIDE_FROM:
+        raise Refused(f"--override-from is {' or '.join(OVERRIDE_FROM)} (got {a.override_from!r})")
+    quote = a.override_quote.strip()
+    if not quote or "\n" in quote or "-->" in quote:
+        raise Refused("--override-quote is the owner's words, on one line")
+    if a.override_from == "scheduled":
+        m = OVERRIDE_LINE.fullmatch(quote)
+        if not m or parse_override(m.group(1)) != o:
+            raise Refused(f"--override-from scheduled quotes the task prompt's own `Review override: ...` line, and "
+                          f"it must give the same override as --override (got {quote!r})")
+    return {**o, "from": a.override_from, "quote": quote}
 
 
 def run(*args: str) -> subprocess.CompletedProcess[str]:
@@ -269,9 +324,12 @@ def ordered(lenses: set[str]) -> list[str]:
     return sorted(lenses, key=lambda x: (LENSES.index(x) if x in LENSES else len(LENSES), x))
 
 
-def make_plan(change: Change, prior: tuple[str, list[dict]] | None, want: str | None) -> dict:
+def make_plan(change: Change, prior: tuple[str, list[dict]] | None, want: str | None,
+              override: dict | None = None) -> dict:
     if want is not None and want not in DEPTHS:
         raise Refused(f"--depth is one of {', '.join(DEPTHS)} (got {want!r})")
+    if want is not None and override and "depth" in override:
+        raise Refused("--depth and an override's depth both set the depth: the owner's override decides it alone")
     if want is not None and DRANK[want] < DRANK[change.floor]:
         raise Refused(f"--depth {want} is below the floor the paths set, {change.floor}: a depth may be raised, never "
                       "lowered")
@@ -279,6 +337,9 @@ def make_plan(change: Change, prior: tuple[str, list[dict]] | None, want: str | 
     why = [f"the paths make it {change.tier} with depth floor {change.floor}"]
     if want and want != change.floor:
         why.append(f"raised to {depth}")
+    if override and "depth" in override:
+        depth = override["depth"]
+        why.append(f"the owner's override ({override['from']}) sets depth {depth}")
     whole = change.tier_set(change.paths)
     light = {CLM} if change.tier == "routine" else {COR}
     paths, since, kind = change.paths, None, "first"
@@ -314,7 +375,10 @@ def make_plan(change: Change, prior: tuple[str, list[dict]] | None, want: str | 
     if run_:
         set_by = [e[VERIFIER] for p in paths for e in change.rated[p]["efforts"] if VERIFIER in e]
         effort[VERIFIER] = max(set_by, key=ERANK.get) if set_by else "medium"
-    return {"head": change.head, "tier": change.tier, "floor": change.floor, "depth": depth, "round": kind,
+    if override and "effort" in override:
+        effort = {x: override["effort"] for x in effort}
+        why.append(f"the owner's override ({override['from']}) sets every effort to {override['effort']}")
+    return {"override": override,"head": change.head, "tier": change.tier, "floor": change.floor, "depth": depth, "round": kind,
             "since": since, "first": first, "then": then, "verifier": VERIFIER if run_ else "", "effort": effort,
             "planned": run_ + ([VERIFIER] if run_ else []), "why": why}
 
@@ -361,6 +425,8 @@ def read_pr(repo: str, number: str) -> tuple[Change, list[dict], str]:
 
 def check_round(p: dict, reviewers: str, lens_specs: list[str]) -> None:
     """Refuses a reviewer set missing a planned lens or the verifier, or a planned lens run below its effort."""
+    if not p["planned"] and not reviewers.strip():
+        return  # no reviewer planned (an override of depth none) and none ran
     try:
         ran = record.names(reviewers)
         specs = {x["name"]: x for x in (record.lens_spec(s) for s in lens_specs)}
@@ -382,7 +448,10 @@ def record_main(a: argparse.Namespace) -> int:
     if a.tier != "routine" and tiers.RANK[a.tier] < tiers.RANK[change.tier]:
         raise Refused(f"PR {a.pr}'s paths make it {change.tier}, so --tier {a.tier} is too low (tier.sh lists the "
                       "paths)")
+    override = read_override(a)
     if a.routine:
+        if override:
+            raise Refused("--tier routine runs no reviewer and needs no override: record it without one")
         if a.depth not in (None, "none"):
             raise Refused("--tier routine runs no reviewer, so its depth is none")
         if change.floor != "none":
@@ -392,36 +461,55 @@ def record_main(a: argparse.Namespace) -> int:
         print(f"head {change.head}\ntier {change.tier}\ndepth none\npairs {' '.join(pairs)}")
         return 0
     if a.repost:
+        if override:
+            raise Refused("--repost carries the reposted record's own override, if it has one: pass no --override")
         f = record_fields(newest_review(comments) or {})
         planned = (f or {}).get("round", {}).get("planned")
         if not f or f["reviewed"] != a.reviewed or "depth" not in f or not planned:
             raise Refused("--repost posts the PR's newest trusted review record again, and that record must have "
                           "reviewed --reviewed and carry its depth and plan: record the round anew")
-        if DRANK[f["depth"]] < DRANK[change.floor]:
+        carried = f.get("override") or ""
+        if DRANK[f["depth"]] < DRANK[change.floor] and not overrides_depth(carried, f["depth"]):
             raise Refused(f"the reposted round ran depth {f['depth']}, below the floor {change.floor} at the head")
         p = {"planned": [] if planned == "none" else planned.split(","), "effort": {}, "depth": f["depth"],
              "round": "reposted"}
         check_round(p, a.reviewers, [])
         pairs = [f"depth={f['depth']}", f"floor={change.floor}", f"planned={planned}"]
-        print(f"head {change.head}\ntier {change.tier}\ndepth {f['depth']}\npairs {' '.join(pairs)}")
+        if carried:
+            src = f["round"].get("overridefrom")
+            pairs += [f"override={carried}"] + ([f"overridefrom={src}"] if src in OVERRIDE_FROM else [])
+        print(f"head {change.head}\ntier {change.tier}\ndepth {f['depth']}\npairs {' '.join(pairs)}"
+              + (f"\noverride {carried}" if carried else ""))
         return 0
-    p = make_plan(change, prior_round(newest_review(comments), change), a.depth)
+    p = make_plan(change, prior_round(newest_review(comments), change), a.depth, override)
     check_round(p, a.reviewers, a.lens)
     pairs = [f"depth={p['depth']}", f"floor={p['floor']}", f"planned={','.join(p['planned']) or 'none'}"]
-    print(f"head {change.head}\ntier {change.tier}\ndepth {p['depth']}\npairs {' '.join(pairs)}")
+    if override:
+        pairs += [f"override={compact(override)}", f"overridefrom={override['from']}"]
+    print(f"head {change.head}\ntier {change.tier}\ndepth {p['depth']}\npairs {' '.join(pairs)}"
+          + (f"\noverride {compact(override)}" if override else ""))
     return 0
+
+
+def overrides_depth(value: str, depth: str) -> bool:
+    """Whether a record's `override=` value names `depth` as the round's depth (the merge guard's test)."""
+    m = COMPACT.fullmatch(value or "")
+    return bool(value and m and m.group(1) == f"depth:{depth}")
 
 
 def preview_main(a: argparse.Namespace) -> int:
     repo = repo_name()
+    override = read_override(a)
     change, comments, default = read_pr(repo, a.pr or current_pr(repo))
     p = {"pr": int(a.pr) if a.pr else None, "base": default, "tip": change.base,
-         **make_plan(change, prior_round(newest_review(comments), change), a.depth)}
+         **make_plan(change, prior_round(newest_review(comments), change), a.depth, override)}
     if a.json:
         print(json.dumps(p))
         return 0
     for k in ("tier", "floor", "depth", "round"):
         print(f"{k}: {p[k]}")
+    if override:
+        print(f"override: {compact(override)}, by the owner ({override['from']}): {override['quote']}")
     print(f"since: {p['since'] or 'none (a first review)'}")
     for k in ("first", "then"):
         shown = ", ".join(f"{x} ({p['effort'][x]})" for x in p[k])
@@ -437,6 +525,12 @@ def floor_main(a: argparse.Namespace) -> int:
     return 0
 
 
+def add_override(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--override")
+    p.add_argument("--override-from")
+    p.add_argument("--override-quote")
+
+
 def main(argv: list[str]) -> int:
     if argv[:1] in (["record"], ["floor"]):
         p = argparse.ArgumentParser(prog=f"plan.py {argv[0]}")
@@ -449,6 +543,7 @@ def main(argv: list[str]) -> int:
             p.add_argument("--tier", choices=list(tiers.RANK), required=True)
             p.add_argument("--routine", action="store_true")
             p.add_argument("--repost", action="store_true")
+            add_override(p)
         else:
             p.add_argument("--base", required=True)
             p.add_argument("--head", required=True)
@@ -459,6 +554,7 @@ def main(argv: list[str]) -> int:
         p.add_argument("--pr")
         p.add_argument("--depth")
         p.add_argument("--json", action="store_true")
+        add_override(p)
         a = p.parse_args(argv)
         handler = preview_main
     if getattr(a, "pr", None) is not None and not re.fullmatch(r"[0-9]+", a.pr):

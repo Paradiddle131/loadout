@@ -5,7 +5,8 @@
 # Usage: verdict.sh <pr> --tier routine|standard|sensitive [--result pass|fail] \
 #          --reviewers "<names>" --reviewed <sha> --file <verifier output> \
 #          --cycle <n> --dupes <n> --nits <n> --lens "<name> model=<m> effort=<e> tokens=<n> seconds=<n> findings=<n>"... \
-#          [--depth none|light|focused|full] [--repost] [--dry-run]
+#          [--depth none|light|focused|full] [--repost] [--dry-run] \
+#          [--override "depth=<d>, effort=<e>" --override-from attended|scheduled --override-quote "<owner's words>"]
 #   The round's plan is plan.py's, computed here from what GitHub names (the PR's head, its default branch and that
 #   branch's tip, the PR's newest trusted review record) and REVIEW.md on that tip; plan.py's header has the rules and
 #   the table of its inputs. --depth raises the plan's depth above the paths' floor, never below it. Above routine,
@@ -35,6 +36,13 @@
 #   `none` for a PASS; for a FAIL the must-fix findings it lists, each heading a `###` block below, with a harm of two
 #   words or more not made only of blocking.py's filler words. The lead acts on the line (the review skill).
 #   A finding block's `- class: patched, not fixed (<settled id>)` line prints a notice on stderr, never a refusal.
+#   --override, --override-from and --override-quote (all three or none) carry the owner's explicit instruction to
+#   review this round at another depth or effort, lighter or heavier, on any path: from the owner's message in an
+#   attended session, or a `Review override: ...` line in a scheduled task's prompt (plan.py's header has the shape);
+#   never the lead's own choice. The plan then takes that depth and those efforts in place of the floor, REVIEW.md
+#   and --depth; the marker carries override=, the round line override= and overridefrom=, and the body quotes the
+#   owner's words, so the merge guard accepts the record below the floor and an audit can group it. An override of
+#   depth=none records that no reviewer ran, as the routine tier does, at the paths' own tier.
 #   --tier routine needs no reviewer: --reviewers, --reviewed and --file are optional, --result defaults to pass,
 #   the comment says the tier needs gates only, and the session that wrote the change may run it, since the
 #   paths decide the tier. It is accepted whenever the paths' depth floor is none (a routine change, or a standard
@@ -54,6 +62,7 @@ export LC_ALL=C # grep's [[:space:]] and blocking.py's blanks agree only in the 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 usage='usage: verdict.sh <pr> --tier routine|standard|sensitive [--result pass|fail] --reviewers "<names>" --reviewed <sha> --file <verifier output> --cycle <n> --dupes <n> --nits <n> --lens "<name> model=<m> effort=<e> tokens=<n> seconds=<n> findings=<n>"... [--depth <d>] [--repost] [--dry-run]'
 pr='' tier='' result='' reviewers='' reviewed='' file='' cycle='' dupes='' nits='' repost='' depth=''
+override='' override_from='' override_quote='' has_override=''
 lens=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -68,6 +77,9 @@ while [ $# -gt 0 ]; do
     --depth) depth=${2:-}; shift 2 ;;
     --lens) lens+=(--lens "${2:-}"); shift 2 ;;
     --repost) repost=--repost; shift ;;
+    --override) override=${2:-}; has_override=1; shift 2 ;;
+    --override-from) override_from=${2:-}; has_override=1; shift 2 ;;
+    --override-quote) override_quote=${2:-}; has_override=1; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     -*) echo "$usage" >&2; exit 2 ;;
     *) [ -z "$pr" ] || { echo "$usage" >&2; exit 2; }; pr=$1; shift ;;
@@ -79,10 +91,14 @@ done
 rank() { case "$1" in routine) echo 0 ;; standard) echo 1 ;; sensitive) echo 2 ;; *) echo 9 ;; esac; }
 [[ "$pr" =~ ^[0-9]+$ ]] || die "the first argument is the PR number. $usage"
 case "$tier" in routine | standard | sensitive) ;; *) die "--tier is routine, standard or sensitive. $usage" ;; esac
-[ "$tier" != routine ] || result=${result:-pass}
+# No reviewer runs on the routine tier, or where the owner's override sets depth none (plan.py checks the override).
+no_review=''
+[ "$tier" != routine ] || no_review=1
+[[ " $override " =~ [[:space:],]depth=none[[:space:],] ]] && no_review=1
+[ -z "$no_review" ] || result=${result:-pass}
 case "$depth" in '' | none | light | focused | full) ;; *) die "--depth is none, light, focused or full. $usage" ;; esac
 case "$result" in '' | pass | fail) ;; *) die "--result is pass or fail. $usage" ;; esac
-if [ "$tier" != routine ]; then
+if [ -z "$no_review" ]; then
   [ -n "$reviewers" ] || die "--reviewers names who reviewed (a $tier change needs a reviewer)."
   [ -n "$file" ] && [ -s "$file" ] || die "--file is the reviewers' raw output, and it must not be empty (a $tier change needs a reviewer)."
   [[ "$reviewed" =~ ^[0-9a-f]{40}$ ]] || die "--reviewed is the full sha of the commit the reviewers read (a $tier change needs it)."
@@ -138,7 +154,7 @@ else
   [ -z "$file" ] || [ -r "$file" ] || die "cannot read --file $file"
   [ -z "$reviewed" ] || [[ "$reviewed" =~ ^[0-9a-f]{40}$ ]] || die "--reviewed is a full sha"
   [ -z "$cycle$dupes$nits$repost" ] && [ ${#lens[@]} = 0 ] ||
-    die "the routine tier runs no reviewer, so it takes no --cycle, --dupes, --nits, --lens or --repost."
+    die "the routine tier, or an override of depth none, runs no reviewer, so it takes no --cycle, --dupes, --nits, --lens or --repost."
   round_out=''
 fi
 
@@ -147,6 +163,9 @@ head=$(pr_head "$pr")
 default=$(pr_default_branch "$pr")
 # The plan: plan.py reads its own inputs from GitHub and force-fetches the default branch's tip GitHub names.
 plan_args=(record --pr "$pr" --tier "$tier" ${depth:+--depth "$depth"})
+if [ -n "$has_override" ]; then
+  plan_args+=(--override "$override" --override-from "$override_from" --override-quote "$override_quote")
+fi
 if [ "$tier" = routine ]; then
   plan_args+=(--routine)
 else
@@ -158,10 +177,12 @@ plan_out=$(python3 "$here/plan.py" ${plan_args[@]+"${plan_args[@]}"} 2>"$why") |
   die "${reason#plan.py: }"
 }
 rm -f "$why"
-plan_head='' plan_depth='' plan_pairs=''
+plan_head='' plan_depth='' plan_pairs='' plan_override=''
 while read -r k v; do
-  case "$k" in head) plan_head=$v ;; depth) plan_depth=$v ;; pairs) plan_pairs=$v ;; esac
+  case "$k" in head) plan_head=$v ;; depth) plan_depth=$v ;; pairs) plan_pairs=$v ;; override) plan_override=$v ;; esac
 done <<<"$plan_out"
+[ -z "$no_review" ] || [ "$tier" = routine ] || [ "$plan_depth" = none ] ||
+  die "only an override of depth=none records a $tier change with no reviewer"
 [ "$plan_head" = "$head" ] || die "PR $pr's head moved while the plan was read: run again"
 for c in "$head" ${reviewed:+"$reviewed"}; do
   git cat-file -e "$c^{commit}" 2>/dev/null || git fetch -q origin "$c" 2>/dev/null ||
@@ -205,6 +226,14 @@ lines=(--line "- Head commit: \`$head\`" --line "- Reviewed commit: \`$reviewed\
   --line "- Tier from the paths: $computed" --line "- Depth: $plan_depth (${plan_pairs// /, })"
   --line "- Reviewers: ${reviewers:-none}")
 [ "$tier" != routine ] || lines+=(--line "- The routine tier needs gates only: no reviewer was required.")
+if [ -n "$plan_override" ]; then
+  if [ -n "$override_from" ]; then
+    lines+=(--line "- Override: $plan_override, by the owner's instruction ($override_from): \"$override_quote\"")
+  else
+    lines+=(--line "- Override: $plan_override, carried from the reposted round's record")
+  fi
+  [ -z "$no_review" ] || lines+=(--line "- No reviewer ran: the owner's override sets depth none.")
+fi
 round=()
 read -r -a plan_pair_list <<<"$plan_pairs"
 if [ -n "$round_out" ]; then
@@ -219,6 +248,7 @@ if [ -n "$round_out" ]; then
 fi
 for p in ${plan_pair_list[@]+"${plan_pair_list[@]}"}; do round+=(--round "$p"); done
 build_record --kind review --sha "$head" --state "$state" --tier "$tier" --reviewed "$reviewed" --depth "$plan_depth" \
+  ${plan_override:+--override "$plan_override"} \
   ${round[@]+"${round[@]}"} \
   --title "🤖 Review: $result ($tier tier)" ${lines[@]+"${lines[@]}"} ${file:+--file "$file"} \
   --details "Reviewer output (raw)" >"$tmp/body.md"
