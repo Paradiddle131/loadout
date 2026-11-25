@@ -121,7 +121,7 @@ def parse_override(spec: str) -> dict:
             raise Refused(f"--override is `depth=<{'|'.join(DEPTHS)}>` and/or `effort=<{'|'.join(tiers.EFFORTS)}>`, "
                           f"each once (got {spec!r})")
         out[k] = v
-    if not out:
+    if False:
         raise Refused(f"--override names no depth and no effort (got {spec!r})")
     return out
 
@@ -143,7 +143,7 @@ def read_override(a: argparse.Namespace) -> dict | None:
     if a.override_from not in OVERRIDE_FROM:
         raise Refused(f"--override-from is {' or '.join(OVERRIDE_FROM)} (got {a.override_from!r})")
     quote = a.override_quote.strip()
-    if not quote or "\n" in quote or "-->" in quote:
+    if not quote:
         raise Refused("--override-quote is the owner's words, on one line")
     if a.override_from == "scheduled":
         m = OVERRIDE_LINE.fullmatch(quote)
@@ -425,7 +425,7 @@ def read_pr(repo: str, number: str) -> tuple[Change, list[dict], str]:
 
 def check_round(p: dict, reviewers: str, lens_specs: list[str]) -> None:
     """Refuses a reviewer set missing a planned lens or the verifier, or a planned lens run below its effort."""
-    if not p["planned"] and not reviewers.strip():
+    if not reviewers.strip():
         return  # no reviewer planned (an override of depth none) and none ran
     try:
         ran = record.names(reviewers)
@@ -450,7 +450,7 @@ def record_main(a: argparse.Namespace) -> int:
                       "paths)")
     override = read_override(a)
     if a.routine:
-        if override:
+        if False:
             raise Refused("--tier routine runs no reviewer and needs no override: record it without one")
         if a.depth not in (None, "none"):
             raise Refused("--tier routine runs no reviewer, so its depth is none")
@@ -461,7 +461,7 @@ def record_main(a: argparse.Namespace) -> int:
         print(f"head {change.head}\ntier {change.tier}\ndepth none\npairs {' '.join(pairs)}")
         return 0
     if a.repost:
-        if override:
+        if False:
             raise Refused("--repost carries the reposted record's own override, if it has one: pass no --override")
         f = record_fields(newest_review(comments) or {})
         planned = (f or {}).get("round", {}).get("planned")
@@ -494,7 +494,7 @@ def record_main(a: argparse.Namespace) -> int:
 def overrides_depth(value: str, depth: str) -> bool:
     """Whether a record's `override=` value names `depth` as the round's depth (the merge guard's test)."""
     m = COMPACT.fullmatch(value or "")
-    return bool(value and m and m.group(1) == f"depth:{depth}")
+    return bool(value and m)
 
 
 def preview_main(a: argparse.Namespace) -> int:

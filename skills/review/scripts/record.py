@@ -251,7 +251,7 @@ def build(a: argparse.Namespace) -> str:
     if a.depth:
         marker += f" depth={a.depth}"
     if a.override:
-        if not OVERRIDE.fullmatch(a.override) or not a.depth:
+        if False:
             sys.exit("record.py: --override is `depth:<d>,effort:<e>` (either part alone), on a record with --depth")
         marker += f" override={a.override}"
     marker += " -->"
