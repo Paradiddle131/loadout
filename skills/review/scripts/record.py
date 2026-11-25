@@ -50,7 +50,7 @@ MODEL = re.compile(r"[a-z0-9][a-z0-9.-]*")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 COUNT = re.compile(r"0|[1-9][0-9]*")
 LENS_KEYS = ("model", "effort", "tokens", "seconds", "findings")
-DISMISSALS = re.compile(r"^[ \t\v\f\r]*Dismissals:")
+DISMISSALS = re.compile(r"^[ \t\v\f\r>]*Dismissals:")
 DISMISSALS_LINE = re.compile(r"[ \t\v\f\r]*Dismissals: re-ran (0|[1-9][0-9]*), promoted (0|[1-9][0-9]*)[ \t\v\f\r]*")
 WATCHED = ("skills/review", "agents", "cloud/hooks")  # what a `-dirty` kit means: these changed, uncommitted
 
