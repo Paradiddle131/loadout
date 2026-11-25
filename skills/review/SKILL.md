@@ -2,7 +2,7 @@
 name: review
 description: "Use before any change lands on a default branch, in any repo, attended or unattended: tier the change, stamp its gates, run fresh reviewers, verify their findings, fix, record the verdict, merge."
 metadata:
-  version: 3.1.0
+  version: 3.2.0
 ---
 
 # Review
@@ -95,6 +95,7 @@ Done when every planned lens has returned its raw findings; remove the worktrees
 - It computes the plan itself (`plan.py record`) and refuses a depth below the floor, a `--reviewers` set missing a planned lens or `finding-verifier`, and a planned lens whose `--lens` effort is below its planned effort; extra lenses and higher efforts are accepted.
 - Above `routine` it takes the result from the output's first `VERDICT` line, and refuses an output without the verifier's `VERDICT` and `Reviewed` lines, one whose lines name a commit other than `--reviewed`, one whose `Blocking:` line (right after `Reviewed:`) is missing, lists a must-fix whose harm is missing, under two words or made only of `blocking.py`'s filler words, or whose id opens no `###` heading below it outside a code fence, lists none on a `FAIL` or any on a `PASS`, and a `--result` that contradicts its verdict.
 - It posts the output as a PR comment that starts with `🤖` and names the reviewed commit and the head, as the `🤖 Review` record: `success` when the verifier's `VERDICT` line says `PASS` (for `routine`, when `--result` is `pass`, its default).
+- Both scripts write each character GitHub would delete or rewrite in a stored comment (format and control characters, spaces other than a plain one, line separators, the `!` of `<![`) as `\u{XXXX}`, and a literal `\u{` as `\u{5C}u{`, with a count above the output, so the read-back matches what was sent.
 - Above `routine` it also takes the round's cost and shape, refusing a malformed or missing value: `--reviewers` names every agent that ran, the verifier included; `--cycle <n>` (1 for a first review), `--dupes <n>` (findings the verifier merged), `--nits <n>`, and one `--lens "<name> model=<m> effort=<e> tokens=<n> seconds=<n> findings=<n>"` per agent named there and no other, copied from the usage the harness printed when that agent returned (total tokens; duration in ms / 1000, rounded; findings raised, or kept for the verifier).
   The must-fix count comes from the `Blocking:` line, and the verifier's first `Dismissals: re-ran <n>, promoted <m>` line in its header, when it has one, adds both numbers.
   Re-posting a verdict after a clean merge of the default branch (step 6) takes `--repost` in place of that usage: no reviewer ran, so the record carries none.

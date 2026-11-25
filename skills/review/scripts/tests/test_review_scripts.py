@@ -1345,3 +1345,75 @@ def test_verdict_prints_no_notice_without_the_marker(w: World, tmp_path: Path, t
                      "--file", review_file(tmp_path, head, "FAIL", text))
     assert done.returncode == 0, done.stderr
     assert "notice:" not in done.stderr
+
+
+# What GitHub changes in a stored comment (stub_gh.stored, measured on a posted comment): escaped before posting.
+
+CHANGED_BY_GITHUB = ["​", "‌", "‍", "‎", "‏", "⁠", "﻿", "­", "؜",
+                     "‪", "‫", "‬", "‭", "‮", "⁦", "⁧", "⁨", "⁩",
+                     " ", " ", "\x85", "\x07", "\x1b", "\xa0", "　", "<![", "\r"]
+
+
+@pytest.mark.parametrize("odd", CHANGED_BY_GITHUB)
+def test_verdict_reads_back_an_output_holding_what_github_changes(w: World, tmp_path: Path, odd: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    out = tmp_path / "out.txt"
+    out.write_text(f"VERDICT: PASS {head}\nReviewed: {head}\nBlocking: none\n\n## Nits\n- evidence: `a{odd}b`\n",
+                   encoding="utf-8", newline="")
+    done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head, "--file", str(out))
+    assert done.returncode == 0, done.stderr
+    [c] = w.comments()
+    assert f"{REVIEW} sha={head} state=success" in c["body"]
+    assert "Escaped for GitHub, which would change them: 1 place(s)" in c["body"]
+    assert re.search(r"evidence: `a<?\\u\{[0-9A-F]+\}\[?b`", c["body"]), c["body"]
+
+
+def test_verdict_read_back_fails_when_a_body_is_posted_unescaped(w: World, tmp_path: Path) -> None:
+    """The stub really stores what GitHub stores: the same output, built without escaping, fails its read-back."""
+    head = w.commit({"src/app.py": "x = 2\n"})
+    out = tmp_path / "out.txt"
+    out.write_text(f"VERDICT: PASS {head}\nReviewed: {head}\nBlocking: none\n\n- `(?<![a])`​\n")
+    shim = tmp_path / "noescape" / "scripts"
+    shim.mkdir(parents=True)
+    shutil.copy(SCRIPTS.parent / "SKILL.md", shim.parent / "SKILL.md")
+    for f in SCRIPTS.glob("*"):
+        if f.is_file():
+            (shim / f.name).write_text(f.read_text())
+    rec = shim / "record.py"
+    rec.write_text(rec.read_text().replace("return ESCAPED.sub(one, text), n", "return text, 0"))
+    done = subprocess.run(["bash", str(shim / "verdict.sh"), "12", "--tier", "standard", "--reviewers", PLANNED,
+                           "--reviewed", head, "--file", str(out), *round_args(PLANNED)],
+                          cwd=w.repo, env=w.env, capture_output=True, text=True, timeout=60)
+    assert done.returncode == 1 and "does not hold the body that was sent" in done.stderr, done.stderr
+
+
+def test_gate_stamp_reads_back_output_holding_what_github_changes(w: World, tmp_path: Path) -> None:
+    w.commit({"src/app.py": "x = 2\n"})
+    log = tmp_path / "log.txt"
+    log.write_text("".join(f"line {i} a{c}b\n" for i, c in enumerate(CHANGED_BY_GITHUB)) + "12 passed\n",
+                   encoding="utf-8", newline="")
+    done = w.run("gate_stamp.sh", "--", "cat", str(log), LC_ALL="C.UTF-8")
+    assert done.returncode == 0, done.stderr
+    [c] = w.comments()
+    assert c["body"].split("\n")[0] == "🤖 Gates: success"
+
+
+def test_escape_leaves_nothing_github_changes() -> None:
+    """Over every code point, an escaped text is stored as sent, and a literal escape reads back distinct."""
+    import importlib.util
+    import sys as _sys
+
+    _sys.path.insert(0, str(SCRIPTS))
+    import record  # noqa: PLC0415
+
+    spec = importlib.util.spec_from_file_location("stub_gh_model", STUB)
+    src = STUB.read_text()
+    model = src[src.index("def stored("):src.index("\ncomments = load(")]
+    ns: dict = {}
+    exec(model, ns)  # noqa: S102 -- the stub's own model of GitHub, not its routes
+    assert spec is not None
+    text = "".join(chr(c) for c in range(0x110000) if not 0xD800 <= c <= 0xDFFF) + "<![x\\u{41}"
+    escaped, n = record.escape(text)
+    assert ns["stored"](escaped) == escaped
+    assert n > 0 and "\\u{5C}u{41}" in escaped and "<\\u{21}[x" in escaped
+    assert record.escape("plain ascii, 🤖 and é")[1] == 0
