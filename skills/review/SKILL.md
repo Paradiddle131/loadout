@@ -2,7 +2,7 @@
 name: review
 description: "Use before any change lands on a default branch, in any repo, attended or unattended: tier the change, stamp its gates, run fresh reviewers, verify their findings, fix, record the verdict, merge."
 metadata:
-  version: 3.1.0
+  version: 4.0.0
 ---
 
 # Review
@@ -47,7 +47,7 @@ A lens the plan leaves out may be added for what paths cannot show; name it in `
 | [`leak-hunter`](../../agents/leak-hunter.md) | by `REVIEW.md` | personal data, or output from real data |
 | [`control-prober`](../../agents/control-prober.md) | by `REVIEW.md` | security, guardrail checks, scorers, review machinery |
 
-A `REVIEW.md` line's `lenses: a, b` plans those lenses for its paths.
+A `REVIEW.md` line's `lenses: a, b` plans those lenses for its paths on a first review; a fix round runs them again only as step 5 says.
 A change to a line of the repo's guardrails section fails `guardrail-reviewer` unless the PR cites the owner's answer to a conflict packet (`ways/guardrails.md`).
 Done when every planned lens has returned its raw findings; remove the worktrees.
 
@@ -73,8 +73,10 @@ Done when every planned lens has returned its raw findings; remove the worktrees
 - A finding the verifier marks `patched, not fixed` (another case of a settled must-fix's class) sends its item to its rethink below, not to another patch; `verdict.sh` prints a notice when a block holds that line exactly.
 - Then steps 2 to 4 on the new commits only (`<reviewed>..<new head>`), each brief carrying the settled list, built from the earlier `🤖 Review` records: each finding's ids, its rank as that record posted it (on a record with a `Blocking:` line, a must-fix is one that line lists; on an older one, one its `## Must-fix` section holds), and the record's link (templates.md).
   The lenses are what `plan.py` prints, from the PR's newest trusted `🤖 Review` record:
-  - in `focused`, each lens a must-fix on its `Blocking:` line came from, the lenses `REVIEW.md` names for the fix's paths, `correctness-reviewer` when a fix path is not routine, `claims-auditor` when every one is, and the sensitive set when one is sensitive;
-  - in `full`, or when a blocking id's prefix names no lens, the whole set; in `light`, its one lens;
+  - in `focused` and `light`, each lens a must-fix on its `Blocking:` line came from, and `correctness-reviewer`, or `claims-auditor` in its place in `focused` when every fix path is routine;
+  - `guardrail-reviewer` too when a fix path is sensitive, and every lens the first-review plan for the fix paths holds that the record's round did not plan;
+  - the depth's first-review set, those lenses with it, when the record passed (`Blocking: none`), when a fix path is one the change did not hold at the record's reviewed commit (a file no earlier round reviewed), or when a blocking id's prefix names no lens;
+  - in `full`, the whole set;
   - the verifier on every round.
 - A cycle is a fix round, a red stamp, or an integrate round (step 6); with a `must-fix` or red stamp still open:
   - **rethink** once per item, after the third cycle when the findings point at the approach, or at once when a finding is marked `patched, not fixed`: a fresh worker, a fresh brief carrying them, the count at zero;

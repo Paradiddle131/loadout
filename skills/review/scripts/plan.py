@@ -21,9 +21,11 @@ Inputs, where each is read from, who controls it, and how a lead-controlled one 
 | Default branch name | the same answer, `.base.repo.default_branch` | GitHub's PR API | `origin/HEAD` and local branch names are never read |
 | Default branch tip | `gh api repos/<r>/branches/<name>`, `.commit.sha`; then `git fetch --force origin +refs/heads/<name>:refs/remotes/origin/<name>` | GitHub (the sha), the remote (the objects) | the forced fetch overwrites a locally moved ref; a fetched tip other than GitHub's sha refuses |
 | Changed paths | `git diff --name-only --no-renames $(git merge-base <tip> <head>) <head>` | the two shas above | computed from content-addressed commits only |
-| Policy | `REVIEW.md` at the tip, parsed by tiers.py (tier.sh's parser), and the tip's instruction imports | the default branch on the remote | the change's own `REVIEW.md` is never read; an unparsable one rates every path sensitive; no line lowers a path below the built-in floor or below `## Sensitive` |
+| Policy | `REVIEW.md` at the tip, parsed by tiers.py (tier.sh's parser), and the instruction imports of the tip and of the head (which can only add) | the default branch on the remote | the change's own `REVIEW.md` is never read; an unparsable one rates every path sensitive; no line lowers a path below the built-in floor or below `## Sensitive` |
 | Previous round | `gh api repos/<r>/issues/<n>/comments`, paged by hand: the newest review-marker comment by the owner, a member or a collaborator | a trusted record on the PR | used only when unedited, in verdict.sh's exact shape, above routine, its raw output's first `Reviewed:` naming its `reviewed=`, its `Blocking:` line readable, and `reviewed=` an ancestor of the head and not of the merge-base; else a first review (the widest plan); an older record is never used in its place; untrusted authors are ignored |
 | Answered lenses | that record's `Blocking:` ids, by prefix | a trusted record | an id whose prefix names no lens plans the whole set |
+| Previously planned lenses | that record's round line, `planned=` | a trusted record | a record with none plans the whole set |
+| Reviewed paths | `git diff --name-only --no-renames $(git merge-base <tip> <reviewed>) <reviewed>` | that record's `reviewed=` and GitHub's tip | a fix path outside them plans the whole set |
 | `--depth` | the lead's argument | the lead | the depth is the higher of it and the floor; one below the floor refuses |
 | `--reviewers`, `--lens` | the lead's arguments to verdict.sh | the lead | must cover every planned lens and the verifier, each planned lens at its planned effort or above; extra lenses are accepted |
 | `--pr` | the lead's argument | the lead | names the PR the record is posted on, so it can only describe that PR |
@@ -44,11 +46,15 @@ claims-auditor, guardrail-reviewer and the lenses REVIEW.md names for the change
            their briefs.
   full     the tier's set at once.
 A fix round is a round after the PR's newest trusted review record (the table's "Previous round"); its paths are those
-changed since that record's `reviewed=` commit that the change still changes. In focused it runs each lens a must-fix
-on the record's `Blocking:` line came from (by its id's prefix, PREFIX), the lenses REVIEW.md names for its paths,
-correctness-reviewer when one of its paths is not routine, claims-auditor when every one is, and the sensitive set when
-one is sensitive; an id whose prefix names no lens runs the whole set. In light it reruns the one lens; in full, the
-whole set. The verifier runs on every round with a lens.
+changed since that record's `reviewed=` commit that the change still changes. In focused and light it runs each lens a
+must-fix on the record's `Blocking:` line came from (by its id's prefix, PREFIX) and correctness-reviewer, or
+claims-auditor in its place in focused when every fix path is routine; guardrail-reviewer when a fix path is
+sensitive; and every lens the first-review plan for the fix paths holds that the record's `planned=` does not (all
+of the depth's first-review set when it has no `planned=`). It runs the depth's first-review set, with the answered
+lenses, when the record passed (`Blocking: none`), when a fix path is not among the change's paths at the `reviewed=`
+commit (against the base that commit forked from: a file no earlier round reviewed), or when an id's prefix names no
+lens. In full it runs the whole set.
+The verifier runs on every round with a lens.
 Effort per lens, the highest over the round's paths: a REVIEW.md `; effort: <lens>=<level>` on a line matching the
 path (raising or lowering it), else high for correctness-reviewer and control-prober on a sensitive path that is not
 prose (*.md, *.txt, licence files), else medium. The verifier is medium unless a line sets it. A lens may run above
@@ -155,8 +161,8 @@ class Change:
             raise Refused(f"{head} changes nothing against {base}")
         self.base, self.head = base, head
         self.rules, self.broken = tiers.load_rules(base, prog="plan.py")
-        try:
-            imported = tiers.imports(base)
+        try:  # the head's imports can only add: a file the change itself imports counts
+            imported = {**tiers.imports(head), **tiers.imports(base)}
         except RuntimeError as exc:
             raise Refused(str(exc)) from None
         self.rated = tiers.rate(self.paths, self.rules, self.broken, imported)
@@ -238,8 +244,9 @@ def record_fields(c: dict) -> dict | None:
     return f
 
 
-def prior_round(c: dict | None, change: Change) -> tuple[str, list[dict]] | None:
-    """(reviewed commit, its must-fix items) when `c` can start a fix round of `change`; else None (a first review)."""
+def prior_round(c: dict | None, change: Change) -> tuple[str, list[dict], set[str] | None] | None:
+    """(reviewed commit, its must-fix items, the lenses its round line's `planned=` holds, None when it has none) when
+    `c` can start a fix round of `change`; else None (a first review)."""
     f = record_fields(c) if c else None
     if not f or f["tier"] == "routine":
         return None
@@ -259,17 +266,26 @@ def prior_round(c: dict | None, change: Change) -> tuple[str, list[dict]] | None
     if (run("git", "cat-file", "-e", f"{reviewed}^{{commit}}").returncode or reviewed == change.head
             or not is_ancestor(reviewed, change.head) or is_ancestor(reviewed, change.mb)):
         return None
-    return reviewed, items
+    planned = f["round"].get("planned")
+    return reviewed, items, None if planned is None else set(planned.split(",")) - {"none"}
 
 
 # The plan.
+
+
+def reviewed_paths(change: Change, reviewed: str) -> set[str]:
+    """The change's paths at `reviewed`, against the base it forked from: what the earlier rounds reviewed."""
+    try:
+        return set(tiers.changed(change.base, reviewed)[1])
+    except RuntimeError as exc:
+        raise Refused(str(exc)) from None
 
 
 def ordered(lenses: set[str]) -> list[str]:
     return sorted(lenses, key=lambda x: (LENSES.index(x) if x in LENSES else len(LENSES), x))
 
 
-def make_plan(change: Change, prior: tuple[str, list[dict]] | None, want: str | None) -> dict:
+def make_plan(change: Change, prior: tuple[str, list[dict], set[str] | None] | None, want: str | None) -> dict:
     if want is not None and want not in DEPTHS:
         raise Refused(f"--depth is one of {', '.join(DEPTHS)} (got {want!r})")
     if want is not None and DRANK[want] < DRANK[change.floor]:
@@ -281,32 +297,48 @@ def make_plan(change: Change, prior: tuple[str, list[dict]] | None, want: str | 
         why.append(f"raised to {depth}")
     whole = change.tier_set(change.paths)
     light = {CLM} if change.tier == "routine" else {COR}
-    paths, since, kind = change.paths, None, "first"
+    paths, since, kind, unseen = change.paths, None, "first", []
     if prior:
         fix = [p for p in git("diff", "--name-only", "--no-renames", prior[0], change.head).splitlines()
                if p in change.rated]
         if fix:
             paths, since, kind = fix, prior[0], "fix"
+            unseen = [p for p in fix if p not in reviewed_paths(change, prior[0])]
+    first_set = light if depth == "light" else whole
     if depth == "none":
         lenses: set[str] = set()
         why.append("none: gates only")
-    elif depth == "light":
-        lenses = light
-    elif kind == "first" or depth == "full":
+    elif kind == "first":
+        lenses = first_set
+    elif depth == "full":
         lenses = whole
-        if kind == "fix":
-            why.append("full: a fix round reruns the whole set")
+        why.append("full: a fix round reruns the whole set")
     else:
         prefixes = {x.strip().rsplit("-", 1)[0] for b in prior[1] for x in b["ids"].split(",") if x.strip()}
-        if prefixes - set(PREFIX):
-            lenses = whole
+        answered = {PREFIX[x] for x in prefixes if x in PREFIX}
+        if not prior[1]:
+            lenses = first_set
+            why.append("the previous record passed, so the round answers no must-fix and the whole set runs")
+        elif prefixes - set(PREFIX):
+            lenses = first_set | answered
             why.append("a blocking id's prefix names no lens, so the whole set runs")
+        elif unseen:
+            lenses = first_set | answered
+            why.append(f"the fix touches {', '.join(unseen)}, which no earlier round reviewed, so the whole set runs")
         else:
-            top = change.tier_of(paths)
-            lenses = {PREFIX[x] for x in prefixes} | change.named(paths) | ({CLM} if top == "routine" else {COR})
-            if top == "sensitive":
-                lenses |= set(TIER_SET["sensitive"])
-            why.append("a fix round: the lenses whose must-fix it answers and those its paths call for")
+            routine_only = depth == "focused" and change.tier_of(paths) == "routine"
+            lenses = answered | ({CLM} if routine_only else {COR})
+            why.append("a fix round: the lenses whose must-fix it answers, and "
+                       + ("claims-auditor on a documentation-only fix" if routine_only else "correctness-reviewer"))
+            if any(change.rated[p]["tier"] == "sensitive" for p in paths):
+                lenses = lenses | {GRD}
+                why.append("guardrail-reviewer on a sensitive fix path")
+            own = change.tier_set(paths) if depth != "light" else {CLM} if change.tier_of(paths) == "routine" else {COR}
+            new = first_set if prior[2] is None else own - prior[2]
+            if new - lenses:
+                why.append(f"{', '.join(ordered(new - lenses))}, which the fix's paths plan and the previous round did "
+                           "not")
+            lenses = lenses | new
     run_ = ordered(lenses)
     first = [COR] if depth == "focused" and COR in run_ and len(run_) > 1 else []
     then = [x for x in run_ if x not in first]

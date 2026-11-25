@@ -449,44 +449,100 @@ def test_a_record_at_or_before_the_merge_base_plans_a_first_review(w: World, tmp
 def test_the_previous_round_is_read_from_the_pr_never_passed_in(w: World, tmp_path: Path) -> None:
     # verdict.sh takes the previous round from the PR itself: an output file of another round only reaches it as
     # --file, which must name the reviewed commit.
-    first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER], ids=("GRD-1",))
+    first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n", "src/app.py": "x = 5\n"}, "sensitive", SENSITIVE + [VER],
+                ids=("GRD-1",))
     head = w.commit({"src/app.py": "x = 2\n"})
     code, p, err = plan(w)
     assert code == 0, err
     assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted([COR, GRD])
 
 
-# Fix rounds rerun what they answer (focused) or the whole set (full).
+# Fix rounds: the lenses a must-fix came from, correctness, the verifier; the whole set on a file no round reviewed.
+
+SENSITIVE_PAIR = {"cloud/hooks/x.sh": "x\n", "src/app.py": "x = 5\n"}
 
 
-def test_a_fix_round_reruns_the_lens_a_must_fix_came_from_and_correctness_on_code(w: World, tmp_path: Path) -> None:
-    first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER], ids=("CLM-1",))
-    w.commit({"src/app.py": "x = 2\n"})
+def test_a_fix_round_reruns_only_the_lens_it_answers_and_correctness(w: World, tmp_path: Path) -> None:
+    # A fix to a sensitive path the first round reviewed: no sensitive set, only the answered lens and correctness.
+    first_round(w, tmp_path, SENSITIVE_PAIR, "sensitive", SENSITIVE + [VER], ids=("GRD-1",))
+    head = w.commit({"cloud/hooks/x.sh": "y\n"})
     code, p, err = plan(w)
     assert code == 0, err
-    assert p["first"] == [COR] and p["then"] == [CLM] and p["verifier"] == VER
+    assert p["round"] == "fix" and p["first"] == [COR] and p["then"] == [GRD] and p["verifier"] == VER
+    assert p["planned"] == [COR, GRD, VER]
+    assert verdict(w, tmp_path, head, [COR, GRD, VER], "sensitive").returncode == 0
 
 
-def test_a_documentation_fix_runs_claims_auditor(w: World, tmp_path: Path) -> None:
-    first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER], ids=("COR-1",))
-    w.commit({"docs/a.md": "x\n"})
+def test_a_fix_round_runs_no_review_md_lens_its_blocking_line_does_not_name(w: World, tmp_path: Path) -> None:
+    base_has(w, {"REVIEW.md": "## Sensitive\n- `lib/**`; lenses: leak-hunter\n"})
+    first_round(w, tmp_path, {"lib/x.py": "x\n"}, "sensitive", SENSITIVE + [LEAK, VER], ids=("COR-1",))
+    w.commit({"lib/x.py": "y\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert lenses_of(p) == [COR, GRD]  # leak-hunter was planned and ran; guardrail-reviewer for a sensitive path
+
+
+@pytest.mark.parametrize("fix", [{"src/new.py": "x\n"}, {"src/new.py": "x\n", "cloud/hooks/x.sh": "y\n"}])
+def test_a_fix_touching_a_file_no_earlier_round_reviewed_reruns_the_whole_set(w: World, tmp_path: Path,
+                                                                              fix: dict[str, str]) -> None:
+    first_round(w, tmp_path, SENSITIVE_PAIR, "sensitive", SENSITIVE + [VER], ids=("CLM-1",))
+    head = w.commit(fix)
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted(SENSITIVE)
+    done = verdict(w, tmp_path, head, [COR, CLM, VER], "sensitive")
+    assert done.returncode == 2 and GRD in done.stderr and len(w.comments()) == 1
+
+
+def test_a_file_main_brought_in_after_the_review_counts_as_unreviewed(w: World, tmp_path: Path) -> None:
+    # The reviewed set is the change's diff at the reviewed commit, against the base it forked from: a path main
+    # changed after the review is not in it, even though a diff against the new tip would list it.
+    first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER], ids=("GRD-1",))
+    merge_main(w, {"src/app.py": "main\n"})
+    w.commit({"src/app.py": "branch\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted(SENSITIVE)
+
+
+def test_a_merge_of_main_keeps_a_fix_to_reviewed_files_narrow(w: World, tmp_path: Path) -> None:
+    first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER], ids=("GRD-1",))
+    merge_main(w)
+    w.commit({"cloud/hooks/x.sh": "y\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert sorted(lenses_of(p)) == sorted([COR, GRD])
+
+
+def test_a_documentation_fix_runs_claims_auditor_in_place_of_correctness(w: World, tmp_path: Path) -> None:
+    first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n", "docs/a.md": "x\n"}, "sensitive", SENSITIVE + [VER],
+                ids=("GRD-1",))
+    w.commit({"docs/a.md": "y\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert sorted(lenses_of(p)) == sorted([CLM, GRD])
+
+
+def test_a_light_fix_round_reruns_the_lens_it_answers_and_correctness(w: World, tmp_path: Path) -> None:
+    first_round(w, tmp_path, {"src/app.py": "x = 2\n"}, "standard", [COR, CLM, VER], ids=("CLM-1",))
+    w.commit({"src/app.py": "x = 3\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["depth"] == "light" and sorted(lenses_of(p)) == sorted([COR, CLM])
+
+
+def test_a_wide_fix_round_keeps_the_lens_it_answers(w: World, tmp_path: Path) -> None:
+    # light's first-review set is correctness alone: a new file widens to it, and the answered lens stays.
+    first_round(w, tmp_path, {"src/app.py": "x = 2\n"}, "standard", [COR, CLM, VER], ids=("CLM-1",))
+    w.commit({"src/other.py": "x\n"})
     code, p, err = plan(w)
     assert code == 0, err
     assert sorted(lenses_of(p)) == sorted([COR, CLM])
 
 
-def test_a_fix_round_runs_the_review_md_lenses_of_the_paths_it_changed(w: World, tmp_path: Path) -> None:
-    base_has(w, {"REVIEW.md": "## Sensitive\n- `lib/**`; lenses: leak-hunter\n"})
-    first_round(w, tmp_path, {"src/app.py": "x = 2\n"}, "standard", [COR, VER])
-    w.commit({"lib/x.py": "x\n"})
-    code, p, err = plan(w)
-    assert code == 0, err
-    assert set(SENSITIVE + [LEAK]) <= set(lenses_of(p))
-
-
 def test_a_blocking_id_naming_no_lens_reruns_the_whole_set(w: World, tmp_path: Path) -> None:
     first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER], ids=("ODD-1",))
-    w.commit({"src/app.py": "x = 2\n"})
+    w.commit({"cloud/hooks/x.sh": "y\n"})
     code, p, err = plan(w)
     assert code == 0, err
     assert sorted(lenses_of(p)) == sorted(SENSITIVE)
@@ -494,7 +550,7 @@ def test_a_blocking_id_naming_no_lens_reruns_the_whole_set(w: World, tmp_path: P
 
 def test_a_full_fix_round_reruns_the_whole_set(w: World, tmp_path: Path) -> None:
     first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER], ids=("COR-1",))
-    w.commit({"src/app.py": "x = 2\n"})
+    w.commit({"cloud/hooks/x.sh": "y\n"})
     code, p, err = plan(w, "--depth", "full")
     assert code == 0, err
     assert p["round"] == "fix" and p["first"] == [] and sorted(p["then"]) == sorted(SENSITIVE)
@@ -657,3 +713,93 @@ def test_a_repost_without_a_record_is_refused(w: World, tmp_path: Path) -> None:
     done = repost(w, tmp_path, reviewed)
     assert done.returncode == 2 and "record the round anew" in done.stderr, done.stderr
     assert w.writes() == []
+
+
+# Fix rounds the narrowing does not reach: each widens the plan.
+
+
+def test_a_round_after_a_passing_record_runs_the_whole_set(w: World, tmp_path: Path) -> None:
+    sha = w.commit({"cloud/hooks/x.sh": "x\n"})
+    assert verdict(w, tmp_path, sha, SENSITIVE + [VER], "sensitive", "PASS").returncode == 0
+    head = w.commit({"cloud/hooks/x.sh": "exit 0\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted(SENSITIVE)
+    done = verdict(w, tmp_path, head, [COR, VER], "sensitive", "PASS")
+    assert done.returncode == 2 and GRD in done.stderr
+
+
+@pytest.mark.parametrize("path", ["AGENTS.md", "skills/x/SKILL.md", "docs/policy.md"])
+def test_a_fix_round_to_an_instruction_file_runs_guardrail_reviewer(w: World, tmp_path: Path, path: str) -> None:
+    if path == "docs/policy.md":  # a file an instruction file on the default branch imports
+        base_has(w, {"CLAUDE.md": "@docs/policy.md\n", "docs/policy.md": "## Guardrails\n"})
+    first_round(w, tmp_path, {path: "## Guardrails\n- never deploy\n"}, "sensitive", SENSITIVE + [VER], ids=("COR-1",))
+    w.commit({path: "## Guardrails\n- deploy when convenient\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted([COR, GRD])
+
+
+def test_a_fix_path_raised_above_the_records_tier_runs_the_whole_set(w: World, tmp_path: Path) -> None:
+    first_round(w, tmp_path, {"src/app.py": "x = 2\n"}, "standard", [COR, VER], ids=("COR-1",))
+    merge_main(w, {"REVIEW.md": "## Sensitive\n- `src/**`; lenses: leak-hunter\n"})
+    w.commit({"src/app.py": "x = 3\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["tier"] == "sensitive" and sorted(lenses_of(p)) == sorted(SENSITIVE + [LEAK])
+
+
+# A fix round also plans every lens the first-review plan for its paths holds that the previous round did not plan,
+# and guardrail-reviewer on any sensitive fix path; imports are read from the tip and the head.
+
+
+def test_a_lead_raised_tier_does_not_hide_a_lens_the_round_never_planned(w: World, tmp_path: Path) -> None:
+    first_round(w, tmp_path, {"src/app.py": "x = 2\n"}, "sensitive", [COR, VER], ids=("COR-1",))
+    merge_main(w, {"REVIEW.md": "## Sensitive\n- `src/**`; lenses: leak-hunter\n"})
+    w.commit({"src/app.py": "x = 3\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted(SENSITIVE + [LEAK])
+
+
+def test_a_policy_rise_inside_a_sensitive_change_plans_the_newly_named_lens(w: World, tmp_path: Path) -> None:
+    first_round(w, tmp_path, {"RULES.md": "x\n", "src/app.py": "x = 2\n"}, "sensitive", SENSITIVE + [VER],
+                ids=("COR-1",))
+    merge_main(w, {"REVIEW.md": "## Sensitive\n- `src/**`; lenses: leak-hunter\n"})
+    w.commit({"src/app.py": "x = 3\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted([COR, GRD, LEAK])
+
+
+def test_a_fix_to_a_file_the_change_imports_runs_guardrail_reviewer(w: World, tmp_path: Path) -> None:
+    first_round(w, tmp_path, {"AGENTS.md": "@docs/policy.md\n", "docs/policy.md": "## Guardrails\n- never deploy\n"},
+                "sensitive", SENSITIVE + [VER], ids=("COR-1",))
+    w.commit({"docs/policy.md": "## Guardrails\n- deploy when convenient\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["round"] == "fix" and GRD in lenses_of(p)
+
+
+def test_a_fix_to_a_rule_file_review_md_lists_runs_guardrail_reviewer(w: World, tmp_path: Path) -> None:
+    base_has(w, {"REVIEW.md": "## Sensitive\n- `FEEDBACK.md`; lenses: guardrail-reviewer\n"})
+    first_round(w, tmp_path, {"FEEDBACK.md": "- never post data\n"}, "sensitive", SENSITIVE + [VER], ids=("COR-1",))
+    w.commit({"FEEDBACK.md": "- post anything\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted([COR, GRD])
+
+
+def test_a_record_with_no_planned_list_plans_the_whole_set(w: World, tmp_path: Path) -> None:
+    # The whole first-review set of the change, leak-hunter for src/** included, though the fix touches only the hook.
+    base_has(w, {"REVIEW.md": "## Sensitive\n- `src/**`; lenses: leak-hunter\n"})
+    first_round(w, tmp_path, SENSITIVE_PAIR, "sensitive", SENSITIVE + [LEAK, VER], ids=("GRD-1",))
+    cs = w.comments()
+    lines = cs[-1]["body"].split("\n")
+    lines[2] = " ".join(x for x in lines[2].split() if not x.startswith("planned="))
+    cs[-1]["body"] = "\n".join(lines)
+    (w.fx / "comments.json").write_text(json.dumps(cs))
+    w.commit({"cloud/hooks/x.sh": "y\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted(SENSITIVE + [LEAK])
