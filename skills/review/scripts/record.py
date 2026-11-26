@@ -18,7 +18,8 @@
     exits 0 when the comment's body is the one sent (line endings and trailing newlines aside), else 1.
   record.py stored <file>
     prints the file as GitHub stores a comment holding it (stored() below); build applies the same to its raw output
-    and lines, so a record's read-back matches what was sent.
+    and lines, and blocking.py and the Dismissals reader read the output that way, so a record's read-back matches
+    what was sent and its counts come from the text it holds.
 
 The round line is a record's third line, for audits and people; the merge guard reads only the first two:
   <!-- loadout + :round v=<version> kit=<commit> [<key>=<value>]... -->   (one word, `loadout` and `:round` joined)
@@ -180,7 +181,7 @@ def dismissals(path: str | None) -> tuple[int, int] | None:
         return None
     found: list[tuple[int, int]] = []
     fence = ""
-    for ln in open(path, encoding="utf-8", errors="replace").read().split("\n"):
+    for ln in stored(open(path, encoding="utf-8", errors="replace").read()).split("\n"):
         if m := re.match(r"\s*(`{3,}|~{3,})", ln):
             if not fence:
                 fence = m.group(1)

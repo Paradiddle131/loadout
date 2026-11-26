@@ -26,6 +26,8 @@ import json
 import re
 import sys
 
+from record import stored  # the text as GitHub stores it: a record's counts come from what it holds
+
 WS = r"[ \t\v\f\r]"  # what grep's [[:space:]] matches inside a line in the C locale, which verdict.sh sets
 REVIEWED = re.compile(rf"^{WS}*Reviewed:")
 LINE = re.compile(rf"^{WS}*Blocking:{WS}*(.*?){WS}*$")
@@ -98,7 +100,7 @@ def patched(text: str) -> list[tuple[str, str]]:
 def main() -> int:
     if len(sys.argv) == 3 and sys.argv[1] == "--patched":
         try:
-            text = open(sys.argv[2], encoding="utf-8", errors="replace", newline="").read()
+            text = stored(open(sys.argv[2], encoding="utf-8", errors="replace", newline="").read())
         except OSError as e:
             sys.stderr.write(f"{e}\n")
             return 2
@@ -109,7 +111,7 @@ def main() -> int:
         sys.stderr.write("usage: blocking.py [--patched] <verifier output>\n")
         return 2
     try:
-        items = read(open(sys.argv[1], encoding="utf-8", errors="replace", newline="").read())
+        items = read(stored(open(sys.argv[1], encoding="utf-8", errors="replace", newline="").read()))
     except (OSError, ValueError) as e:
         sys.stderr.write(f"{e}\n")
         return 2
