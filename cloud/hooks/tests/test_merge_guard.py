@@ -824,7 +824,7 @@ def test_an_override_that_does_not_name_the_record_s_depth_refuses(fx: Fx, tmp_p
 
 @pytest.mark.parametrize("files, tier, marker", [
     ({"hooks/x.sh": "x\n"}, "sensitive", " depth=none override=none -->"),  # an override never skips review
-    ({"src/app.py": "x = 2\n"}, "standard", " depth=focused override=light -->"),  # at the floor, yet malformed
+    ({"src/app.py": "x = 2\n"}, "standard", " depth=focused override=light -->"),  # above the floor, yet malformed
 ])
 def test_an_override_marker_out_of_shape_refuses_even_where_the_floor_would_not(fx: Fx, tmp_path: Path,
                                                                                  files: dict[str, str], tier: str,
