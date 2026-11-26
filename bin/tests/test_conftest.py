@@ -19,3 +19,13 @@ def test_the_root_conftest_drops_repository_local_git_variables_and_keeps_identi
     done = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, env=env, cwd=tmp_path)
     assert done.returncode == 0, done.stderr
     assert done.stdout.strip() == "[] kept"
+
+
+def test_a_suite_started_from_its_own_directory_loads_the_root_conftest(tmp_path: Path) -> None:
+    foreign = tmp_path / "foreign-index"
+    done = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                           "test_hook_runs_listed_checks.py::test_the_pre_commit_hook_runs_every_listed_check"],
+                          cwd=ROOT / "bin" / "tests", capture_output=True, text=True,
+                          env={**os.environ, "GIT_INDEX_FILE": str(foreign)})
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert not foreign.exists()  # no stub was staged in another index

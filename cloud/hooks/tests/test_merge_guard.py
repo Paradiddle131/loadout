@@ -11,6 +11,7 @@ import json
 import os
 import re
 import runpy
+import shutil
 import subprocess
 import sys
 import time
@@ -71,8 +72,8 @@ class Fx:
                         "html_url": f"https://github.com/{REPO}/pull/12#issuecomment-{1000 + i}"})
         (self.d / "comments.json").write_text(json.dumps(out))
 
-    def both(self, tier: str = "standard") -> None:
-        self.comments(comment(record("gates")), comment(record("review", tier=tier)))
+    def both(self, tier: str = "standard", sha: str = HEAD) -> None:
+        self.comments(comment(record("gates", sha=sha)), comment(record("review", sha=sha, tier=tier)))
 
     def noted(self) -> list[dict]:
         return [json.loads(x) for x in self.friction.read_text().splitlines()] if self.friction.exists() else []
@@ -141,9 +142,10 @@ def test_hooks_json_registers_the_guard_for_bash_and_the_merge_tools() -> None:
         assert not matcher.search(name), name
 
 
-def test_both_records_on_the_named_head_pass(fx: Fx, clone: Path) -> None:
-    fx.both()
-    assert mcp(fx, clone, expectedHeadSha=HEAD) is None
+def test_both_records_on_the_named_head_pass(fx: Fx, held: tuple[Path, str]) -> None:
+    clone, head = held
+    fx.both(sha=head)
+    assert mcp(fx, clone, expectedHeadSha=head) is None
     assert f"repos/{REPO}/issues/12/comments?per_page=100&page=1" in fx.gets()
 
 
@@ -162,10 +164,11 @@ def test_a_marker_from_outside_the_repo_does_not_count(fx: Fx, clone: Path, asso
     assert reason and "no review record" in reason and f"markers by {assoc} do not count" in reason
 
 
-def test_a_newer_outside_marker_neither_counts_nor_blocks(fx: Fx, clone: Path) -> None:
-    fx.comments(comment(record("gates")), comment(record("review")),
-                comment(record("review", state="failure"), assoc="NONE"))
-    assert mcp(fx, clone, expectedHeadSha=HEAD) is None
+def test_a_newer_outside_marker_neither_counts_nor_blocks(fx: Fx, held: tuple[Path, str]) -> None:
+    clone, head = held
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head)),
+                comment(record("review", sha=head, state="failure"), assoc="NONE"))
+    assert mcp(fx, clone, expectedHeadSha=head) is None
 
 
 def test_records_for_an_older_head_do_not_count(fx: Fx, clone: Path) -> None:
@@ -201,10 +204,11 @@ def test_an_edited_record_refuses(fx: Fx, clone: Path) -> None:
     assert reason and "was edited" in reason
 
 
-def test_comments_are_paged_by_hand(fx: Fx, clone: Path) -> None:
+def test_comments_are_paged_by_hand(fx: Fx, held: tuple[Path, str]) -> None:
+    clone, head = held
     filler = [comment(f"note {i}") for i in range(150)]
-    fx.comments(*filler, comment(record("gates")), comment(record("review")))
-    assert mcp(fx, clone, expectedHeadSha=HEAD) is None
+    fx.comments(*filler, comment(record("gates", sha=head)), comment(record("review", sha=head)))
+    assert mcp(fx, clone, expectedHeadSha=head) is None
     assert f"repos/{REPO}/issues/12/comments?per_page=100&page=2" in fx.gets()
 
 
@@ -214,10 +218,11 @@ def test_a_merge_naming_an_older_head_refuses(fx: Fx, clone: Path) -> None:
     assert reason and f"is now {HEAD}" in reason
 
 
-def test_a_merge_naming_no_head_is_asked_to_name_it(fx: Fx, clone: Path) -> None:
-    fx.both()
+def test_a_merge_naming_no_head_is_asked_to_name_it(fx: Fx, held: tuple[Path, str]) -> None:
+    clone, head = held
+    fx.both(sha=head)
     reason = mcp(fx, clone)
-    assert reason and f"expectedHeadSha: {HEAD}" in reason
+    assert reason and f"expectedHeadSha: {head}" in reason
 
 
 @pytest.mark.parametrize("fail_on", ["pulls/12", "issues/12/comments"])
@@ -245,6 +250,14 @@ def test_auto_merge_is_refused(fx: Fx, clone: Path) -> None:
 
 
 # The tier check, in a local clone holding the head.
+
+
+@pytest.fixture
+def held(tmp_path: Path, fx: Fx) -> tuple[Path, str]:
+    """A clone that holds the PR's head (a standard change, floor light) and GitHub's tip of main: the guard can
+    compute the floor, as it must before any merge."""
+    r, head, _ = change(tmp_path, fx, {"src/app.py": "x = 2\n"})
+    return r, head
 
 
 @pytest.fixture
@@ -279,10 +292,16 @@ def test_a_review_below_the_paths_tier_refuses_in_a_local_clone(fx: Fx, local: t
     assert mcp(fx, r, expectedHeadSha=head) is None
 
 
-def test_without_a_local_clone_the_tier_check_is_skipped(fx: Fx, local: tuple[Path, str], clone: Path) -> None:
+@pytest.mark.parametrize("tier, depth", [("routine", None), ("sensitive", "full")])
+def test_without_a_clone_holding_the_head_the_merge_is_refused(fx: Fx, local: tuple[Path, str], clone: Path,
+                                                               tier: str, depth: str | None) -> None:
     _, head = local
-    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, tier="routine")))
-    assert mcp(fx, clone, expectedHeadSha=head) is None  # `clone` does not hold the head
+    review = record("review", sha=head, tier=tier, depth=depth or "floor")
+    fx.comments(comment(record("gates", sha=head)), comment(review))
+    reason = mcp(fx, clone, expectedHeadSha=head)  # `clone` does not hold the head
+    assert reason and "cannot be checked" in reason and "git fetch origin main" in reason, reason
+    done = check(fx, clone, "--check", f"{REPO}#12")
+    assert done.returncode == 1 and "cannot be checked" in done.stderr, done.stderr
 
 
 def test_bad_input_passes_silently(fx: Fx) -> None:
@@ -298,12 +317,13 @@ def check(fx: Fx, cwd: Path, *args: str, **env: str) -> subprocess.CompletedProc
                           timeout=60, env=guard_env(fx, **env), stdin=subprocess.DEVNULL)
 
 
-def test_check_mode_passes_and_prints_the_head(fx: Fx, clone: Path) -> None:
-    fx.both()
+def test_check_mode_passes_and_prints_the_head(fx: Fx, held: tuple[Path, str]) -> None:
+    clone, head = held
+    fx.both(sha=head)
     for arg in (f"{REPO}#12", "12"):
         done = check(fx, clone, "--check", arg)
         assert done.returncode == 0, done.stderr
-        assert done.stdout.strip() == HEAD
+        assert done.stdout.strip() == head
 
 
 def test_check_mode_refuses_with_the_reason(fx: Fx, clone: Path) -> None:
@@ -389,12 +409,13 @@ def test_the_tier_check_compares_with_the_default_branch_github_names(fx: Fx, lo
     assert reason and "make it sensitive" in reason, reason
 
 
-def test_a_clone_without_the_default_branch_skips_the_tier_check(fx: Fx, local: tuple[Path, str]) -> None:
+def test_a_clone_without_the_default_branch_refuses_the_merge(fx: Fx, local: tuple[Path, str]) -> None:
     r, head = local
     subprocess.run(["git", "update-ref", "-d", "refs/remotes/origin/main"], cwd=r, check=True)
     (fx.d / "pr.json").write_text(json.dumps(pr_answer(head, "develop")))
     fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, tier="routine")))
-    assert mcp(fx, r, expectedHeadSha=head) is None
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "a copy of develop" in reason, reason
 
 
 # The Bash rule: the command's text, never parsed as shell.
@@ -574,9 +595,10 @@ def test_a_merge_tool_refusal_is_noted_with_its_rule(fx: Fx, clone: Path, case: 
     assert [e["rule"] for e in fx.noted()] == [rule]
 
 
-def test_an_allowed_merge_notes_nothing(fx: Fx, clone: Path) -> None:
-    fx.both()
-    assert mcp(fx, clone, expectedHeadSha=HEAD) is None
+def test_an_allowed_merge_notes_nothing(fx: Fx, held: tuple[Path, str]) -> None:
+    clone, head = held
+    fx.both(sha=head)
+    assert mcp(fx, clone, expectedHeadSha=head) is None
     assert fx.noted() == []
 
 
@@ -588,15 +610,16 @@ def test_an_unwritable_friction_log_leaves_the_decision_alone(fx: Fx, clone: Pat
         assert reason and "rule `pr-merge`" in reason, log
 
 
-def test_a_pr_the_owner_merges_is_refused_whatever_its_records(fx: Fx, clone: Path) -> None:
-    fx.both()
-    (fx.d / "pr.json").write_text(json.dumps({**pr_answer(HEAD), "labels": [{"name": "Owner-Merges"}]}))
-    reason = mcp(fx, clone, expectedHeadSha=HEAD)
+def test_a_pr_the_owner_merges_is_refused_whatever_its_records(fx: Fx, held: tuple[Path, str]) -> None:
+    clone, head = held
+    fx.both(sha=head)
+    (fx.d / "pr.json").write_text(json.dumps({**pr_answer(head), "labels": [{"name": "Owner-Merges"}]}))
+    reason = mcp(fx, clone, expectedHeadSha=head)
     assert reason and "`owner-merges`" in reason and "the merge is the owner's" in reason, reason
     done = check(fx, clone, "--check", f"{REPO}#12")
     assert done.returncode == 1 and "`owner-merges`" in done.stderr and done.stdout == ""
-    (fx.d / "pr.json").write_text(json.dumps({**pr_answer(HEAD), "labels": [{"name": "other"}]}))
-    assert mcp(fx, clone, expectedHeadSha=HEAD) is None
+    (fx.d / "pr.json").write_text(json.dumps({**pr_answer(head), "labels": [{"name": "other"}]}))
+    assert mcp(fx, clone, expectedHeadSha=head) is None
 
 
 def nested(tool: str, command: str) -> str:
@@ -650,9 +673,10 @@ def test_the_record_builder_writes_a_round_line_on_line_three() -> None:
     assert round_line_of(record("gates")).startswith("<!-- loadout" + ":round v=")
 
 
-def test_both_records_with_their_round_lines_merge(fx: Fx, clone: Path) -> None:
-    fx.both()
-    assert mcp(fx, clone, expectedHeadSha=HEAD) is None
+def test_both_records_with_their_round_lines_merge(fx: Fx, held: tuple[Path, str]) -> None:
+    clone, head = held
+    fx.both(sha=head)
+    assert mcp(fx, clone, expectedHeadSha=head) is None
 
 
 def without_round(body: str) -> str:
@@ -660,11 +684,12 @@ def without_round(body: str) -> str:
     return "\n".join(lines[:2] + lines[3:])
 
 
-def test_records_posted_before_the_round_line_still_merge(fx: Fx, clone: Path) -> None:
-    gates, review = without_round(record("gates")), without_round(record("review"))
+def test_records_posted_before_the_round_line_still_merge(fx: Fx, held: tuple[Path, str]) -> None:
+    clone, head = held
+    gates, review = without_round(record("gates", sha=head)), without_round(record("review", sha=head))
     assert all("round" not in b for b in (gates, review))
     fx.comments(comment(gates), comment(review))
-    assert mcp(fx, clone, expectedHeadSha=HEAD) is None
+    assert mcp(fx, clone, expectedHeadSha=head) is None
 
 
 @pytest.mark.parametrize("garbage", [
@@ -673,15 +698,16 @@ def test_records_posted_before_the_round_line_still_merge(fx: Fx, clone: Path) -
     "not a marker at all",
     "",
 ])
-def test_a_garbage_round_line_changes_nothing_on_a_good_line_two(fx: Fx, clone: Path, garbage: str) -> None:
+def test_a_garbage_round_line_changes_nothing_on_a_good_line_two(fx: Fx, held: tuple[Path, str], garbage: str) -> None:
+    clone, head = held
     def spoil(body: str) -> str:
         lines = body.split("\n")
         return "\n".join(lines[:2] + [garbage] + lines[3:])
 
-    fx.comments(comment(spoil(record("gates"))), comment(spoil(record("review"))))
-    assert mcp(fx, clone, expectedHeadSha=HEAD) is None
-    fx.comments(comment(spoil(record("gates"))), comment(spoil(record("review", state="failure"))))
-    reason = mcp(fx, clone, expectedHeadSha=HEAD)
+    fx.comments(comment(spoil(record("gates", sha=head))), comment(spoil(record("review", sha=head))))
+    assert mcp(fx, clone, expectedHeadSha=head) is None
+    fx.comments(comment(spoil(record("gates", sha=head))), comment(spoil(record("review", sha=head, state="failure"))))
+    reason = mcp(fx, clone, expectedHeadSha=head)
     assert reason and "says failure" in reason  # line two still decides
 
 
@@ -810,12 +836,68 @@ def test_a_record_s_depth_is_checked_against_a_lab_policy_too(fx: Fx, tmp_path: 
 # The owner's override (verdict.sh --owner): a record whose override= names its own depth passes below the floor.
 
 
+QUOTED = '- Owner override: depth light, by the owner\'s words: "light is enough here"\n'
+
+
+def carried(n: int, depth: str = "light") -> str:
+    """The line a repost writes, linking the n-th comment the fixture posts (Fx.comments numbers them from 1000)."""
+    return (f"- Owner override: depth {depth}, carried from the reposted round's record "
+            f"(https://github.com/{REPO}/pull/12#issuecomment-{1000 + n}), which quotes the owner\n")
+
+
+def overridden(head: str, quote: str) -> str:
+    return record("review", sha=head, tier="sensitive", depth="light").replace(
+        " depth=light -->", " depth=light override=light -->", 1) + quote
+
+
 def test_an_owner_override_naming_the_record_s_depth_merges_below_the_floor(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"})
+    fx.comments(comment(record("gates", sha=head)), comment(overridden(head, QUOTED)))
+    assert mcp(fx, r, expectedHeadSha=head) is None
+
+
+@pytest.mark.parametrize("chain", [
+    [QUOTED, carried(1)],  # a repost of the record that quotes the owner
+    [QUOTED, carried(1), carried(2)],  # a repost of a repost
+])
+def test_a_repost_s_override_counts_when_its_link_leads_to_the_owner_s_words(fx: Fx, tmp_path: Path,
+                                                                            chain: list[str]) -> None:
+    r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"})
+    fx.comments(comment(record("gates", sha=head)), *[comment(overridden(head, q)) for q in chain])
+    assert mcp(fx, r, expectedHeadSha=head) is None
+
+
+@pytest.mark.parametrize("chain, spoil", [
+    (["- Owner override: depth light, carried from the reposted round's record, which quotes the owner\n"], None),
+    ([carried(9)], None),  # a link to no comment of the PR
+    (["", carried(1)], None),  # a repost of a record that quotes nobody: the laundering path
+    ([carried(2), carried(1)], None),  # a loop
+    ([QUOTED.replace("light", "focused", 1), carried(1)], None),  # the linked record quotes another depth
+    ([QUOTED, carried(1)], "edited"),  # the linked record was edited after it was posted
+    ([QUOTED, carried(1)], "outsider"),  # the linked record is not by the owner, a member or a collaborator
+    ([QUOTED, carried(1)], "no-override"),  # the linked record's marker carries no override
+])
+def test_a_repost_s_override_without_a_path_to_the_owner_s_words_refuses(fx: Fx, tmp_path: Path, chain: list[str],
+                                                                       spoil: str | None) -> None:
+    r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"})
+    bodies = [overridden(head, q) for q in chain]
+    if spoil == "no-override":
+        bodies[0] = bodies[0].replace(" override=light", "", 1)
+    first = comment(bodies[0], assoc="NONE" if spoil == "outsider" else "OWNER", edited=spoil == "edited")
+    fx.comments(comment(record("gates", sha=head)), first, *[comment(b) for b in bodies[1:]])
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "quoting the owner's words" in reason, reason
+
+
+@pytest.mark.parametrize("quote", ["", '- Owner override: depth light, by the owner\'s words: ""\n',
+                                   QUOTED.replace("depth light", "depth focused"), "x " + QUOTED])
+def test_an_owner_override_without_the_owner_s_quote_refuses(fx: Fx, tmp_path: Path, quote: str) -> None:
     r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"})
     body = record("review", sha=head, tier="sensitive", depth="light").replace(" depth=light -->",
                                                                                 " depth=light override=light -->", 1)
-    fx.comments(comment(record("gates", sha=head)), comment(body))
-    assert mcp(fx, r, expectedHeadSha=head) is None
+    fx.comments(comment(record("gates", sha=head)), comment(body + quote))
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "quoting the owner's words" in reason, reason
 
 
 @pytest.mark.parametrize("marker", [" depth=light override=focused -->", " depth=light override=none -->",
@@ -862,9 +944,10 @@ def test_a_malformed_depth_refuses(fx: Fx, clone: Path, body: str) -> None:
     assert reason and "malformed" in reason, reason
 
 
-def test_a_well_formed_depth_is_accepted_without_a_clone(fx: Fx, clone: Path) -> None:
-    fx.comments(comment(record("gates")), comment(record("review", depth=None).replace(" -->", " depth=light -->", 1)))
-    assert mcp(fx, clone, expectedHeadSha=HEAD) is None
+def test_a_well_formed_depth_is_accepted(fx: Fx, held: tuple[Path, str]) -> None:
+    clone, head = held
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, depth=None).replace(" -->", " depth=light -->", 1)))
+    assert mcp(fx, clone, expectedHeadSha=head) is None
 
 
 # A review record without depth (two lines, or with the round line, as posted before review depths) never counts,
@@ -983,3 +1066,22 @@ def test_a_floor_check_that_exits_non_zero_refuses_whatever_it_printed(fx: Fx, t
                                 "tool_input": {"owner": "example-owner", "repo": "example-repo", "pullNumber": 12,
                                                "expectedHeadSha": head}})
     assert done.returncode == 0 and "tier.sh failed" in done.stdout, done.stdout + done.stderr
+
+
+def test_a_session_above_its_clones_finds_the_repo_s_clone_by_name(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"src/app.py": "x = 2\n"})
+    clones = tmp_path / "clones"
+    clones.mkdir()
+    r.rename(clones / REPO.split("/")[1])  # where a cloud session keeps the clone of this repo
+    copy = tmp_path / "copy"
+    shutil.copytree(GUARD.parents[2] / "skills" / "review" / "scripts", copy / "skills" / "review" / "scripts")
+    guard = copy / "cloud" / "hooks" / "merge-guard.py"
+    guard.parent.mkdir(parents=True)
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head)))
+    event = {"tool_name": "mcp__github__merge_pull_request", "cwd": str(tmp_path),  # above the clones
+             "tool_input": {"owner": "example-owner", "repo": "example-repo", "pullNumber": 12,
+                            "expectedHeadSha": head}}
+    for where, refused in ((clones, False), (tmp_path / "elsewhere", True)):
+        guard.write_text(GUARD.read_text().replace('CLONES = Path("/home/user")', f"CLONES = Path({str(where)!r})", 1))
+        done = run_copy(fx, guard, event)
+        assert done.returncode == 0 and ("cannot be checked" in done.stdout) == refused, done.stdout + done.stderr

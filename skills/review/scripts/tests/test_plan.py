@@ -832,7 +832,8 @@ def test_a_repost_carries_the_override_and_takes_no_owner_words(w: World, tmp_pa
     assert done.returncode == 0, done.stderr
     body = w.comments()[-1]["body"]
     assert body.split("\n")[1].endswith(f"reviewed={head} depth=light override=light -->")
-    assert "- Owner override: depth light, carried from the reposted round's record, which quotes the owner" in body
+    first = w.comments()[-2]["html_url"]
+    assert f"- Owner override: depth light, carried from the reposted round's record ({first}), which quotes the owner" in body
 
 
 def test_a_repost_of_a_light_round_with_no_override_stays_refused_below_the_floor(w: World, tmp_path: Path) -> None:

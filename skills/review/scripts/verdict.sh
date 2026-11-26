@@ -175,9 +175,12 @@ plan_out=$(python3 "$here/plan.py" ${plan_args[@]+"${plan_args[@]}"} 2>"$why") |
   die "${reason#plan.py: }"
 }
 rm -f "$why"
-plan_head='' plan_depth='' plan_pairs='' plan_override=''
+plan_head='' plan_depth='' plan_pairs='' plan_override='' plan_record=''
 while read -r k v; do
-  case "$k" in head) plan_head=$v ;; depth) plan_depth=$v ;; pairs) plan_pairs=$v ;; override) plan_override=$v ;; esac
+  case "$k" in
+    head) plan_head=$v ;; depth) plan_depth=$v ;; pairs) plan_pairs=$v ;; override) plan_override=$v ;;
+    record) plan_record=$v ;;
+  esac
 done <<<"$plan_out"
 [ "$plan_head" = "$head" ] || die "PR $pr's head moved while the plan was read: run again"
 for c in "$head" ${reviewed:+"$reviewed"}; do
@@ -235,7 +238,7 @@ lines=(--line "- Head commit: \`$head\`" --line "- Reviewed commit: \`$reviewed\
   --line "- Tier from the paths: $computed" --line "- Depth: $plan_depth (${plan_pairs// /, })"
   --line "- Reviewers: ${reviewers:-none}")
 if [ -n "$plan_override" ] && [ -n "$repost" ]; then
-  lines+=(--line "- Owner override: depth $plan_override, carried from the reposted round's record, which quotes the owner")
+  lines+=(--line "- Owner override: depth $plan_override, carried from the reposted round's record${plan_record:+ ($plan_record)}, which quotes the owner")
 elif [ -n "$plan_override" ]; then
   lines+=(--line "- Owner override: depth $plan_override, by the owner's words: \"$owner\"")
 fi

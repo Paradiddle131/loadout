@@ -13,8 +13,11 @@ PR's current head as a success. In a local clone holding the head and the defaul
 `plan.py floor` (tier.sh's tier and the paths' depth floor) runs against that branch's tip as GitHub's branches API
 names it when the clone holds that commit, else against `origin/<that branch>`; a review below the paths' tier
 refuses, as does a record whose `depth` is below the floor unless its `override` names that depth (the owner's
-override, which verdict.sh records with the owner's words), and so does a check that fails or runs out of time; with
-no such clone the check is skipped. A review record without `depth` (one from before review depths) never counts.
+override, which verdict.sh records with the owner's words, and which counts only on a record that quotes them, or
+on a repost whose link leads, through trusted and unedited review records of the PR, to one that does), and so
+does a check that fails or runs out of time. The clone is the session's working directory, else the cloud's
+`/home/user/<repo name>`; with neither holding the head and a copy of the default branch the floor cannot be
+computed, and the merge is refused. A review record without `depth` never counts.
 When the floor is `none` and it was computed against GitHub's tip, no review record is needed: the gates record
 alone lets the merge go when the newest trusted review record is absent, for an older head, or an unedited,
 well-formed success; an edited, malformed, depth-less or failing one holds the merge. The merge must name the head checked (`expectedHeadSha`), so
@@ -63,6 +66,12 @@ TITLE = {"gates": re.compile(r"🤖 Gates: (success|failure)"),
          "review": re.compile(r"🤖 Review: (pass|fail) \((routine|standard|sensitive) tier\)")}
 FIELDS = {"gates": {"sha", "state"}, "review": {"sha", "state", "tier", "reviewed", "depth", "override"}}
 OVERRIDES = ("light", "focused", "full")  # what verdict.sh's --owner may set a round's depth to
+# The lines verdict.sh writes under the marker of an overridden round: the owner's words, or a repost's link to the
+# record it carries, which the guard follows to a record that quotes them.
+OWNER_WORDS = re.compile(r'- Owner override: depth (light|focused|full), by the owner\'s words: ".*\S.*"')
+OWNER_CARRIED = re.compile(r"- Owner override: depth (light|focused|full), carried from the reposted round's record "
+                           r"\((https://\S+)\), which quotes the owner")
+CLONES = Path("/home/user")  # where a cloud session's clones live, one per repo, by its name
 RANK = {"routine": 0, "standard": 1, "sensitive": 2}
 DEPTH = {"none": 0, "light": 1, "focused": 2, "full": 3}
 PLAN_PY = ROOT / "skills/review/scripts/plan.py"
@@ -161,8 +170,28 @@ def body_lines(c: dict) -> list[str]:
     return (c.get("body") or "").replace("\r\n", "\n").split("\n")
 
 
-def record_problem(kind: str, c: dict, head: str) -> tuple[str, dict]:
-    """Why `c`, the newest trusted marker comment of `kind`, records no success on `head` ('' when it does)."""
+def owner_quoted(override: str, c: dict, trusted: list[dict], seen: frozenset = frozenset()) -> bool:
+    """Whether review record `c` quotes the owner's words for `override`: on its own `by the owner's words` line, or on a
+    repost's `carried from` line whose link names another trusted, unedited review record of this PR, with the same
+    override, that does (followed to the end of the chain; a loop, a dead link or a record without words fails)."""
+    for ln in body_lines(c)[3:]:
+        s = ln.strip()
+        if (m := OWNER_WORDS.fullmatch(s)) and m.group(1) == override:
+            return True
+        if (m := OWNER_CARRIED.fullmatch(s)) and m.group(1) == override and m.group(2) not in seen:
+            for o in trusted:
+                lines = body_lines(o)
+                marker = MARKER.fullmatch(lines[1].strip()) if len(lines) > 1 else None
+                if (o.get("html_url") == m.group(2) and o.get("updated_at") == o.get("created_at") and marker
+                        and marker.group(1) == "review" and f" override={override} " in f" {marker.group(2)} "
+                        and owner_quoted(override, o, trusted, seen | {m.group(2)})):
+                    return True
+    return False
+
+
+def record_problem(kind: str, c: dict, head: str, trusted: list[dict] | None = None) -> tuple[str, dict]:
+    """Why `c`, the newest trusted marker comment of `kind`, records no success on `head` ('' when it does); `trusted`
+    is the PR's trusted comments, where a repost's override is traced to the record that quotes the owner."""
     lines = body_lines(c)
     where = f"the newest {kind} record ({c.get('html_url') or 'comment ' + str(c.get('id'))})"
     if c.get("updated_at") != c.get("created_at"):
@@ -190,7 +219,10 @@ def record_problem(kind: str, c: dict, head: str) -> tuple[str, dict]:
         return (f"{where} is for {fields['sha']}, not the head {head}: a record for an older head does not "
                 "count"), {"older": True}
     if kind == "review" and "depth" not in fields:
-        return (f"{where} carries no depth (it predates review depths), so its depth floor cannot be checked"), {}
+        return f"{where} carries no depth, so its depth floor cannot be checked", {}
+    if kind == "review" and "override" in fields and not owner_quoted(fields["override"], c, trusted or []):
+        return (f"{where} carries override={fields['override']} but no `- Owner override:` line quoting the "
+                "owner's words, or one carried from a record of this PR that does, so the override does not count"), {}
     if state != "success":
         return f"{where} says {state}", {"state": state}
     return "", fields
@@ -266,6 +298,7 @@ def check_merge(repo: str | None, number: str | None, expected: str | None, cwd:
         return (f"refused merging PR {number} of {repo}: the merge names head {expected}, but the PR's head "
                 f"is now {head}. Check the new head's gates and review, then merge naming it"), head
     newest: dict[str, dict] = {}
+    trusted: list[dict] = []  # every trusted marker comment, where a repost's override is traced to the owner's words
     ignored: dict[str, set[str]] = {"gates": set(), "review": set()}
     for c in sorted(comments(repo, number), key=lambda c: (str(c.get("created_at")), c.get("id") or 0)):
         lines = body_lines(c)
@@ -274,10 +307,14 @@ def check_merge(repo: str | None, number: str | None, expected: str | None, cwd:
             continue
         if c.get("author_association") in TRUSTED:
             newest[m.group(1)] = c
+            trusted.append(c)
         else:
             ignored[m.group(1)].add(str(c.get("author_association")))
     base = ((pr.get("base") or {}).get("repo") or {}).get("default_branch")
     rated = paths_rating(repo, head, base, cwd)
+    cloud_clone = CLONES / repo.split("/")[-1]
+    if rated is None and cloud_clone.is_dir() and cloud_clone.resolve() != Path(cwd).resolve():
+        rated = paths_rating(repo, head, base, str(cloud_clone))
     gates_alone = bool(rated and rated[2] and rated[1] == "none")
     # Floor none, but against the clone's own ref: the relief needs GitHub's tip, so say how to get it.
     unpinned_none = bool(rated and not rated[2] and rated[1] == "none")
@@ -286,13 +323,17 @@ def check_merge(repo: str | None, number: str | None, expected: str | None, cwd:
             + (", or record it with skills/review/scripts/verdict.sh <pr> --tier routine" if rated[0] == "routine"
                else "")) if unpinned_none else ""
     problems, review = [], {}
+    if rated is None:
+        problems.append(f"no local clone of {repo} holds the head {head} and a copy of {base or 'its default branch'}, "
+                        f"so the head's tier and depth floor cannot be checked: merge from a clone of it (here, or "
+                        f"{cloud_clone}) after `git fetch origin {base or '<default branch>'} {head}`")
     for kind in ("gates", "review"):
         if kind == "review" and gates_alone:
             # Floor none on GitHub's tip: no review is needed. The newest trusted review record still holds the merge
             # unless it is an unedited, well-formed success, or a record for an older head: an edited, malformed or
             # failing one holds it, as it does on every other path.
             if "review" in newest:
-                why, fields = record_problem(kind, newest[kind], head)
+                why, fields = record_problem(kind, newest[kind], head, trusted)
                 if why and not fields.get("older"):
                     problems.append(f"{why}; the paths need no review, but this review record holds the merge: "
                                     f"record it again with {PRODUCER[kind]}, or delete it if no reviewer ran")
@@ -302,7 +343,7 @@ def check_merge(repo: str | None, number: str | None, expected: str | None, cwd:
             problems.append(f"no {kind} record{extra}; record it with {PRODUCER[kind]}" + (hint if kind == "review"
                                                                                         else ""))
             continue
-        why, fields = record_problem(kind, newest[kind], head)
+        why, fields = record_problem(kind, newest[kind], head, trusted)
         if why:
             problems.append(f"{why}; record it again with {PRODUCER[kind]}")
         elif kind == "review":
