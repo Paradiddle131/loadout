@@ -837,18 +837,56 @@ def test_a_record_s_depth_is_checked_against_a_lab_policy_too(fx: Fx, tmp_path: 
 
 
 QUOTED = '- Owner override: depth light, by the owner\'s words: "light is enough here"\n'
-CARRIED = ("- Owner override: depth light, carried from the reposted round's record "
-           f"(https://github.com/{REPO}/pull/12#issuecomment-1), which quotes the owner\n")
 
 
-@pytest.mark.parametrize("quote", [QUOTED, CARRIED])
-def test_an_owner_override_naming_the_record_s_depth_merges_below_the_floor(fx: Fx, tmp_path: Path,
-                                                                            quote: str) -> None:
+def carried(n: int, depth: str = "light") -> str:
+    """The line a repost writes, linking the n-th comment the fixture posts (Fx.comments numbers them from 1000)."""
+    return (f"- Owner override: depth {depth}, carried from the reposted round's record "
+            f"(https://github.com/{REPO}/pull/12#issuecomment-{1000 + n}), which quotes the owner\n")
+
+
+def overridden(head: str, quote: str) -> str:
+    return record("review", sha=head, tier="sensitive", depth="light").replace(
+        " depth=light -->", " depth=light override=light -->", 1) + quote
+
+
+def test_an_owner_override_naming_the_record_s_depth_merges_below_the_floor(fx: Fx, tmp_path: Path) -> None:
     r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"})
-    body = record("review", sha=head, tier="sensitive", depth="light").replace(" depth=light -->",
-                                                                                " depth=light override=light -->", 1)
-    fx.comments(comment(record("gates", sha=head)), comment(body + quote))
+    fx.comments(comment(record("gates", sha=head)), comment(overridden(head, QUOTED)))
     assert mcp(fx, r, expectedHeadSha=head) is None
+
+
+@pytest.mark.parametrize("chain", [
+    [QUOTED, carried(1)],  # a repost of the record that quotes the owner
+    [QUOTED, carried(1), carried(2)],  # a repost of a repost
+])
+def test_a_repost_s_override_counts_when_its_link_leads_to_the_owner_s_words(fx: Fx, tmp_path: Path,
+                                                                            chain: list[str]) -> None:
+    r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"})
+    fx.comments(comment(record("gates", sha=head)), *[comment(overridden(head, q)) for q in chain])
+    assert mcp(fx, r, expectedHeadSha=head) is None
+
+
+@pytest.mark.parametrize("chain, spoil", [
+    (["- Owner override: depth light, carried from the reposted round's record, which quotes the owner\n"], None),
+    ([carried(9)], None),  # a link to no comment of the PR
+    (["", carried(1)], None),  # a repost of a record that quotes nobody: the laundering path
+    ([carried(2), carried(1)], None),  # a loop
+    ([QUOTED.replace("light", "focused", 1), carried(1)], None),  # the linked record quotes another depth
+    ([QUOTED, carried(1)], "edited"),  # the linked record was edited after it was posted
+    ([QUOTED, carried(1)], "outsider"),  # the linked record is not by the owner, a member or a collaborator
+    ([QUOTED, carried(1)], "no-override"),  # the linked record's marker carries no override
+])
+def test_a_repost_s_override_without_a_path_to_the_owner_s_words_refuses(fx: Fx, tmp_path: Path, chain: list[str],
+                                                                       spoil: str | None) -> None:
+    r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"})
+    bodies = [overridden(head, q) for q in chain]
+    if spoil == "no-override":
+        bodies[0] = bodies[0].replace(" override=light", "", 1)
+    first = comment(bodies[0], assoc="NONE" if spoil == "outsider" else "OWNER", edited=spoil == "edited")
+    fx.comments(comment(record("gates", sha=head)), first, *[comment(b) for b in bodies[1:]])
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "quoting the owner's words" in reason, reason
 
 
 @pytest.mark.parametrize("quote", ["", '- Owner override: depth light, by the owner\'s words: ""\n',
