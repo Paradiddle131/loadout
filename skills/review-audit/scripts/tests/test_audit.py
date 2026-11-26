@@ -927,7 +927,7 @@ def test_escapes_lists_a_later_fix_to_a_passed_pr_s_lines_within_the_window(tmp_
     d = tmp_path / "h"
     d.mkdir()
     (d / "prs.jsonl").write_text(json.dumps({"repo": REPO, "pr": 7, "merged_at": "2030-01-03T00:00:00Z",
-                                             "merge_commit": merge,
+                                             "merge_commit": merge, "pr_commits": [git_at(r, "rev-parse", "feature")],
                                              "guard_review": {"state": "success", "sha": "x", "depth": "light"}})
                                  + "\n" + json.dumps({"repo": REPO, "pr": 8, "merged_at": None, "merge_commit": None,
                                                       "guard_review": None}) + "\n")
@@ -957,6 +957,11 @@ def test_escapes_refuses_a_shallow_clone(tmp_path: Path) -> None:
 def escapes_of(tmp: Path, r: Path, prs: list[dict], rounds: list[dict] | None = None) -> tuple[list[dict], dict]:
     d = tmp / "h"
     d.mkdir(exist_ok=True)
+    for p in prs:  # what GitHub lists for a PR: a merge commit's second-parent side, else the one commit
+        if "pr_commits" not in p and p["merge_commit"] != "f" * 40:
+            parents = git_at(r, "rev-list", "--parents", "-n", "1", p["merge_commit"]).split()[1:]
+            p["pr_commits"] = (git_at(r, "rev-list", f"{parents[0]}..{parents[1]}").split() if len(parents) > 1
+                               else [p["merge_commit"]])
     (d / "prs.jsonl").write_text("".join(json.dumps(p) + "\n" for p in prs))
     (d / "rounds.jsonl").write_text("".join(json.dumps(x) + "\n" for x in rounds or []))
     assert audit.escapes(audit.argparse.Namespace(dir=str(d), clone=[f"{REPO}={r}"], days=30, branch="main")) == 0
@@ -964,7 +969,7 @@ def escapes_of(tmp: Path, r: Path, prs: list[dict], rounds: list[dict] | None = 
 
 
 def passed(pr: int, merge: str, depth: str = "light", **extra: object) -> dict:
-    return {"repo": REPO, "pr": pr, "merged_at": "x", "merge_commit": merge,
+    return {"repo": REPO, "pr": pr, "merged_at": "2030-01-03T00:00:00Z", "merge_commit": merge,
             "guard_review": {"state": "success", "sha": "x", "depth": depth}, **extra}
 
 
@@ -1024,9 +1029,10 @@ def test_harvest_keeps_the_guard_record_s_depth_and_a_merged_pr_s_commit_count(g
     cs = github["data"][f"repos/{REPO}/issues/7/comments"]
     cs[2] = {**cs[2], "body": cs[2]["body"].replace(f"reviewed={H2} -->", f"reviewed={H2} depth=light -->", 1)}
     cs[3] = {**cs[3], "author_association": "NONE"}
-    github["data"][f"repos/{REPO}/pulls/7/commits"] = [{"commit": {"message": "one"}}, {"commit": {"message": "two"}}]
+    github["data"][f"repos/{REPO}/pulls/7/commits"] = [{"sha": "a" * 40, "commit": {"message": "one"}},
+                                                       {"sha": "b" * 40, "commit": {"message": "two"}}]
     [p] = [x for x in rows(harvest(tmp_path), "prs") if x["pr"] == 7]
-    assert p["guard_review"]["depth"] == "light" and p["commits"] == 2
+    assert p["guard_review"]["depth"] == "light" and p["commits"] == 2 and p["pr_commits"] == ["a" * 40, "b" * 40]
 
 
 def test_escapes_keeps_a_pr_of_a_repo_with_no_clone_as_skipped(tmp_path: Path) -> None:
@@ -1115,9 +1121,8 @@ def rebased(tmp: Path) -> tuple[Path, str]:
 
 
 @pytest.mark.parametrize("extra, commits, last_only", [
-    ({"commits": 2}, "last only", 1),  # a rebase or a squash of two commits: git cannot tell which
-    ({}, "last only", 1),  # a harvest that did not count the PR's commits
-    ({"commits": 1}, "all", 0),
+    ({"pr_commits": ["a" * 40, "b" * 40]}, "last only", 1),  # a rebase or a squash of two commits the branch lacks
+    ({"pr_commits": ["a" * 40]}, "all", 0),  # a squash or rebase of one commit is that commit
 ])
 def test_escapes_marks_a_pr_whose_commits_git_cannot_tell_and_counts_it(tmp_path: Path, extra: dict, commits: str,
                                                                         last_only: int,
@@ -1160,9 +1165,69 @@ def test_escapes_splits_a_clone_spec_at_its_first_equals_sign(tmp_path: Path) ->
     r.rename(odd)
     d = tmp_path / "h"
     d.mkdir()
-    (d / "prs.jsonl").write_text(json.dumps(passed(7, merge)) + "\n")
+    (d / "prs.jsonl").write_text(json.dumps(passed(7, merge, pr_commits=[git_at(odd, "rev-parse", "feature")])) + "\n")
     assert audit.escapes(audit.argparse.Namespace(dir=str(d), clone=[f"{REPO}={odd}"], days=30, branch="main")) == 0
     assert [len(x["candidates"]) for x in rows(d, "escapes")] == [1]
     for spec, says in ((REPO, "--clone is"), (f"{REPO}={tmp_path / 'missing'}", "not a git clone")):
         with pytest.raises(SystemExit, match=says):
             audit.escapes(audit.argparse.Namespace(dir=str(d), clone=[spec], days=30, branch="main"))
+
+
+def fast_forward(tmp: Path, update_from_main: bool) -> tuple[Path, str, list[str]]:
+    """main: a base; PR 7 (one commit, then an update-from-main merge when asked) reaches main by a pushed
+    fast-forward on 2030-01-04, so its merge commit is its head, dated before GitHub's merge time."""
+    r = tmp / "clone"
+    r.mkdir()
+    git_at(r, "init", "-q", "-b", "main")
+    (r / "app.py").write_text("base = 1\n")
+    (r / "other.py").write_text("x\n")
+    git_at(r, "add", ".")
+    git_at(r, "commit", "-qm", "base", when="2030-01-01T00:00:00Z")
+    git_at(r, "switch", "-q", "-c", "feature")
+    (r / "app.py").write_text("base = 1\nadded = 2\n")
+    git_at(r, "commit", "-qam", "feature", when="2030-01-02T00:00:00Z")
+    listed = [git_at(r, "rev-parse", "HEAD")]
+    if update_from_main:
+        git_at(r, "switch", "-q", "main")
+        (r / "other.py").write_text("y\n")
+        git_at(r, "commit", "-qam", "main moves", when="2030-01-03T00:00:00Z")
+        git_at(r, "switch", "-q", "feature")
+        git_at(r, "merge", "-q", "--no-ff", "-m", "update", "main", when="2030-01-04T00:00:00Z")
+        listed.append(git_at(r, "rev-parse", "HEAD"))
+    git_at(r, "switch", "-q", "main")
+    git_at(r, "merge", "-q", "--ff-only", "feature")
+    return r, git_at(r, "rev-parse", "HEAD"), listed
+
+
+def test_escapes_measures_the_window_from_github_s_merge_time(tmp_path: Path) -> None:
+    r, merge, listed = fast_forward(tmp_path, update_from_main=False)
+    (r / "app.py").write_text("base = 1\nadded = 20\n")
+    git_at(r, "commit", "-qam", "fix", when="2030-02-05T00:00:00Z")  # 34 days after the commit, 24 after the merge
+    [row], _ = escapes_of(tmp_path, r, [passed(7, merge, merged_at="2030-01-12T00:00:00Z", pr_commits=listed)])
+    assert [(c["fix"], c["days"]) for c in row["candidates"]] == [(git_at(r, "rev-parse", "HEAD"), 24.0)]
+
+
+def test_escapes_reads_a_fast_forwarded_pr_s_own_commits_past_its_update_from_main_merge(tmp_path: Path) -> None:
+    r, merge, listed = fast_forward(tmp_path, update_from_main=True)
+    (r / "app.py").write_text("base = 1\nadded = 20\n")
+    git_at(r, "commit", "-qam", "fix", when="2030-01-06T00:00:00Z")
+    [row], _ = escapes_of(tmp_path, r, [passed(7, merge, merged_at="2030-01-05T00:00:00Z", pr_commits=listed)])
+    assert row["commits"] == "all" and [c["lines"] for c in row["candidates"]] == [1]
+
+
+def test_escapes_marks_a_pr_the_branch_holds_only_part_of_and_counts_it(tmp_path: Path) -> None:
+    r, merge = one_file_history(tmp_path, "app.py", "base = 1\n", "base = 1\nadded = 20\n")
+    listed = [git_at(r, "rev-parse", "feature"), "c" * 40]  # one commit the clone lacks, as after a force-push
+    [row], s = escapes_of(tmp_path, r, [passed(7, merge, pr_commits=listed)])
+    assert row["commits"] == "partial" and len(row["candidates"]) == 1
+    assert s["escape_candidates"]["depth light"]["last_only"] == 1
+
+
+@pytest.mark.parametrize("extra, says", [
+    ({"pr_commits": []}, "lists no commits"),
+    ({"merged_at": "yesterday"}, "not a time"),
+])
+def test_escapes_skips_a_pr_with_no_commit_list_or_merge_time(tmp_path: Path, extra: dict, says: str) -> None:
+    r, merge = one_file_history(tmp_path, "app.py", "base = 1\n", "base = 1\nadded = 20\n")
+    [row], s = escapes_of(tmp_path, r, [passed(7, merge, **extra)])
+    assert says in row["error"] and s["escape_candidates"]["depth light"]["skipped"] == 1

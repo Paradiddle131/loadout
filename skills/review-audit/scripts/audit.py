@@ -15,13 +15,15 @@ back on the PRs, and sums both up. GitHub holds every record; the JSONL files ar
       posts one `🤖 Audit` record on the PR: a table for people and the judgments as a JSON block.
   audit.py escapes --dir <dir> --clone <owner/name>=<path> [--clone ...] [--days <n>] [--branch <ref>]
       reads, never writes but <dir>/escapes.jsonl: for each harvested PR merged on a passing review, the commits on
-      the branch's first-parent line (default origin/main) within --days (30) of its merge that change or delete a
-      line the PR added, by `git blame` on each such commit's parent; each is a candidate escape, never a finding,
-      until an auditor confirms it. Each clone must hold full history (not shallow); a passed PR whose repo has no
-      --clone, that git cannot read or whose merge commit is not on the branch keeps a row with its error and counts
-      as skipped; a single-parent merge of a PR with more than one commit (rebase or squash, which git cannot tell
-      apart) is read from its last commit only and counted so, and so is a PR whose window the branch has not
-      reached yet.
+      the branch's first-parent line (default origin/main) within --days (30) of GitHub's merge time that change or
+      delete a line the PR's commits wrote, by `git blame` on each such commit's parent; each is a candidate escape,
+      never a finding, until an auditor confirms it. The PR's commits are the ones GitHub lists for it, where the
+      branch holds them (a merge commit or a fast-forward), plus the merge commit; where it does not (a squash or
+      rebase), the merge commit alone, which is all of them only for a one-commit PR. Each clone must hold full
+      history (not shallow); a passed PR whose repo has no --clone, that git cannot read, whose merge commit is not
+      on the branch or whose harvest lists no commits keeps a row with its error and counts as skipped; a PR read
+      from part of its commits is counted so (a squash or rebase of several, or GitHub's 250-commit list cap), and
+      so is a PR whose window the branch has not reached yet.
   audit.py summary --dir <dir> [--session <id>] [--json]
       prints the batch's numbers: rounds, passes, convergence, lens yield and, from the audits, how often a
       checkable finding was wrong or mattered and a must-fix was ranked too high, each with its 95% interval,
@@ -49,6 +51,7 @@ import subprocess
 import sys
 import tempfile
 from collections import Counter, defaultdict
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -215,8 +218,9 @@ def harvest(a: argparse.Namespace) -> int:
             row = {"repo": repo, "pr": n, "title": pr["title"], "state": pr["state"],
                    "created_at": pr["created_at"], "merged_at": pr.get("merged_at"),
                    "head": pr["head"]["sha"], "branch": pr["head"]["ref"], "merge_commit": pr.get("merge_commit_sha")}
-            if row["merged_at"]:  # one commit, or more that a single-parent merge may hold only the last of
-                row["commits"] = sum(1 for _ in pages(f"repos/{repo}/pulls/{n}/commits"))
+            if row["merged_at"]:  # the PR's own commits, which escapes looks for on the branch
+                row["pr_commits"] = [c["sha"] for c in pages(f"repos/{repo}/pulls/{n}/commits")]
+                row["commits"] = len(row["pr_commits"])
             rows["prs"].append(row)
             newest = None  # the newest trusted comment with a review marker line, picked as the merge guard picks it
             for c in pages(f"repos/{repo}/issues/{n}/comments"):
@@ -342,12 +346,13 @@ def commit_time(clone: str, commit: str) -> int:
     return int(git_out(clone, "rev-list", "--no-walk", "--timestamp", commit).split()[0])
 
 
-def escape_candidates(clone: str, pr_commits: set[str], merge: str, branch: str, days: int) -> tuple[list[dict], bool]:
-    """Commits on `branch`'s first-parent line within `days` of `merge` that change lines one of `pr_commits` wrote,
+def escape_candidates(clone: str, pr_commits: set[str], merge: str, when: int, branch: str,
+                      days: int) -> tuple[list[dict], bool]:
+    """Commits on `branch`'s first-parent line after `merge` and within `days` of `when` (GitHub's merge time, which a
+    merge commit's own time is not for a PR pushed as a fast-forward) that change lines one of `pr_commits` wrote,
     and whether the window is still open (the branch's tip is older than the window's end, so more may come).
 
     Every commit after the merge is read by its own time: one whose clock is ahead does not end the walk."""
-    when = commit_time(clone, merge)
     end = when + days * 86400
     later = git_out(clone, "rev-list", "--first-parent", "--reverse", "--timestamp", f"{merge}..{branch}").split("\n")
     found = []
@@ -367,16 +372,28 @@ def escape_candidates(clone: str, pr_commits: set[str], merge: str, branch: str,
     return found, commit_time(clone, branch) < end
 
 
-def merged_commits(clone: str, merge: str, count: int | None) -> tuple[set[str], str]:
-    """The commits a PR's merge put on the branch, and whether they are "all" of them or the "last only".
+PART = ("last only", "partial")  # a row read from part of its PR's commits
+GITHUB_PR_COMMITS_CAP = 250  # GitHub lists at most this many of a PR's commits
 
-    A merge commit's second-parent side is all of them. A single-parent merge is all of them only when the PR had one
-    commit: with more, a rebase put them on the branch and a squash did not, and git cannot tell which, so only the
-    merge commit counts and the row says so (as it does when the harvest did not count the PR's commits)."""
-    parents = git_out(clone, "rev-list", "--parents", "-n", "1", merge).split()[1:]
-    if len(parents) > 1:
-        return set(git_out(clone, "rev-list", f"{parents[0]}..{merge}").split()), "all"
-    return {merge}, "all" if count == 1 else "last only"
+
+def merged_commits(clone: str, merge: str, listed: list[str]) -> tuple[set[str], str]:
+    """The commits that wrote a PR's lines on the branch, and whether they are "all" of them, the "last only" or a
+    "partial" list.
+
+    The PR's commits are the ones GitHub lists for it, so no parent order is read: where `merge` holds each of them (a
+    merge commit, or a fast-forward, whose head may be the PR's own update-from-main merge), they are the PR's, with
+    the merge commit's own resolutions. Where it holds none, a squash or a rebase rewrote them, git cannot tell which,
+    and only the merge commit counts: all of them for a one-commit PR, else the last only."""
+    held = [c for c in listed if subprocess.run(["git", "-C", clone, "merge-base", "--is-ancestor", c, merge],
+                                                capture_output=True).returncode == 0]
+    if held:
+        partial = len(held) < len(listed) or len(listed) >= GITHUB_PR_COMMITS_CAP
+        return set(held) | {merge}, "partial" if partial else "all"
+    return {merge}, "all" if len(listed) == 1 else "last only"
+
+
+class Skip(Exception):
+    """A passed PR escapes keeps as a skipped row, with this as its error."""
 
 
 def escapes(a: argparse.Namespace) -> int:
@@ -408,14 +425,23 @@ def escapes(a: argparse.Namespace) -> int:
             rows.append(row)  # kept and counted as skipped, so the batch's denominator stays whole
             continue
         try:
-            if subprocess.run(["git", "-C", clone, "merge-base", "--is-ancestor", merge, a.branch],
-                              capture_output=True).returncode == 1:
-                raise subprocess.CalledProcessError(1, "merge-base", stderr=f"the merge commit is not on {a.branch}")
-            pr_commits, row["commits"] = merged_commits(clone, merge, p.get("commits"))
-            found, row["window_open"] = escape_candidates(clone, pr_commits, merge, a.branch, a.days)
-        except subprocess.CalledProcessError as exc:
+            on = subprocess.run(["git", "-C", clone, "merge-base", "--is-ancestor", merge, a.branch],
+                                capture_output=True, encoding="utf-8", errors="surrogateescape")
+            if on.returncode:  # 1: not on the branch; any other: git could not read the commit or the branch
+                raise subprocess.CalledProcessError(on.returncode, "merge-base", stderr=(
+                    f"the merge commit is not on {a.branch}" if on.returncode == 1 else on.stderr))
+            if not p.get("pr_commits"):
+                raise Skip("the harvest lists no commits for this PR; harvest again")
+            try:
+                when = int(datetime.fromisoformat(p["merged_at"].replace("Z", "+00:00")).timestamp())
+            except ValueError:
+                raise Skip(f"merged_at is not a time: {p['merged_at']!r}") from None
+            pr_commits, row["commits"] = merged_commits(clone, merge, p["pr_commits"])
+            found, row["window_open"] = escape_candidates(clone, pr_commits, merge, when, a.branch, a.days)
+        except (subprocess.CalledProcessError, Skip) as exc:
             row.pop("commits", None)
-            row["error"] = f"git failed: {shown(exc.stderr or '').strip()[:200]}"
+            row["error"] = (str(exc) if isinstance(exc, Skip)
+                            else f"git failed: {shown(exc.stderr or '').strip()[:200]}")
             rows.append(row)  # kept, so the summary counts it as skipped instead of losing it
             print(f"{p['repo']}#{p['pr']}: skipped, {row['error']}", file=sys.stderr)
             continue
@@ -429,8 +455,8 @@ def escapes(a: argparse.Namespace) -> int:
             fh.write(json.dumps(r, ensure_ascii=False) + "\n")
     skipped = sum("error" in r for r in rows)
     print(f"escapes: {len(rows)} merged on a pass, {sum(bool(r['candidates']) for r in rows)} with a candidate, "
-          f"{skipped} skipped, {sum(r.get('commits') == 'last only' for r in rows)} counted from the last commit "
-          f"only, {sum(bool(r.get('window_open')) for r in rows)} with the window still open")
+          f"{skipped} skipped, {sum(r.get('commits') in PART for r in rows)} read from part of their "
+          f"commits, {sum(bool(r.get('window_open')) for r in rows)} with the window still open")
     return 0
 
 
@@ -598,7 +624,7 @@ def summarize(d: Path, session: str | None) -> dict:
             esc[k]["passed_merges"] += 1
             esc[k]["with_candidate"] += bool(e["candidates"])
             esc[k]["skipped"] += "error" in e
-            esc[k]["last_only"] += e.get("commits") == "last only"
+            esc[k]["last_only"] += e.get("commits") in PART
             esc[k]["window_open"] += bool(e.get("window_open"))
     merged = [c for c in changes if c["merged"]]
     return {**_costs(rounds, by_pr),
@@ -713,7 +739,7 @@ def summary(a: argparse.Namespace) -> int:
         print(f"| {k} | {v} |")
     if s["escape_candidates"]:
         print("\n| Escape candidates by | Merged on a pass | With a later fix to their lines "
-              "| Skipped (no clone, or git failed) | Read from the last commit only | Window still open |"
+              "| Skipped (no clone, or git failed) | Read from part of its commits | Window still open |"
               "\n|---|---|---|---|---|---|")
         for k, v in s["escape_candidates"].items():
             print(f"| {k} | {v['passed_merges']} | {v['with_candidate']} | {v['skipped']} | {v['last_only']} "
