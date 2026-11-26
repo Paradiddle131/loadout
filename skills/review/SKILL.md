@@ -2,7 +2,7 @@
 name: review
 description: "Use before any change lands on a default branch, in any repo, attended or unattended: tier the change, stamp its gates, run fresh reviewers, verify their findings, fix, record the verdict, merge."
 metadata:
-  version: 6.0.0
+  version: 7.0.0
 ---
 
 # Review
@@ -107,7 +107,7 @@ Done when every planned lens has returned its raw findings; remove the worktrees
 
 ## 8. Merge
 
-- Merge when both records are `success` on the PR's head commit (for a floor-none change, the gates record, where the guard's clone holds the head and GitHub's tip, and the newest review record, if any, an unedited, well-formed success or one for an older head), naming that head in the merge; the merge guard recomputes the floor and refuses a review record that carries a `depth` below it, unless its `override=` names that depth; on cloud a hook refuses it otherwise, and refuses any Bash command whose text holds `pr merge` or a `pulls/<n>/merge` endpoint, so merge there with the MCP merge tool (`expectedHeadSha`) or a script that calls the hook's `--check <owner>/<repo>#<n>` (`cloud/hooks/merge-guard.py`), as the autopilot's `merge.sh` does.
+- Merge when both records are `success` on the PR's head commit (for a floor-none change, the gates record, where the guard's clone holds the head and GitHub's tip, and the newest review record, if any, an unedited, well-formed success or one for an older head), naming that head in the merge; the merge guard recomputes the floor and refuses a review record without a `depth`, or with one below it unless its `override=` names that depth; on cloud a hook refuses it otherwise, and refuses any Bash command whose text holds `pr merge` or a `pulls/<n>/merge` endpoint, so merge there with the MCP merge tool (`expectedHeadSha`) or a script that calls the hook's `--check <owner>/<repo>#<n>` (`cloud/hooks/merge-guard.py`), as the autopilot's `merge.sh` does.
 - Where the owner keeps the merge (a repo's own rule, an autopilot profile's merge policy, or the owner's word), skip the merge and list the PR as ready; step 9 still runs.
 
 ## 9. File and brief

@@ -808,6 +808,18 @@ def test_a_repost_of_a_light_round_with_no_override_stays_refused_below_the_floo
     assert done.returncode == 2 and "below the floor" in done.stderr, done.stderr
 
 
+def test_a_repost_of_a_record_whose_override_is_not_its_depth_is_refused(w: World, tmp_path: Path) -> None:
+    head = w.commit({"cloud/hooks/x.sh": "x\n"})
+    assert owner_round(w, tmp_path, head, result="PASS").returncode == 0
+    cs = w.comments()
+    cs[-1]["body"] = cs[-1]["body"].replace(" override=light -->", " override=focused -->", 1)
+    (w.fx / "comments.json").write_text(json.dumps(cs))
+    merge_main(w)
+    done = w.verdict("12", "--tier", "sensitive", "--reviewers", f"{COR}, {VER}", "--reviewed", head,
+                     "--file", review_file(tmp_path, head), "--repost", cost=False)
+    assert done.returncode == 2 and "names another depth" in done.stderr, done.stderr
+
+
 @pytest.mark.parametrize("override, depth", [("focused", "light"), ("none", "none"), ("light", None)])
 def test_record_py_refuses_an_override_that_is_not_the_record_s_depth(override: str, depth: str | None) -> None:
     done = subprocess.run([sys.executable, str(RECORD), "build", "--kind", "review", "--sha", "a" * 40, "--state",
