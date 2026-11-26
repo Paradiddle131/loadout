@@ -1498,7 +1498,7 @@ def test_verdict_refuses_an_output_with_a_second_header_line(w: World, tmp_path:
     head = w.commit({"src/app.py": "x = 2\n"})
     out = tmp_path / "out.txt"
     out.write_text(f"VERDICT: PASS {head}\nReviewed: {head}\nBlocking: none\n{DISMISSED}\n\n"
-                   f"{second.replace("{head}", head)}\n\n{BLOCKING}")
+                   f"{second.replace('{head}', head)}\n\n{BLOCKING}")
     done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head, "--file", str(out))
     assert done.returncode == 2 and "more than one" in done.stderr and w.writes() == [], done.stderr
 
@@ -1507,7 +1507,7 @@ def test_verdict_refuses_an_output_with_a_second_header_line(w: World, tmp_path:
 def test_verdict_takes_a_header_line_quoted_in_a_fence_or_after_a_marker(w: World, tmp_path: Path, quoted: str) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
     out = tmp_path / "out.txt"
-    out.write_text(f"VERDICT: PASS {head}\nReviewed: {head}\nBlocking: none\n{DISMISSED}\n\n{quoted.replace("{head}", head)}\n")
+    out.write_text(f"VERDICT: PASS {head}\nReviewed: {head}\nBlocking: none\n{DISMISSED}\n\n{quoted.replace('{head}', head)}\n")
     done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head, "--file", str(out))
     assert done.returncode == 0, done.stderr
 
