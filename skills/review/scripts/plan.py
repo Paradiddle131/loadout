@@ -23,7 +23,7 @@ Inputs, where each is read from, who controls it, and how a lead-controlled one 
 | Default branch tip | `gh api repos/<r>/branches/<name>`, `.commit.sha`; then `git fetch --force origin +refs/heads/<name>:refs/remotes/origin/<name>` | GitHub (the sha), the remote (the objects) | the forced fetch overwrites a locally moved ref; a fetched tip other than GitHub's sha refuses |
 | Changed paths | `git diff --name-only --no-renames $(git merge-base <tip> <head>) <head>` | the two shas above | computed from content-addressed commits only |
 | Policy | `REVIEW.md` at the tip, parsed by tiers.py (tier.sh's parser), and the tip's instruction imports | the default branch on the remote | the change's own `REVIEW.md` is never read; an unparsable one rates every path sensitive; no line lowers a path below the built-in floor or below `## Sensitive` |
-| Previous round | `gh api repos/<r>/issues/<n>/comments`, paged by hand: the newest review-marker comment by the owner, a member or a collaborator | a trusted record on the PR | used only when unedited, in verdict.sh's exact shape, above routine, its raw output's first `Reviewed:` naming its `reviewed=`, its `Blocking:` line readable, and `reviewed=` an ancestor of the head and not of the merge-base; else a first review (the widest plan); an older record is never used in its place; untrusted authors are ignored |
+| Previous round | `gh api repos/<r>/issues/<n>/comments`, paged by hand: the newest review-marker comment by the owner, a member or a collaborator | a trusted record on the PR | used only when unedited, in verdict.sh's exact shape, at or above the change's tier and this round's depth, its raw output's first `Reviewed:` naming its `reviewed=`, its `Blocking:` line readable, and `reviewed=` an ancestor of the head and not of the merge-base; else a first review (the widest plan); an older record is never used in its place; untrusted authors are ignored |
 | Answered lenses | that record's `Blocking:` ids, by their first part | a trusted record | a part that names no lens plans correctness-reviewer; the record narrows only when its depth is at least this round's |
 | `--depth` | the lead's argument | the lead | the depth is the higher of it and the floor; one below the floor refuses |
 | `--owner` | the lead's argument, quoting the owner's instruction | the owner, by the review skill's rule | sets the depth to `--depth` exactly (light at least), recorded as `override=` with the quote; a later round narrows from it only at no greater depth |
@@ -50,7 +50,7 @@ depth are at least this round's (a round below either, such as one the owner ove
 one); its paths are those changed since that record's `reviewed=` commit that the change still changes. In focused it
 runs each lens a must-fix on the record's `Blocking:` line came from (by its id's first part, PREFIX, so a promoted
 dismissal `COR-RO-1` is correctness-reviewer's; a part that names no lens, correctness-reviewer), the lenses REVIEW.md
-names for its paths, and the sensitive set when it brings in a sensitive path the reviewed round's diff did not hold.
+names for its paths, and the sensitive set when one of its paths is sensitive.
 In light it reruns the one lens; in full, the whole set. The verifier runs on every round with a lens.
 Effort per lens, the highest over the round's paths: a REVIEW.md `; effort: <lens>=<level>` on a line matching the
 path (raising or lowering it), else high for correctness-reviewer and control-prober at depth full on a sensitive path
@@ -326,10 +326,9 @@ def make_plan(change: Change, prior: tuple[str, list[dict], str] | None, want: s
         prefixes = {x.strip().split("-", 1)[0] for b in prior[1] for x in b["ids"].split(",") if x.strip()}
         lenses = {PREFIX.get(x, COR) for x in prefixes} | change.named(paths) or {COR}
         why.append("a fix round: the lenses whose must-fix it answers and those REVIEW.md names for its paths")
-        covered = set(git("diff", "--name-only", "--no-renames", change.mb, since).splitlines())
-        if any(change.rated[x]["tier"] == "sensitive" for x in paths if x not in covered):
+        if change.tier_of(paths) == "sensitive":
             lenses |= set(TIER_SET["sensitive"])
-            why.append("the fix brings in a sensitive path the reviewed round did not hold, so the sensitive set runs")
+            why.append("a fix path is sensitive, so the sensitive set runs too")
     run_ = ordered(lenses)
     first = [COR] if depth == "focused" and COR in run_ and len(run_) > 1 else []
     then = [x for x in run_ if x not in first]

@@ -479,7 +479,7 @@ def test_the_previous_round_is_read_from_the_pr_never_passed_in(w: World, tmp_pa
 def test_a_fix_round_reruns_only_the_lens_each_must_fix_came_from(w: World, tmp_path: Path, ids: tuple[str, ...],
                                                                   lenses: list[str]) -> None:
     first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER], ids=ids)
-    w.commit({"cloud/hooks/x.sh": "y\n", "docs/a.md": "x\n"})
+    w.commit({"src/app.py": "x = 2\n", "docs/a.md": "x\n"})  # no sensitive fix path: only what it answers
     code, p, err = plan(w)
     assert code == 0, err
     assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted(lenses) and p["verifier"] == VER
@@ -498,7 +498,7 @@ def test_a_fix_round_after_a_sensitive_round_runs_the_review_md_lenses_of_its_pa
                                                                                     tmp_path: Path) -> None:
     base_has(w, {"REVIEW.md": "## Sensitive\n- `lib/**`; lenses: leak-hunter\n"})
     first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER], ids=("COR-1",))
-    w.commit({"lib/x.py": "x\n"})  # a sensitive path the first round did not hold: the sensitive set runs too
+    w.commit({"lib/x.py": "x\n"})  # a sensitive fix path: the sensitive set runs too
     code, p, err = plan(w)
     assert code == 0, err
     assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted([COR, GRD, LEAK])
@@ -821,18 +821,28 @@ def test_a_fix_bringing_in_a_new_sensitive_path_runs_the_sensitive_set(w: World,
     assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted([COR, CLM, GRD])
 
 
-def test_a_fix_to_a_sensitive_path_the_round_held_runs_only_what_it_answers(w: World, tmp_path: Path) -> None:
+def test_a_merge_of_main_does_not_count_main_s_sensitive_paths_as_reviewed(w: World, tmp_path: Path) -> None:
+    first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER], ids=("CLM-1",))
+    (w.seed / "hooks").mkdir()
+    merge_main(w, {"hooks/y.sh": "main's\n"})
+    w.commit({"hooks/y.sh": "the PR's own change\n"})
+    code, p, err = plan(w)
+    assert code == 0, err
+    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted([COR, CLM, GRD])
+
+
+def test_a_fix_to_a_sensitive_path_the_round_held_runs_the_sensitive_set_too(w: World, tmp_path: Path) -> None:
     first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER], ids=("CLM-1",))
     w.commit({"cloud/hooks/x.sh": "y\n"})
     code, p, err = plan(w)
     assert code == 0, err
-    assert p["round"] == "fix" and lenses_of(p) == [CLM]
+    assert p["round"] == "fix" and sorted(lenses_of(p)) == sorted([COR, CLM, GRD])
 
 
 def test_a_fix_round_after_a_pass_still_runs_correctness(w: World, tmp_path: Path) -> None:
     sha = w.commit({"cloud/hooks/x.sh": "x\n"})
     assert verdict(w, tmp_path, sha, SENSITIVE + [VER], "sensitive", "PASS").returncode == 0
-    head = w.commit({"cloud/hooks/x.sh": "y\n"})
+    head = w.commit({"src/app.py": "x = 2\n"})
     code, p, err = plan(w)
     assert code == 0 and p["round"] == "fix" and lenses_of(p) == [COR], (p, err)
     done = verdict(w, tmp_path, head, [CLM], "sensitive", "PASS", ids=())

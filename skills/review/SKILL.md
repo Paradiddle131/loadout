@@ -76,8 +76,8 @@ Done when every planned lens has returned its raw findings; remove the worktrees
 - A fix to code covers the finding's class (every place the same defect occurs) with a test that goes red without it; a fix to a claim says less (narrow or delete the sentence) and adds no new completeness claim.
 - A finding the verifier marks `patched, not fixed` (another case of a settled must-fix's class) sends its item to its rethink below, not to another patch; `verdict.sh` prints a notice when a block holds that line exactly.
 - Then steps 2 to 4 on the new commits only (`<reviewed>..<new head>`), each brief carrying the settled list, built from the earlier `🤖 Review` records: each finding's ids, its rank as that record posted it (on a record with a `Blocking:` line, a must-fix is one that line lists; on an older one, one its `## Must-fix` section holds), and the record's link (templates.md).
-  The lenses are what `plan.py` prints, from the PR's newest trusted `🤖 Review` record, when that record's depth is at least this round's (else the whole change is reviewed again):
-  - in `focused`, only each lens a must-fix on its `Blocking:` line came from (`correctness-reviewer` for an id that names no lens) and the lenses `REVIEW.md` names for the fix's paths;
+  The lenses are what `plan.py` prints, from the PR's newest trusted `🤖 Review` record, when that record's tier and depth are at least this round's (else the whole change is reviewed again):
+  - in `focused`, each lens a must-fix on its `Blocking:` line came from (`correctness-reviewer` for an id that names no lens), the lenses `REVIEW.md` names for the fix's paths, and the sensitive set when a fix path is sensitive;
   - in `full`, the whole set; in `light`, its one lens;
   - the verifier on every round.
 - A cycle is a fix round, a red stamp, or an integrate round (step 6); with a `must-fix` or red stamp still open:
