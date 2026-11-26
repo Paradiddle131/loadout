@@ -369,6 +369,13 @@ def test_trusted_record_refuses_malformed_or_disagreeing_records(body: str) -> N
                                                                     "reviewed": H2})
 
 
+def test_trusted_record_reads_an_owner_override() -> None:
+    body = GOOD.replace(" -->", " depth=light override=light -->", 1)
+    c = {"id": 1, "body": body, "author_association": "OWNER", "created_at": "t", "updated_at": "t"}
+    assert audit.trusted_record(c) == ("review", {"sha": H2, "state": "success", "tier": "standard", "reviewed": H2,
+                                                  "depth": "light", "override": "light"})
+
+
 def test_record_refuses_a_round_by_an_untrusted_or_edited_author_or_of_another_kind(github: dict, tmp_path: Path) -> None:
     comments = github["data"][f"repos/{REPO}/issues/7/comments"]
     url = f"https://api.github.com/repos/{REPO}/issues/7"

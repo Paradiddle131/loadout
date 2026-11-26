@@ -1,7 +1,7 @@
 # Review
 
 What the `review` skill's `tier.sh` reads for a change to this collection, from the default branch.
-Every repo that imports the collection runs what these paths hold, so a change to them takes the sensitive set (correctness-reviewer and guardrail-reviewer) and the lenses a line names.
+Every repo that imports the collection runs what these paths hold, so a first review of a change to them runs the sensitive set (correctness-reviewer and guardrail-reviewer) and the lenses a line names.
 
 ## Sensitive
 - `ways/**` — the standing practices every adopting repo follows; lenses: claims-auditor

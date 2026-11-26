@@ -29,8 +29,14 @@ ID = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
       "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
 
 
+TIER_DEPTH = {"routine": "none", "standard": "light", "sensitive": "focused"}  # each tier's built-in floor
+
+
 def record(kind: str, sha: str = HEAD, state: str = "success", tier: str = "standard",
-           depth: str | None = None) -> str:
+           depth: str | None = "floor") -> str:
+    """A record as verdict.sh posts it; a review's depth defaults to its tier's floor, and `depth=None` leaves it
+    out, as on a record from before review depths."""
+    depth = TIER_DEPTH[tier] if depth == "floor" else depth
     if kind == "gates":
         title, extra = f"🤖 Gates: {state}", []
     else:
@@ -680,8 +686,8 @@ def test_a_garbage_round_line_changes_nothing_on_a_good_line_two(fx: Fx, clone: 
 
 
 # The depth floor (skills/review/scripts/plan.py): the guard recomputes it for the head in a local clone and requires
-# no more. A change whose floor is `none` merges on its gates record alone; a record without `depth` is judged as
-# before depth existed.
+# no more. A change whose floor is `none` merges on its gates record alone; a review record without `depth` never
+# counts.
 
 
 def git_in(r: Path, *args: str) -> str:
@@ -830,7 +836,7 @@ def test_an_override_marker_out_of_shape_refuses_even_where_the_floor_would_not(
                                                                                  files: dict[str, str], tier: str,
                                                                                  marker: str) -> None:
     r, head, _ = change(tmp_path, fx, files)
-    body = record("review", sha=head, tier=tier).replace(" -->", marker, 1)
+    body = record("review", sha=head, tier=tier, depth=None).replace(" -->", marker, 1)
     fx.comments(comment(record("gates", sha=head)), comment(body))
     reason = mcp(fx, r, expectedHeadSha=head)
     assert reason and "malformed" in reason, reason
@@ -846,9 +852,9 @@ def test_an_override_never_lowers_the_tier(fx: Fx, tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("body", [
-    record("review").replace(" -->", " depth=deep -->", 1),
-    record("review").replace(" -->", " depth= -->", 1),
-    record("review").replace(" -->", " depth=light depth=full -->", 1),
+    record("review", depth=None).replace(" -->", " depth=deep -->", 1),
+    record("review", depth=None).replace(" -->", " depth= -->", 1),
+    record("review", depth=None).replace(" -->", " depth=light depth=full -->", 1),
 ])
 def test_a_malformed_depth_refuses(fx: Fx, clone: Path, body: str) -> None:
     fx.comments(comment(record("gates")), comment(body))
@@ -857,32 +863,50 @@ def test_a_malformed_depth_refuses(fx: Fx, clone: Path, body: str) -> None:
 
 
 def test_a_well_formed_depth_is_accepted_without_a_clone(fx: Fx, clone: Path) -> None:
-    fx.comments(comment(record("gates")), comment(record("review").replace(" -->", " depth=light -->", 1)))
+    fx.comments(comment(record("gates")), comment(record("review", depth=None).replace(" -->", " depth=light -->", 1)))
     assert mcp(fx, clone, expectedHeadSha=HEAD) is None
 
 
-# Records already on open PRs (two lines with no depth, or with the round line): exactly today's result.
+# A review record without depth (two lines, or with the round line, as posted before review depths) never counts,
+# whatever its tier, with a clone or without one.
 
 
 @pytest.mark.parametrize("shape", ["two-line", "round-line"])
-@pytest.mark.parametrize("files, tier, allowed", [
-    ({"src/app.py": "x = 2\n"}, "standard", True),
-    ({"src/app.py": "x = 2\n"}, "routine", False),
-    ({"docs/guide.md": "x\n"}, "routine", True),
-    ({"hooks/x.sh": "x\n"}, "standard", False),
-    ({"hooks/x.sh": "x\n"}, "sensitive", True),
+@pytest.mark.parametrize("files, tier", [
+    ({"src/app.py": "x = 2\n"}, "standard"),
+    ({"src/app.py": "x = 2\n"}, "sensitive"),
+    ({"hooks/x.sh": "x\n"}, "sensitive"),
 ])
-def test_records_without_depth_keep_todays_result(fx: Fx, tmp_path: Path, shape: str, files: dict[str, str],
-                                                  tier: str, allowed: bool) -> None:
+def test_a_record_without_depth_refuses(fx: Fx, tmp_path: Path, shape: str, files: dict[str, str],
+                                        tier: str) -> None:
     r, head, _ = change(tmp_path, fx, files)
-    gates, review = record("gates", sha=head), record("review", sha=head, tier=tier)
+    gates, review = record("gates", sha=head), record("review", sha=head, tier=tier, depth=None)
     if shape == "two-line":
         gates, review = without_round(gates), without_round(review)
     fx.comments(comment(gates), comment(review))
     reason = mcp(fx, r, expectedHeadSha=head)
-    assert (reason is None) is allowed, reason
+    assert reason and "carries no depth" in reason, reason
     done = check(fx, r, "--check", f"{REPO}#12")
-    assert (done.returncode == 0) is allowed, done.stderr
+    assert done.returncode == 1 and "carries no depth" in done.stderr, done.stderr
+
+
+def test_a_record_without_depth_refuses_without_a_clone(fx: Fx, clone: Path) -> None:
+    fx.comments(comment(record("gates")), comment(record("review", depth=None)))
+    reason = mcp(fx, clone, expectedHeadSha=HEAD)
+    assert reason and "carries no depth" in reason, reason
+
+
+def test_on_gates_alone_a_record_without_depth_holds_the_merge(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"docs/guide.md": "x\n"})
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, tier="routine", depth=None)))
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "carries no depth" in reason and "holds the merge" in reason, reason
+
+
+def test_a_record_without_depth_for_an_older_head_still_reads_as_older(fx: Fx, clone: Path) -> None:
+    fx.comments(comment(record("gates")), comment(record("review", sha=OLD, depth=None)))
+    reason = mcp(fx, clone, expectedHeadSha=HEAD)
+    assert reason and "older head" in reason and "carries no depth" not in reason, reason
 
 
 # On the gates-alone path the newest trusted review record still holds the merge unless it is an unedited, well-formed
@@ -921,14 +945,6 @@ def test_on_gates_alone_only_an_absent_older_or_counting_success_lets_gates_merg
     elif review == "success":
         cs.append(comment(record("review", sha=head, tier="routine", depth="none")))
     fx.comments(*cs)
-    assert mcp(fx, r, expectedHeadSha=head) is None
-
-
-def test_a_record_without_depth_is_judged_on_its_tier_alone(fx: Fx, tmp_path: Path) -> None:
-    # Records posted before depths existed sit on open PRs: none may become unmergeable.
-    r, head, _ = change(tmp_path, fx, {"src/app.py": "x = 2\n"},
-                        base={"REVIEW.md": "## Paths\n- `src/**`; depth: full\n"})
-    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head)))
     assert mcp(fx, r, expectedHeadSha=head) is None
 
 

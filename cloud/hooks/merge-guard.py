@@ -12,12 +12,12 @@ by the owner, a member or a collaborator whose first line is `🤖 Gates: <state
 PR's current head as a success. In a local clone holding the head and the default branch GitHub names, the review skill's
 `plan.py floor` (tier.sh's tier and the paths' depth floor) runs against that branch's tip as GitHub's branches API
 names it when the clone holds that commit, else against `origin/<that branch>`; a review below the paths' tier
-refuses, as does a record that carries a `depth` below the floor unless its `override` names that depth (the
-owner's override, which verdict.sh records with the owner's words; a record without `depth` is judged on its tier
-alone), and so does a check that fails or runs out of time; with no such clone the check is skipped. When the floor
-is `none` and it was computed against GitHub's tip, no review record is needed: the gates record alone lets the merge
-go when the newest trusted review record is absent, for an older head, or an unedited, well-formed success; an
-edited, malformed or failing one holds the merge. The merge must name the head checked (`expectedHeadSha`), so
+refuses, as does a record whose `depth` is below the floor unless its `override` names that depth (the owner's
+override, which verdict.sh records with the owner's words), and so does a check that fails or runs out of time; with
+no such clone the check is skipped. A review record without `depth` (one from before review depths) never counts.
+When the floor is `none` and it was computed against GitHub's tip, no review record is needed: the gates record
+alone lets the merge go when the newest trusted review record is absent, for an older head, or an unedited,
+well-formed success; an edited, malformed, depth-less or failing one holds the merge. The merge must name the head checked (`expectedHeadSha`), so
 GitHub refuses it if a push lands in between. A PR labelled `owner-merges`, in any case, is refused whatever
 its records (the merge is the owner's), here and in `--check`. `enable_pr_auto_merge` is refused.
 
@@ -189,6 +189,8 @@ def record_problem(kind: str, c: dict, head: str) -> tuple[str, dict]:
     if fields["sha"] != head:
         return (f"{where} is for {fields['sha']}, not the head {head}: a record for an older head does not "
                 "count"), {"older": True}
+    if kind == "review" and "depth" not in fields:
+        return (f"{where} carries no depth (it predates review depths), so its depth floor cannot be checked"), {}
     if state != "success":
         return f"{where} says {state}", {"state": state}
     return "", fields
@@ -311,7 +313,7 @@ def check_merge(repo: str | None, number: str | None, expected: str | None, cwd:
             problems.append(hint.lstrip("; ") if unpinned_none and review["tier"] == "routine" else
                             f"the review is {review['tier']} tier, but the head's paths make it {tier} "
                             "(skills/review/scripts/tier.sh); review it at that tier")
-        elif ("depth" in review and DEPTH[review["depth"]] < DEPTH[floor]
+        elif (DEPTH[review["depth"]] < DEPTH[floor]
               and review.get("override") != review["depth"]):
             problems.append(f"the review is depth {review['depth']}, but the head's paths need depth {floor} "
                             "(skills/review/scripts/plan.py); review it at that depth")

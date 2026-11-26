@@ -8,9 +8,9 @@
 #          [--depth none|light|focused|full] [--owner "<the owner's words>"] [--repost] [--dry-run]
 #   The round's plan is plan.py's, computed here from what GitHub names (the PR's head, its default branch and that
 #   branch's tip, the PR's newest trusted review record) and REVIEW.md on that tip; plan.py's header has the rules and
-#   the table of its inputs. --depth raises the plan's depth above the paths' floor, never below it but under --owner. Above routine,
-#   --reviewers must name every planned lens and finding-verifier, and each planned lens's --lens effort must be at
-#   least its planned effort; extra lenses are accepted. The depth goes on the marker (depth=), and depth, floor and
+#   the table of its inputs. --depth raises the plan's depth above the paths' floor, never below it, except under
+#   --owner (light at least). Above routine, --reviewers must name every planned lens and finding-verifier, and each
+#   planned lens's --lens effort must be at least its planned effort; extra lenses are accepted. The depth goes on the marker (depth=), and depth, floor and
 #   planned on the round line.
 #   --owner quotes the owner's instruction that set this round's depth (the review skill's owner override): --depth is
 #   then taken as given (light, focused or full), below the floor too; the marker carries override=<depth>, which
