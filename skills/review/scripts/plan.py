@@ -324,7 +324,7 @@ def make_plan(change: Change, prior: tuple[str, list[dict], str] | None, want: s
             why.append("full: a fix round reruns the whole set")
     else:
         prefixes = {x.strip().split("-", 1)[0] for b in prior[1] for x in b["ids"].split(",") if x.strip()}
-        lenses = {PREFIX.get(x, COR) for x in prefixes} | change.named(paths) or {COR}
+        lenses = {PREFIX.get(x, COR) for x in prefixes} | change.named(paths) or set()
         why.append("a fix round: the lenses whose must-fix it answers and those REVIEW.md names for its paths")
         covered = set(git("diff", "--name-only", "--no-renames", change.mb, since).splitlines())
         if any(change.rated[x]["tier"] == "sensitive" for x in paths if x not in covered):
