@@ -1193,6 +1193,23 @@ def test_verdict_refuses_an_unbumped_review_path_change_in_the_collection(w: Wor
     assert done.returncode == 2 and "version check refuses" in done.stderr and w.writes() == [], done.stderr
 
 
+@pytest.mark.parametrize("checker", [None, "#!/usr/bin/env python3\nraise SystemExit(0)\n"])
+def test_verdict_runs_the_default_branch_s_version_check_whatever_the_head_does_to_it(w: World, tmp_path: Path,
+                                                                                    checker: str | None) -> None:
+    as_the_collection(w)
+    w.commit({"skills/review/notes.md": "x\n"})  # unbumped, and the head deletes or disarms the checker
+    if checker is None:
+        w.git(w.repo, "rm", "-q", "bin/check-review-version")
+        w.git(w.repo, "commit", "-qm", "drop the checker")
+        w.push()
+    else:
+        w.commit({"bin/check-review-version": checker})
+    head = w.git(w.repo, "rev-parse", "HEAD")
+    done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head,
+                     "--file", review_file(tmp_path, head))
+    assert done.returncode == 2 and "version check refuses" in done.stderr and w.writes() == [], done.stderr
+
+
 def test_verdict_in_the_collection_passes_a_change_off_the_review_path(w: World) -> None:
     as_the_collection(w)
     w.commit({"docs/a.md": "x\n"})
