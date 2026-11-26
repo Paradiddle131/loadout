@@ -154,22 +154,34 @@ REPO_ROOT = SCRIPTS.parents[2]
 
 
 def review_python_files() -> list[Path]:
-    """Every Python file the review path runs: its scripts, their tests, the merge guard and the version check."""
-    found = sorted(SCRIPTS.glob("*.py")) + sorted((SCRIPTS / "tests").glob("*.py"))
-    found += [REPO_ROOT / "cloud/hooks/merge-guard.py", REPO_ROOT / "bin/check-review-version"]
-    return found
+    """Every Python file the repo tracks, which holds all the review path runs: `*.py` files and scripts whose first
+    line names python (the pre-commit hook's `bin/check-refs`, `bin/check-review-version` and the like)."""
+    tracked = subprocess.run(["git", "ls-files", "-z"], cwd=REPO_ROOT, capture_output=True, text=True,
+                             check=True).stdout.split("\0")
+    found = []
+    for name in filter(None, tracked):
+        f = REPO_ROOT / name
+        if not f.is_file():
+            continue
+        first = f.read_bytes()[:80].split(b"\n")[0]
+        if f.suffix == ".py" or (not f.suffix and first.startswith(b"#!") and b"python" in first):
+            found.append(f)
+    return sorted(found)
 
 
 def test_review_python_files_listed() -> None:
-    files = review_python_files()
-    assert {"plan.py", "record.py", "tiers.py", "blocking.py", "merge-guard.py"} <= {f.name for f in files}
-    assert all(f.is_file() for f in files), [str(f) for f in files if not f.is_file()]
+    names = {str(f.relative_to(REPO_ROOT)) for f in review_python_files()}
+    hook = (REPO_ROOT / ".githooks/pre-commit").read_text()
+    assert {"skills/review/scripts/plan.py", "cloud/hooks/merge-guard.py", "bin/check-review-version",
+            "bin/check-refs", "cloud/githooks/check-process-ids.py", "skills/report-kit/tests/build_fixture.py"} <= names
+    for run in ("bin/check-refs", "bin/check-review-version", "cloud/githooks/check-process-ids.py"):
+        assert run in hook and run in names, run  # every Python the pre-commit hook runs is parsed below
 
 
-@pytest.mark.skipif(UVX is None, reason="uvx not installed")
 def test_review_scripts_parse_on_oldest_python() -> None:
-    """Each file compiles under the oldest supported Python (nothing is written: compile() only parses)."""
-    assert UVX
+    """Each file compiles under the oldest supported Python (nothing is written: compile() only parses); a host
+    without uvx fails here rather than skipping, so a green run always means the files were parsed."""
+    assert UVX, "uvx is required to parse the repo's Python under the oldest supported version; install uv"
     code = ("import sys\n"
             "bad = []\n"
             "for f in sys.argv[1:]:\n"
@@ -185,6 +197,12 @@ def test_review_scripts_parse_on_oldest_python() -> None:
                           capture_output=True, text=True, timeout=240, cwd=SCRIPTS)
     assert done.stdout.startswith(f"({OLDEST_PYTHON.replace('.', ', ')})"), done.stdout + done.stderr
     assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_the_parse_test_fails_rather_than_skips_without_uvx(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(globals(), "UVX", None)
+    with pytest.raises(AssertionError, match="uvx is required"):
+        test_review_scripts_parse_on_oldest_python()
 
 
 # gate_stamp.sh
@@ -1077,6 +1095,8 @@ def test_verdict_refuses_a_reviewer_named_twice(w: World, tmp_path: Path) -> Non
     ("Dismissals: re-ran 2, promoted 1", [("dismissals", "2"), ("promoted", "1")]),
     ("  Dismissals: re-ran 0, promoted 0  ", [("dismissals", "0"), ("promoted", "0")]),
     ("Dismissals: re-ran 3, promoted 3", [("dismissals", "3"), ("promoted", "3")]),
+    # a settled record's line, quoted ahead of the verifier's own, is not read as a second one
+    ("> Dismissals: re-ran 5, promoted 2\nDismissals: re-ran 1, promoted 0", [("dismissals", "1"), ("promoted", "0")]),
 ])
 def test_verdict_adds_the_verifiers_dismissals(w: World, tmp_path: Path, line: str, pairs: list) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
@@ -1092,6 +1112,7 @@ def test_verdict_adds_the_verifiers_dismissals(w: World, tmp_path: Path, line: s
     ("", "has no `Dismissals:"),  # none in the header
     ("Dismissals: re-ran 0, promoted 7\n", "cannot exceed re-ran"),  # more promoted than re-ran
     ("Dismissals: re-ran 9, promoted 9\nDismissals: re-ran 0, promoted 0\n", "holds 2 Dismissals lines"),
+    ("Dismissals: re-ran 1, promoted 0\nDismissals: re-ran 1, promoted 0\n", "holds 2 Dismissals lines"),  # same twice
     ("```\nDismissals: re-ran 1, promoted 0\n```\n", "has no `Dismissals:"),  # only in a fence
 ])
 def test_verdict_refuses_a_missing_repeated_or_impossible_dismissals_line(w: World, tmp_path: Path, header: str,
@@ -1121,6 +1142,35 @@ def test_verdict_routine_carries_the_version_kit_and_depth_only(w: World) -> Non
     f = round_fields(w.comments()[0]["body"])
     assert [k for k, _ in f] == ["v", "kit", "depth", "floor", "planned"] and f[0][1] == skill_version()
     assert f[2:] == [("depth", "none"), ("floor", "none"), ("planned", "none")]
+
+
+def as_the_collection(w: World) -> None:
+    """Make `main` a clone of this collection as far as the version check reads it."""
+    files = {"bin/check-review-version": (REPO_ROOT / "bin/check-review-version").read_text(),
+             "skills/review/scripts/record.py": (SCRIPTS / "record.py").read_text(),
+             "skills/review/SKILL.md": "---\nname: review\nmetadata:\n  version: 1.0.0\n---\n"}
+    for name, text in files.items():
+        (w.seed / name).parent.mkdir(parents=True, exist_ok=True)
+        (w.seed / name).write_text(text)
+    w.git(w.seed, "add", "-A")
+    w.git(w.seed, "commit", "-qm", "the collection")
+    w.git(w.seed, "push", "-q", str(w.remote), "main")
+    w.git(w.repo, "fetch", "-q", "origin")
+    w.git(w.repo, "merge", "-q", "origin/main")
+
+
+def test_verdict_refuses_an_unbumped_review_path_change_in_the_collection(w: World) -> None:
+    as_the_collection(w)
+    w.commit({"skills/review/notes.md": "x\n"})
+    done = w.verdict("12", "--tier", "routine")
+    assert done.returncode == 2 and "version check refuses" in done.stderr and w.writes() == [], done.stderr
+
+
+def test_verdict_in_the_collection_passes_a_change_off_the_review_path(w: World) -> None:
+    as_the_collection(w)
+    w.commit({"docs/a.md": "x\n"})
+    done = w.verdict("12", "--tier", "routine")
+    assert done.returncode == 0, done.stderr
 
 
 def test_verdict_routine_takes_no_round_arguments(w: World) -> None:

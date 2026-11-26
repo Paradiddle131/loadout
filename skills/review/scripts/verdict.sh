@@ -25,6 +25,8 @@
 #   the verifier's `Dismissals: re-ran <n>, promoted <m>` line adds both numbers: an output whose header lacks it, holds
 #   two, or promotes more than it re-ran is refused.
 #   They go on the record's round line (record.py has its shape; the merge guard ignores it) and in a table below.
+#   In a clone of this collection (it holds bin/check-review-version), that check runs on the head first and
+#   refuses a review-path change whose version is not bumped.
 #   --repost posts an earlier round's verdict again on a head that differs from --reviewed only by clean merges of the
 #   default branch (the same --reviewers and output): no agent ran, so it takes no --cycle, --dupes, --nits or --lens,
 #   and its round line says repost=1 with no usage, so an audit counts that round's cost once.
@@ -175,6 +177,12 @@ for c in "$head" ${reviewed:+"$reviewed"}; do
 done
 
 paths=$(bash "$here/tier.sh" --base "origin/$default" --head "$head") || die "tier.sh could not read PR $pr's paths"
+# In a clone of this collection, the review path's version bump is checked here too, so a commit made without the
+# pre-commit hook (a file pushed through an API, a clone without core.hooksPath) cannot reach a record unbumped.
+if [ -f bin/check-review-version ] && [ -f skills/review/SKILL.md ]; then
+  bumped=$(python3 bin/check-review-version --base "origin/$default" --head "$head" 2>&1) ||
+    die "the review path's version check refuses PR $pr's head: $bumped"
+fi
 computed=${paths%%$'\n'*}
 # A routine record is accepted on a change whose depth floor is none (plan.py checked it), whatever its tier.
 [ "$tier" = routine ] || [ "$(rank "$tier")" -ge "$(rank "$computed")" ] ||
