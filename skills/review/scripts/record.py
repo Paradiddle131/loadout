@@ -170,6 +170,30 @@ def lens_spec(spec: str) -> dict:
             **{k: int(f[k]) for k in ("tokens", "seconds", "findings")}}
 
 
+FENCE_OPEN = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
+
+
+def fenced(lines: list[str]) -> list[bool]:
+    """Whether each line is inside a top-level fenced code block by CommonMark's fence rules: a fence line (one of them
+    included) opens with three or more backticks or tildes indented at most three spaces, a backtick fence's info string
+    holding no backtick, and closes only with a bare run of the same character at least as long. Containers are not
+    modelled: a fence that opens inside a list item, a block quote or an HTML block is read as a top-level one."""
+    out, fence = [], ""
+    for ln in lines:
+        m = FENCE_OPEN.fullmatch(ln)
+        if not fence:
+            if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+                fence = m.group(1)
+                out.append(True)
+                continue
+            out.append(False)
+        else:
+            out.append(True)
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip():
+                fence = ""
+    return out
+
+
 def dismissals(path: str | None) -> tuple[int, int] | None:
     """(re-ran, promoted) from the `Dismissals:` line of the verifier's header; None when it has none.
 
@@ -180,15 +204,9 @@ def dismissals(path: str | None) -> tuple[int, int] | None:
     if not path:
         return None
     found: list[tuple[int, int]] = []
-    fence = ""
-    for ln in stored(open(path, encoding="utf-8", errors="replace").read()).split("\n"):
-        if m := re.match(r"\s*(`{3,}|~{3,})", ln):
-            if not fence:
-                fence = m.group(1)
-            elif m.group(1).startswith(fence) and not ln.strip()[len(m.group(1)):].strip():
-                fence = ""
-            continue
-        if fence:
+    lines = stored(open(path, encoding="utf-8", errors="replace").read()).split("\n")
+    for ln, in_fence in zip(lines, fenced(lines)):
+        if in_fence:
             continue
         if re.match(r"\s*(Lens heads:|##)", ln):
             break
@@ -253,8 +271,9 @@ def review_round(a: argparse.Namespace) -> list[str]:
 # probe, deleted at once). Dropped: zero-width characters, bidirectional controls, the soft hyphen, the Mongolian
 # vowel separator, the invisible math operators and the interlinear annotation marks. Made a newline: CR, CRLF, VT,
 # FF, NEL, U+001C to U+001E and the line and paragraph separators. Made a space: U+001F and the Unicode spaces. Made
-# caret notation (`^A`, `^[`): the other C0 and C1 controls but tab and backspace. And a run of `!` right before a `[`
-# loses its `!`s wherever a `]` follows it later in the body (markdown image syntax), inside code fences too. A record
+# caret notation (`^A`, `^[`): U+0001 to U+0007, U+000E to U+001B and the C1 controls but NEL (NUL, backspace and
+# DEL were not seen changed; NUL was not probed). And a run of `!` right before a `[`
+# loses its `!`s where a `]` follows it in the same paragraph (markdown image syntax), inside code fences too. A record
 # holds such text only where it quotes a reviewer, so it is sent already as it will be stored: nothing changes on the
 # way, and the read-back matches. Every `![` becomes `! [`, which is kept wherever it stands.
 DROPPED = "\u200b\u200c\u200d\u2060\ufeff\u200e\u200f\u061c\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069" \
