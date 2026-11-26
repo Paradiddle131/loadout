@@ -4,14 +4,16 @@
   blocking.py <file>   prints how many must-fix findings the line lists; exits 2 with the reason when the line
                        is missing or malformed, names an id no `###` heading outside a code fence opens with, or a listed
                        finding names no harm
-  blocking.py --stored <file>
-                       prints the output as GitHub stores it (record.py § stored), the text verdict.sh greps
+  blocking.py --header <file>
+                       prints the output's `VERDICT:` and `Reviewed:` lines (an empty line for one it lacks): the first
+                       of each outside a code fence, read as GitHub stores the output (record.py § stored)
   blocking.py --patched <file>
                        prints `<ids> <settled id>` for each finding block, outside a code fence, holding the verifier's
                        `- class: patched, not fixed (<settled id>)` line: a re-raise of a settled must-fix's class
 
-The line is the one right after the output's `Reviewed:` line (agents/finding-verifier.md § Output); an output with
-two `VERDICT:`, `Reviewed:` or `Blocking:` lines outside a code fence is refused, so no decoy pair decides it:
+The line is the one right after the output's `Reviewed:` line (agents/finding-verifier.md § Output), the first outside
+a code fence; an output with two `VERDICT:`, `Reviewed:` or `Blocking:` lines outside a code fence is refused, and
+one in a fence is never read, so no decoy pair decides it:
   Blocking: none
   Blocking: [{"ids": "COR-1, CLM-2", "harm": "an operator trusts a total that drops rows"}, ...]
 Lines are split on newlines only and leading blanks are grep's in the C locale, which `verdict.sh` sets, so both
@@ -53,18 +55,29 @@ def no_harm(harm: object) -> bool:
 HEADER = re.compile(rf"^{WS}*(VERDICT|Reviewed|Blocking):")
 
 
+def unfenced(lines: list[str]) -> list[int]:
+    """The indexes of the lines outside a code fence (a fence line itself is in none)."""
+    out, fence = [], None
+    for i, ln in enumerate(lines):
+        mark = re.match(r"\s*(`{3,}|~{3,})", ln)
+        if mark:
+            fence = None if fence and mark.group(1)[0] == fence[0] else (fence or mark.group(1))
+        elif fence is None:
+            out.append(i)
+    return out
+
+
+def header_line(lines: list[str], word: str) -> int | None:
+    """The index of the first line outside a code fence that starts with `word:`: the verifier writes its header
+    there, so a header-shaped line quoted in a fence never stands in for it."""
+    return next((i for i in unfenced(lines) if (m := HEADER.match(lines[i])) and m.group(1) == word), None)
+
+
 def one_header(lines: list[str]) -> None:
     """ValueError when a `VERDICT:`, `Reviewed:` or `Blocking:` line stands twice outside a code fence: the first pair
     would decide the record while a second, below it, could list a must-fix (the verifier quotes such a line after
     `> `, agents/finding-verifier.md § Output)."""
-    seen: Counter = Counter()
-    fence = None
-    for ln in lines:
-        mark = re.match(r"\s*(`{3,}|~{3,})", ln)
-        if mark:
-            fence = None if fence and mark.group(1)[0] == fence[0] else (fence or mark.group(1))
-        elif fence is None and (m := HEADER.match(ln)):
-            seen[m.group(1)] += 1
+    seen: Counter = Counter(m.group(1) for i in unfenced(lines) if (m := HEADER.match(lines[i])))
     if twice := [k for k in ("VERDICT", "Reviewed", "Blocking") if seen[k] > 1]:
         raise ValueError(f"the output holds more than one `{twice[0]}:` line outside a code fence: only the verifier's "
                          "header starts a line so")
@@ -73,7 +86,7 @@ def one_header(lines: list[str]) -> None:
 def read(text: str) -> list[dict]:
     lines = text.split("\n")
     one_header(lines)
-    at = next((i for i, ln in enumerate(lines) if REVIEWED.match(ln)), None)
+    at = header_line(lines, "Reviewed")
     if at is None or at + 1 >= len(lines) or not (m := LINE.match(lines[at + 1])):
         raise ValueError("the line after `Reviewed:` is not a `Blocking:` line")
     value = m.group(1).strip("`").strip()
@@ -123,12 +136,15 @@ def patched(text: str) -> list[tuple[str, str]]:
 
 
 def main() -> int:
-    if len(sys.argv) == 3 and sys.argv[1] == "--stored":  # the text every reader of the output reads
+    if len(sys.argv) == 3 and sys.argv[1] == "--header":  # the header lines verdict.sh reads, as every reader does
         try:
-            sys.stdout.write(stored(open(sys.argv[2], encoding="utf-8", errors="replace", newline="").read()))
+            lines = stored(open(sys.argv[2], encoding="utf-8", errors="replace", newline="").read()).split("\n")
         except OSError as e:
             sys.stderr.write(f"{e}\n")
             return 2
+        for word in ("VERDICT", "Reviewed"):
+            at = header_line(lines, word)
+            print("" if at is None else lines[at])
         return 0
     if len(sys.argv) == 3 and sys.argv[1] == "--patched":
         try:
