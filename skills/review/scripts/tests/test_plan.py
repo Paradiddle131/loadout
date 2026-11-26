@@ -941,3 +941,18 @@ def test_a_prose_fix_after_a_pass_still_runs_a_lens(w: World, tmp_path: Path) ->
     w.commit({"docs/a.md": "x\n"})
     code, p, err = plan(w)
     assert code == 0 and p["round"] == "fix" and lenses_of(p) == [CLM] and p["verifier"] == VER, (p, err)
+
+
+def test_probe_launder(w: World, tmp_path: Path) -> None:
+    head = w.commit({"cloud/hooks/x.sh": "x\n"})
+    assert owner_round(w, tmp_path, head, result="PASS").returncode == 0
+    cs = w.comments()
+    body = cs[-1]["body"]
+    cs[-1]["body"] = "\n".join(l for l in body.split("\n") if not l.startswith("- Owner override:"))
+    print("STRIPPED HAS QUOTE:", "- Owner override:" in cs[-1]["body"])
+    (w.fx / "comments.json").write_text(json.dumps(cs))
+    merge_main(w)
+    done = w.verdict("12", "--tier", "sensitive", "--reviewers", f"{COR}, {VER}", "--reviewed", head,
+                     "--file", review_file(tmp_path, head), "--repost", cost=False)
+    print("RC:", done.returncode, done.stderr.strip()[:200])
+    print("NEW:", [l for l in w.comments()[-1]["body"].split("\n") if "override" in l.lower()])
