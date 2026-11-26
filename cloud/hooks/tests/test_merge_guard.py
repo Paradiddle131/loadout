@@ -1157,3 +1157,46 @@ def test_owner_words_in_a_record_s_first_three_lines_do_not_count(fx: Fx, tmp_pa
     fx.comments(comment(record("gates", sha=head)), comment("\n".join(lines)))
     reason = mcp(fx, r, expectedHeadSha=head)
     assert reason and "quoting the owner's words" in reason, reason
+
+
+def guard_with_clones(tmp_path: Path, clones: Path) -> Path:
+    """A copy of the guard whose CLONES is `clones`, beside the review scripts it runs."""
+    copy = tmp_path / "copy"
+    if not copy.exists():
+        shutil.copytree(GUARD.parents[2] / "skills" / "review" / "scripts", copy / "skills" / "review" / "scripts")
+    guard = copy / "cloud" / "hooks" / "merge-guard.py"
+    guard.parent.mkdir(parents=True, exist_ok=True)
+    text = GUARD.read_text()
+    assert 'CLONES = Path("/home/user")' in text
+    guard.write_text(text.replace('CLONES = Path("/home/user")', f"CLONES = Path({str(clones)!r})", 1))
+    return guard
+
+
+def test_the_session_s_own_clone_rating_is_kept_over_a_same_named_folder(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"src/app.py": "x = 2\n"})
+    clones = tmp_path / "clones"
+    clones.mkdir()
+    shutil.copytree(r, clones / "example-repo")  # a folder of the repo's name that holds another repo's clone
+    git_in(clones / "example-repo", "remote", "set-url", "origin", "https://github.com/other-owner/example-repo.git")
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head)))
+    event = {"tool_name": "mcp__github__merge_pull_request", "cwd": str(r),
+             "tool_input": {"owner": "example-owner", "repo": "example-repo", "pullNumber": 12, "expectedHeadSha": head}}
+    done = run_copy(fx, guard_with_clones(tmp_path, clones), event)
+    assert done.returncode == 0 and done.stdout.strip() == "", done.stdout + done.stderr
+
+
+def test_the_exactly_spelled_clone_folder_is_rated_first(fx: Fx, tmp_path: Path) -> None:
+    # Two clones of the repo hold the head, against their own copies of main (GitHub's tip is not pinned): the exact
+    # spelling's says the change touches a hook (sensitive), the other's says nothing changed. A standard review
+    # passes only by the second, so the merge is refused only when the exact spelling is read first.
+    r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"}, pin=False)
+    clones = tmp_path / "clones"
+    clones.mkdir()
+    shutil.copytree(r, clones / "Example-Repo")
+    r.rename(clones / "example-repo")
+    git_in(clones / "Example-Repo", "update-ref", "refs/remotes/origin/main", head)
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, tier="standard")))
+    event = {"tool_name": "mcp__github__merge_pull_request", "cwd": str(tmp_path),  # above the clones
+             "tool_input": {"owner": "example-owner", "repo": "example-repo", "pullNumber": 12, "expectedHeadSha": head}}
+    done = run_copy(fx, guard_with_clones(tmp_path, clones), event)
+    assert done.returncode == 0 and "make it sensitive" in done.stdout, done.stdout + done.stderr
