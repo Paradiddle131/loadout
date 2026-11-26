@@ -13,6 +13,11 @@ back on the PRs, and sums both up. GitHub holds every record; the JSONL files ar
       writes <dir>/sample.jsonl and prints one line per pick.
   audit.py record --repo <owner/name> --pr <n> --session <id> --file <judgments.json> [--backfill] [--dry-run]
       posts one `🤖 Audit` record on the PR: a table for people and the judgments as a JSON block.
+  audit.py escapes --dir <dir> --clone <path> [--days <n>] [--branch <ref>]
+      reads, never writes but <dir>/escapes.jsonl: for each harvested PR merged on a passing review, the commits on
+      the branch's first-parent line (default origin/main) within --days (30) of its merge that change or delete a
+      line the PR added, by `git blame` on each such commit's parent; each is a candidate escape, never a finding,
+      until an auditor confirms it. The clone must hold full history (not shallow).
   audit.py summary --dir <dir> [--session <id>] [--json]
       prints the batch's numbers: rounds, passes, convergence, lens yield and, from the audits, how often a
       checkable finding was wrong or mattered and a must-fix was ranked too high, each with its 95% interval,
@@ -205,7 +210,7 @@ def harvest(a: argparse.Namespace) -> int:
             n = pr["number"]
             row = {"repo": repo, "pr": n, "title": pr["title"], "state": pr["state"],
                    "created_at": pr["created_at"], "merged_at": pr.get("merged_at"),
-                   "head": pr["head"]["sha"], "branch": pr["head"]["ref"]}
+                   "head": pr["head"]["sha"], "branch": pr["head"]["ref"], "merge_commit": pr.get("merge_commit_sha")}
             rows["prs"].append(row)
             newest = None  # the newest trusted comment with a review marker line, picked as the merge guard picks it
             for c in pages(f"repos/{repo}/issues/{n}/comments"):
@@ -279,13 +284,86 @@ def harvest(a: argparse.Namespace) -> int:
             # (as the guard matches it), or "refused" when that record would not count
             nrec = trusted_record(newest) if newest else None
             row["guard_review"] = (None if newest is None else
-                                   {"state": nrec[1]["state"], "sha": nrec[1]["sha"]} if nrec and nrec[0] == "review"
+                                   {"state": nrec[1]["state"], "sha": nrec[1]["sha"], "depth": nrec[1].get("depth")}
+                                   if nrec and nrec[0] == "review"
                                    else "refused")
     for name in ("prs", "gates", "rounds", "findings", "audits"):
         with open(out / f"{name}.jsonl", "w", encoding="utf-8") as fh:
             for r in rows[name]:
                 fh.write(json.dumps(r, ensure_ascii=False) + "\n")
         print(f"{name}: {len(rows[name])}")
+    return 0
+
+
+def git_out(clone: str, *args: str) -> str:
+    return subprocess.run(["git", "-C", clone, *args], capture_output=True, text=True, check=True).stdout
+
+
+def touched_lines(clone: str, commit: str) -> dict[str, list[tuple[int, int]]]:
+    """The old-side line ranges (start, count) each file loses or changes in `commit` against its first parent."""
+    out: dict[str, list[tuple[int, int]]] = defaultdict(list)
+    path = None
+    for ln in git_out(clone, "diff", "-U0", "--no-renames", f"{commit}^1", commit).split("\n"):
+        if ln.startswith("--- "):
+            path = None if ln == "--- /dev/null" else ln[6:]  # strip "--- a/"
+        elif ln.startswith("@@") and path and (m := re.match(r"@@ -(\d+)(?:,(\d+))?", ln)):
+            start, count = int(m.group(1)), int(m.group(2) if m.group(2) is not None else 1)
+            if count:
+                out[path].append((start, count))
+    return out
+
+
+def escape_candidates(clone: str, pr_commits: set[str], merge: str, branch: str, days: int) -> list[dict]:
+    """Commits on `branch`'s first-parent line within `days` of `merge` that change lines one of `pr_commits` wrote."""
+    when = int(git_out(clone, "show", "-s", "--format=%ct", merge).strip())
+    later = git_out(clone, "rev-list", "--first-parent", "--reverse", f"{merge}..{branch}").split()
+    found = []
+    for c in later:
+        at = int(git_out(clone, "show", "-s", "--format=%ct", c).strip())
+        if at > when + days * 86400:
+            break
+        hits: dict[str, int] = {}
+        for path, ranges in touched_lines(clone, c).items():
+            for start, count in ranges:
+                blame = git_out(clone, "blame", "--porcelain", "-L", f"{start},+{count}", f"{c}^1", "--", path)
+                n = sum(1 for ln in blame.split("\n") if re.match(r"[0-9a-f]{40} \d+ \d+", ln)
+                        and ln.split()[0] in pr_commits)
+                if n:
+                    hits[path] = hits.get(path, 0) + n
+        if hits:
+            found.append({"fix": c, "days": round((at - when) / 86400, 1), "files": sorted(hits),
+                          "lines": sum(hits.values())})
+    return found
+
+
+def escapes(a: argparse.Namespace) -> int:
+    d = Path(a.dir)
+    if not (d / "prs.jsonl").exists():
+        sys.exit(f"audit.py: {a.dir} holds no harvest; run `audit.py harvest --out {a.dir}` first")
+    if git_out(a.clone, "rev-parse", "--is-shallow-repository").strip() == "true":
+        sys.exit(f"audit.py: {a.clone} is a shallow clone, so blame cannot see who wrote a line; fetch its history "
+                 "(`git fetch --unshallow`) first")
+    rows = []
+    for p in load(d, "prs"):
+        g, merge = p.get("guard_review"), p.get("merge_commit")
+        if not (p.get("merged_at") and merge and isinstance(g, dict) and g.get("state") == "success"):
+            continue
+        try:
+            first = git_out(a.clone, "rev-parse", f"{merge}^1").strip()
+            pr_commits = set(git_out(a.clone, "rev-list", f"{first}..{merge}").split())
+            found = escape_candidates(a.clone, pr_commits, merge, a.branch, a.days)
+        except subprocess.CalledProcessError as exc:
+            print(f"{p['repo']}#{p['pr']}: skipped, git failed ({(exc.stderr or '').strip()[:120]})", file=sys.stderr)
+            continue
+        rows.append({"repo": p["repo"], "pr": p["pr"], "merge_commit": merge, "depth": g.get("depth"),
+                     "candidates": found})
+        for f in found:
+            print(f"{p['repo']}#{p['pr']}: candidate {f['fix'][:12]} after {f['days']} days, {f['lines']} line(s) "
+                  f"in {', '.join(f['files'])}")
+    with open(d / "escapes.jsonl", "w", encoding="utf-8") as fh:
+        for r in rows:
+            fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+    print(f"escapes: {len(rows)} merged on a pass, {sum(bool(r['candidates']) for r in rows)} with a candidate")
     return 0
 
 
@@ -445,6 +523,12 @@ def summarize(d: Path, session: str | None) -> dict:
                  and any(key({**f, "round": f["round"]}) == (j["repo"], j["pr"], j["round"], tuple(j["ids"]))
                          and f["must_fix"] for f in finds)]
     checkable = [j for j in audits if j.get("correct") in ("yes", "no")]
+    version_of = {(r["repo"], r["pr"]): r.get("v") or UNSTAMPED for r in rounds}  # the newest round's, as sorted
+    esc: dict[str, dict] = defaultdict(lambda: {"passed_merges": 0, "with_candidate": 0})
+    for e in load(d, "escapes") if (d / "escapes.jsonl").exists() else []:
+        for k in (f"depth {e.get('depth') or UNSTAMPED}", f"v {version_of.get((e['repo'], e['pr']), UNSTAMPED)}"):
+            esc[k]["passed_merges"] += 1
+            esc[k]["with_candidate"] += bool(e["candidates"])
     merged = [c for c in changes if c["merged"]]
     return {**_costs(rounds, by_pr),
         "rounds": len(rounds), "changes": len(changes),
@@ -463,6 +547,7 @@ def summarize(d: Path, session: str | None) -> dict:
         "must_fix_too_high": wilson(sum(j["rank"] == "too-high" for j in judged_mf), len(judged_mf)),
         "must_fix_wording": wilson(sum(j.get("kind") == "wording" for j in judged_mf), len(judged_mf)),
         "too_low": sum(j.get("rank") == "too-low" for j in audits),
+        "escape_candidates": dict(sorted(esc.items())),
         "attention": [c for c in changes if c["grew"] or c["merged_without_pass"] or c["steered_rounds"]],
         "series": changes,
     }
@@ -555,6 +640,10 @@ def summary(a: argparse.Namespace) -> int:
     print("\n| Depth | Rounds |\n|---|---|")
     for k, v in s["depth"].items():
         print(f"| {k} | {v} |")
+    if s["escape_candidates"]:
+        print("\n| Escape candidates by | Merged on a pass | With a later fix to their lines |\n|---|---|---|")
+        for k, v in s["escape_candidates"].items():
+            print(f"| {k} | {v['passed_merges']} | {v['with_candidate']} |")
     print("\n| Needs a look | Rounds | Must-fix per round | Why |\n|---|---|---|---|")
     for c in s["attention"]:
         why = [w for w, on in (("grew", c["grew"]), ("merged without a pass", c["merged_without_pass"]),
@@ -592,12 +681,17 @@ def main() -> int:
     r.add_argument("--file", required=True)
     r.add_argument("--backfill", action="store_true")
     r.add_argument("--dry-run", action="store_true")
+    e = sub.add_parser("escapes")
+    e.add_argument("--dir", required=True)
+    e.add_argument("--clone", required=True)
+    e.add_argument("--days", type=int, default=30)
+    e.add_argument("--branch", default="origin/main")
     m = sub.add_parser("summary")
     m.add_argument("--dir", required=True)
     m.add_argument("--session")
     m.add_argument("--json", action="store_true")
     a = p.parse_args()
-    return {"harvest": harvest, "sample": sample, "record": record, "summary": summary}[a.cmd](a)
+    return {"harvest": harvest, "sample": sample, "record": record, "escapes": escapes, "summary": summary}[a.cmd](a)
 
 
 if __name__ == "__main__":

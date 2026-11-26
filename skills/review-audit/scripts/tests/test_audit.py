@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -884,3 +885,69 @@ def test_summary_groups_findings_by_the_effort_their_lens_ran_at(github: dict, t
     # COR-1, CLM-2 is one must-fix raised by a high and a medium lens; CLM-3 a nit from the medium one.
     assert s["effort"] == {"high": {"must_fix": 1}, "medium": {"must_fix": 1, "other": 1}}
     assert s["depth"] == {"focused": 1, "unstamped": 1}
+
+
+# escapes: later fixes to lines a passed PR added (candidates only)
+
+
+def git_at(r: Path, *args: str, when: str | None = None) -> str:
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t",
+           "GIT_COMMITTER_EMAIL": "t@example.com"}
+    if when:
+        env |= {"GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}
+    return subprocess.run(["git", *args], cwd=r, capture_output=True, text=True, check=True, env=env).stdout.strip()
+
+
+def history(tmp: Path) -> tuple[Path, str]:
+    """main: a base file; PR 7 merged (a merge commit) adding two lines; then a fix to one of them after 3 days, a
+    change to a base line after 4 days, and a fix to the other PR line after 40 days."""
+    r = tmp / "clone"
+    r.mkdir()
+    git_at(r, "init", "-q", "-b", "main")
+    (r / "app.py").write_text("base = 1\n")
+    git_at(r, "add", ".")
+    git_at(r, "commit", "-qm", "base", when="2030-01-01T00:00:00Z")
+    git_at(r, "switch", "-q", "-c", "feature")
+    (r / "app.py").write_text("base = 1\nadded = 2\nalso = 3\n")
+    git_at(r, "commit", "-qam", "feature", when="2030-01-02T00:00:00Z")
+    git_at(r, "switch", "-q", "main")
+    git_at(r, "merge", "-q", "--no-ff", "-m", "merge PR 7", "feature", when="2030-01-03T00:00:00Z")
+    merge = git_at(r, "rev-parse", "HEAD")
+    (r / "app.py").write_text("base = 1\nadded = 20\nalso = 3\n")
+    git_at(r, "commit", "-qam", "fix added", when="2030-01-06T00:00:00Z")
+    (r / "app.py").write_text("base = 10\nadded = 20\nalso = 3\n")
+    git_at(r, "commit", "-qam", "change base", when="2030-01-07T00:00:00Z")
+    (r / "app.py").write_text("base = 10\nadded = 20\nalso = 30\n")
+    git_at(r, "commit", "-qam", "late fix", when="2030-02-12T00:00:00Z")
+    return r, merge
+
+
+def test_escapes_lists_a_later_fix_to_a_passed_pr_s_lines_within_the_window(tmp_path: Path) -> None:
+    r, merge = history(tmp_path)
+    d = tmp_path / "h"
+    d.mkdir()
+    (d / "prs.jsonl").write_text(json.dumps({"repo": REPO, "pr": 7, "merged_at": "2030-01-03T00:00:00Z",
+                                             "merge_commit": merge,
+                                             "guard_review": {"state": "success", "sha": "x", "depth": "light"}})
+                                 + "\n" + json.dumps({"repo": REPO, "pr": 8, "merged_at": None, "merge_commit": None,
+                                                      "guard_review": None}) + "\n")
+    ns = audit.argparse.Namespace(dir=str(d), clone=str(r), days=30, branch="main")
+    assert audit.escapes(ns) == 0
+    [row] = rows(d, "escapes")
+    assert row["pr"] == 7 and row["depth"] == "light"
+    [c] = row["candidates"]
+    assert c["fix"] == git_at(r, "rev-parse", "HEAD~2") and c["lines"] == 1 and c["files"] == ["app.py"]
+    (d / "rounds.jsonl").write_text("")
+    s = audit.summarize(d, None)
+    assert s["escape_candidates"]["depth light"] == {"passed_merges": 1, "with_candidate": 1}
+
+
+def test_escapes_refuses_a_shallow_clone(tmp_path: Path) -> None:
+    r, _ = history(tmp_path)
+    shallow = tmp_path / "shallow"
+    git_at(tmp_path, "clone", "-q", "--depth", "1", f"file://{r}", str(shallow))
+    d = tmp_path / "h"
+    d.mkdir()
+    (d / "prs.jsonl").write_text("")
+    with pytest.raises(SystemExit, match="shallow"):
+        audit.escapes(audit.argparse.Namespace(dir=str(d), clone=str(shallow), days=30, branch="main"))
