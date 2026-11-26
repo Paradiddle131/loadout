@@ -25,7 +25,7 @@ aside):
 | Default branch tip | `gh api repos/<r>/branches/<name>`, `.commit.sha`; then `git fetch --force origin +refs/heads/<name>:refs/remotes/origin/<name>` | GitHub (the sha), the remote (the objects) | the forced fetch overwrites a locally moved ref; a fetched tip other than GitHub's sha refuses |
 | Changed paths | `git diff --name-only --no-renames $(git merge-base <tip> <head>) <head>` | the two shas above | computed from content-addressed commits only |
 | Policy | `REVIEW.md` at the tip, parsed by tiers.py (tier.sh's parser), and the tip's instruction imports | the default branch on the remote | the change's own `REVIEW.md` is never read; an unparsable one rates every path sensitive; no line lowers a path below the built-in floor or below `## Sensitive` |
-| Previous round | `gh api repos/<r>/issues/<n>/comments`, paged by hand: the newest review-marker comment by the owner, a member or a collaborator | a trusted record on the PR | used only when unedited, in verdict.sh's exact shape, at or above the change's tier and this round's depth, its raw output's first `Reviewed:` naming its `reviewed=`, its `Blocking:` line readable, and `reviewed=` an ancestor of the head and not of the merge-base; else a first review (the widest plan); an older record is never used in its place; untrusted authors are ignored |
+| Previous round | `gh api repos/<r>/issues/<n>/comments`, paged by hand: the newest review-marker comment by the owner, a member or a collaborator | a trusted record on the PR | used only when unedited, in verdict.sh's exact shape, at or above the change's tier and this round's depth, its raw output's header (blocking.py's: its first lines, no other header-shaped line in it) naming its `reviewed=` and its `Blocking:` line readable, and `reviewed=` an ancestor of the head and not of the merge-base; else a first review (the widest plan); an older record is never used in its place; untrusted authors are ignored |
 | Answered lenses | that record's `Blocking:` ids, by their first part | a trusted record | a part that names no lens plans correctness-reviewer; the record narrows only when its tier and depth are at least this round's |
 | `--depth` | the lead's argument | the lead | the depth is the higher of it and the floor; one below the floor refuses, unless `--owner` is passed |
 | `--owner` | the lead's argument, quoting the owner's instruction | the owner, by the review skill's rule | sets the depth to `--depth` exactly (light at least), recorded as `override=` with the quote; a later round narrows from it only at no greater depth |
@@ -258,13 +258,12 @@ def prior_round(c: dict | None, change: Change) -> tuple[str, list[dict], str] |
     if not raw:
         return None
     text = raw.group(2)
-    first = next((ln for ln in text.split("\n") if blocking.REVIEWED.match(ln)), "")
-    named = REVIEWED_SHA.match(first)
-    if not named or not f["reviewed"].startswith(named.group(1)):
-        return None
-    try:
+    try:  # the header verdict.sh read: the output's first lines, any other header-shaped line refusing it
         items = blocking.read(text)
+        named = REVIEWED_SHA.match(blocking.header(text.split("\n"))[1][1])
     except ValueError:
+        return None
+    if not named or not f["reviewed"].startswith(named.group(1)):
         return None
     reviewed = f["reviewed"]
     if (run("git", "cat-file", "-e", f"{reviewed}^{{commit}}").returncode or reviewed == change.head
