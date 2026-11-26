@@ -1187,8 +1187,9 @@ def test_the_session_s_own_clone_rating_is_kept_over_a_same_named_folder(fx: Fx,
 
 def test_the_exactly_spelled_clone_folder_is_rated_first(fx: Fx, tmp_path: Path) -> None:
     # Two clones of the repo hold the head, against their own copies of main (GitHub's tip is not pinned): the exact
-    # spelling's says the change touches a hook (sensitive), the other's says nothing changed. A standard review
-    # passes only by the second, so the merge is refused only when the exact spelling is read first.
+    # spelling's rates the change sensitive (it touches a hook), the other's finds nothing changed and fails to rate.
+    # The refusal names the sensitive tier only when the exact spelling is read first; read the other way, the guard
+    # refuses for another cause. This pins the order, not a safety property.
     r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"}, pin=False)
     clones = tmp_path / "clones"
     clones.mkdir()

@@ -46,8 +46,8 @@
 #   words or more not made only of blocking.py's filler words. The lead acts on the line (the review skill).
 #   A finding block's `- class: patched, not fixed (<settled id>)` line prints a notice on stderr, never a refusal.
 #   --tier routine needs no reviewer: --reviewers, --reviewed and --file are optional, --result defaults to pass
-#   (with --file, which then needs --reviewed, the verifier output is checked as on every tier, its header and its
-#   `Blocking:` line, and its VERDICT line decides the result),
+#   (with --file, which then needs --reviewed, the verifier output is checked as on every tier, its header with its
+#   `Dismissals:` line and its `Blocking:` line, and its VERDICT line decides the result),
 #   the comment says the tier needs gates only, and the session that wrote the change may run it, since the
 #   paths decide the tier. It is accepted whenever the paths' depth floor is none (a routine change, or a standard
 #   one a REVIEW.md line or `Depth: none` lets merge on gates alone), and records depth=none; such a change needs
@@ -166,6 +166,14 @@ if [ "$tier" != routine ]; then
   }
   rm -f "$why"
 else
+  if [ -n "$output" ]; then  # the header's Dismissals line, which review-round checks above routine
+    why=$(mktemp)
+    python3 "$here/record.py" dismissals "$file" >/dev/null 2>"$why" || {
+      reason=$(cat "$why"); rm -f "$why"
+      die "${reason#record.py: }"
+    }
+    rm -f "$why"
+  fi
   [ -z "$reviewed" ] || [[ "$reviewed" =~ ^[0-9a-f]{40}$ ]] || die "--reviewed is a full sha"
   [ -z "$cycle$dupes$nits$repost" ] && [ ${#lens[@]} = 0 ] ||
     die "the routine tier runs no reviewer, so it takes no --cycle, --dupes, --nits, --lens or --repost."

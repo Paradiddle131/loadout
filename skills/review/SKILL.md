@@ -2,7 +2,7 @@
 name: review
 description: "Use before any change lands on a default branch, in any repo, attended or unattended: tier the change, stamp its gates, run fresh reviewers, verify their findings, fix, record the verdict, merge."
 metadata:
-  version: 15.0.0
+  version: 16.0.0
 ---
 
 # Review
@@ -100,7 +100,7 @@ Done when every planned lens has returned its raw findings; remove the worktrees
 - Above `routine` it takes the result from the output's header, its first lines: the first non-blank line `VERDICT:`, then `Reviewed:`, then `Blocking:`; it refuses an output that does not open with them, one whose lines name a commit other than `--reviewed`, one whose `Blocking:` line (right after `Reviewed:`) is missing, lists a must-fix whose harm is missing, under two words or made only of `blocking.py`'s filler words, or whose id opens no `###` line below it, fenced or not, lists none on a `FAIL` or any on a `PASS`, and a `--result` that contradicts its verdict.
 - It reads and posts the output as GitHub stores a comment (`record.py § stored` lists each rewrite), so a record holds the verifier's output as GitHub keeps it, not byte for byte: format characters such as zero-width and bidirectional ones are dropped, line-break, space and control characters are normalised, and every `![` reads `! [`.
   It refuses an output with any other line that starts with `VERDICT:`, `Reviewed:` or `Blocking:`, wherever it stands, in a code fence or indented too.
-- It posts the output as a PR comment that starts with `🤖` and names the reviewed commit and the head, as the `🤖 Review` record: `success` when the verifier's `VERDICT` line says `PASS` (for `routine`, when `--result` is `pass`, its default; given a `--file`, which then needs `--reviewed`, the output is checked as on every tier, its header and its `Blocking:` line, and its `VERDICT` line decides).
+- It posts the output as a PR comment that starts with `🤖` and names the reviewed commit and the head, as the `🤖 Review` record: `success` when the verifier's `VERDICT` line says `PASS` (for `routine`, when `--result` is `pass`, its default; given a `--file`, which then needs `--reviewed`, the output is checked as on every tier, its header with its `Dismissals:` line and its `Blocking:` line, and its `VERDICT` line decides).
 - Above `routine` it also takes the round's cost and shape, refusing a malformed or missing value: `--reviewers` names every agent that ran, the verifier included; `--cycle <n>` (1 for a first review), `--dupes <n>` (findings the verifier merged), `--nits <n>`, and one `--lens "<name> model=<m> effort=<e> tokens=<n> seconds=<n> findings=<n>"` per agent named there and no other, copied from the usage the harness printed when that agent returned (total tokens; duration in ms / 1000, rounded; findings raised, or kept for the verifier).
   The must-fix count comes from the `Blocking:` line, and the verifier's `Dismissals: re-ran <n>, promoted <m>` line in its header adds both numbers; it refuses an output whose header has no such line, two of them, or more promoted than re-ran.
   Re-posting a verdict after a clean merge of the default branch (step 6) takes `--repost` in place of that usage: no reviewer ran, so the record carries none.
