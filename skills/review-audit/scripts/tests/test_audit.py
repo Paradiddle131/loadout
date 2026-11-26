@@ -931,7 +931,7 @@ def test_escapes_lists_a_later_fix_to_a_passed_pr_s_lines_within_the_window(tmp_
                                              "guard_review": {"state": "success", "sha": "x", "depth": "light"}})
                                  + "\n" + json.dumps({"repo": REPO, "pr": 8, "merged_at": None, "merge_commit": None,
                                                       "guard_review": None}) + "\n")
-    ns = audit.argparse.Namespace(dir=str(d), clone=str(r), days=30, branch="main")
+    ns = audit.argparse.Namespace(dir=str(d), clone=[f"{REPO}={r}"], days=30, branch="main")
     assert audit.escapes(ns) == 0
     [row] = rows(d, "escapes")
     assert row["pr"] == 7 and row["depth"] == "light"
@@ -939,7 +939,7 @@ def test_escapes_lists_a_later_fix_to_a_passed_pr_s_lines_within_the_window(tmp_
     assert c["fix"] == git_at(r, "rev-parse", "HEAD~2") and c["lines"] == 1 and c["files"] == ["app.py"]
     (d / "rounds.jsonl").write_text("")
     s = audit.summarize(d, None)
-    assert s["escape_candidates"]["depth light"] == {"passed_merges": 1, "with_candidate": 1}
+    assert s["escape_candidates"]["depth light"] == {"passed_merges": 1, "with_candidate": 1, "skipped": 0}
 
 
 def test_escapes_refuses_a_shallow_clone(tmp_path: Path) -> None:
@@ -950,4 +950,107 @@ def test_escapes_refuses_a_shallow_clone(tmp_path: Path) -> None:
     d.mkdir()
     (d / "prs.jsonl").write_text("")
     with pytest.raises(SystemExit, match="shallow"):
-        audit.escapes(audit.argparse.Namespace(dir=str(d), clone=str(shallow), days=30, branch="main"))
+        audit.escapes(audit.argparse.Namespace(dir=str(d), clone=[f"{REPO}={shallow}"], days=30, branch="main"))
+
+
+def escapes_of(tmp: Path, r: Path, prs: list[dict], rounds: list[dict] | None = None) -> tuple[list[dict], dict]:
+    d = tmp / "h"
+    d.mkdir(exist_ok=True)
+    (d / "prs.jsonl").write_text("".join(json.dumps(p) + "\n" for p in prs))
+    (d / "rounds.jsonl").write_text("".join(json.dumps(x) + "\n" for x in rounds or []))
+    assert audit.escapes(audit.argparse.Namespace(dir=str(d), clone=[f"{REPO}={r}"], days=30, branch="main")) == 0
+    return rows(d, "escapes"), audit.summarize(d, None)
+
+
+def passed(pr: int, merge: str, depth: str = "light", **extra: object) -> dict:
+    return {"repo": REPO, "pr": pr, "merged_at": "x", "merge_commit": merge,
+            "guard_review": {"state": "success", "sha": "x", "depth": depth}, **extra}
+
+
+def one_file_history(tmp: Path, name: str, base: str, fix: str) -> tuple[Path, str]:
+    """main: `base` in `name`; a merge commit adds `added = 2`; a later commit writes `fix`."""
+    r = tmp / "clone"
+    r.mkdir()
+    git_at(r, "init", "-q", "-b", "main")
+    (r / name).write_text(base)
+    git_at(r, "add", ".")
+    git_at(r, "commit", "-qm", "base", when="2030-01-01T00:00:00Z")
+    git_at(r, "switch", "-q", "-c", "feature")
+    (r / name).write_text(base + "added = 2\n")
+    git_at(r, "commit", "-qam", "feature", when="2030-01-02T00:00:00Z")
+    git_at(r, "switch", "-q", "main")
+    git_at(r, "merge", "-q", "--no-ff", "-m", "merge", "feature", when="2030-01-03T00:00:00Z")
+    merge = git_at(r, "rev-parse", "HEAD")
+    (r / name).write_text(fix)
+    git_at(r, "commit", "-qam", "fix", when="2030-01-05T00:00:00Z")
+    return r, merge
+
+
+@pytest.mark.parametrize("name, base, fix", [
+    ("q.sql", "-- header\nbase = 1\n", "base = 1\nadded = 20\n"),  # a deleted line that reads like a diff header
+    ("my app.py", "base = 1\n", "base = 1\nadded = 20\n"),  # a name git writes with a tab after it
+    ("caf\u00e9.py", "base = 1\n", "base = 1\nadded = 20\n"),  # a name git quotes
+])
+def test_escapes_reads_any_file_name_and_line(tmp_path: Path, name: str, base: str, fix: str) -> None:
+    r, merge = one_file_history(tmp_path, name, base, fix)
+    [row], _ = escapes_of(tmp_path, r, [passed(7, merge)])
+    assert "error" not in row and [c["files"] for c in row["candidates"]] == [[name]]
+
+
+def test_escapes_counts_a_rebase_merge_s_every_commit(tmp_path: Path) -> None:
+    r = tmp_path / "clone"
+    r.mkdir()
+    git_at(r, "init", "-q", "-b", "main")
+    (r / "app.py").write_text("base = 1\n")
+    git_at(r, "add", ".")
+    git_at(r, "commit", "-qm", "base", when="2030-01-01T00:00:00Z")
+    (r / "app.py").write_text("base = 1\na = 2\n")
+    git_at(r, "commit", "-qam", "pr one", when="2030-01-02T00:00:00Z")
+    (r / "app.py").write_text("base = 1\na = 2\nb = 3\n")
+    git_at(r, "commit", "-qam", "pr two", when="2030-01-03T00:00:00Z")
+    merge = git_at(r, "rev-parse", "HEAD")
+    (r / "app.py").write_text("base = 1\na = 20\nb = 3\n")
+    git_at(r, "commit", "-qam", "fix a", when="2030-01-05T00:00:00Z")
+    [row], _ = escapes_of(tmp_path, r, [passed(7, merge, commit_subjects=["pr one", "pr two"])])
+    assert [c["lines"] for c in row["candidates"]] == [1]
+    [row], _ = escapes_of(tmp_path, r, [passed(7, merge, commit_subjects=["other", "pr two"])])
+    assert row["candidates"] == []  # subjects that differ read as a squash: only the merge commit counts
+
+
+def test_escapes_keeps_a_pr_git_cannot_read_and_counts_it_skipped(tmp_path: Path) -> None:
+    r, merge = one_file_history(tmp_path, "app.py", "base = 1\n", "base = 1\nadded = 20\n")
+    [row], s = escapes_of(tmp_path, r, [passed(7, "f" * 40)])
+    assert "git failed" in row["error"]
+    assert s["escape_candidates"]["depth light"] == {"passed_merges": 1, "with_candidate": 0, "skipped": 1}
+
+
+def test_escape_counts_go_by_depth_and_by_the_pr_s_review_path_version(tmp_path: Path) -> None:
+    r, merge = one_file_history(tmp_path, "app.py", "base = 1\n", "base = 1\nadded = 20\n")
+    base = {"repo": REPO, "created_at": "t", "state": "success", "must_fix": 0, "comment": 1, "steered": False,
+            "lenses": [], "tokens": 0, "seconds": 0, "nits": 0}
+    rounds = [{**base, "pr": 7, "v": "9.0.0"}, {**base, "pr": 8, "v": "8.0.0"}]
+    _, s = escapes_of(tmp_path, r, [passed(7, merge), passed(8, git_at(r, "rev-parse", "HEAD"), depth="focused")],
+                      rounds)
+    e = s["escape_candidates"]
+    assert e["v 9.0.0"] == {"passed_merges": 1, "with_candidate": 1, "skipped": 0}
+    assert e["v 8.0.0"] == {"passed_merges": 1, "with_candidate": 0, "skipped": 0}
+    assert e["depth focused"]["with_candidate"] == 0
+
+
+def test_harvest_keeps_the_guard_record_s_depth_and_a_merged_pr_s_commit_subjects(github: dict,
+                                                                                   tmp_path: Path) -> None:
+    cs = github["data"][f"repos/{REPO}/issues/7/comments"]
+    cs[2] = {**cs[2], "body": cs[2]["body"].replace(f"reviewed={H2} -->", f"reviewed={H2} depth=light -->", 1)}
+    cs[3] = {**cs[3], "author_association": "NONE"}
+    github["data"][f"repos/{REPO}/pulls/7/commits"] = [{"commit": {"message": "Fix totals\n\nbody"}}]
+    [p] = [x for x in rows(harvest(tmp_path), "prs") if x["pr"] == 7]
+    assert p["guard_review"]["depth"] == "light" and p["commit_subjects"] == ["Fix totals"]
+
+
+def test_escapes_keeps_a_pr_of_a_repo_with_no_clone_as_skipped(tmp_path: Path) -> None:
+    r, merge = one_file_history(tmp_path, "app.py", "base = 1\n", "base = 1\nadded = 20\n")
+    other = {**passed(9, merge), "repo": "example-owner/other-repo"}
+    found, s = escapes_of(tmp_path, r, [passed(7, merge), other])
+    assert [(x["repo"], x.get("error")) for x in found] == [(REPO, None), ("example-owner/other-repo",
+                                                                           "no --clone given for this repo")]
+    assert s["escape_candidates"]["depth light"] == {"passed_merges": 2, "with_candidate": 1, "skipped": 1}
