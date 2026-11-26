@@ -689,28 +689,42 @@ def test_verdict_routine_on_routine_paths_needs_no_reviewer(w: World) -> None:
 
 def test_verdict_routine_carries_the_verdict_of_a_given_verifier_output(w: World, tmp_path: Path) -> None:
     head = w.commit({"docs/a.md": "x\n"})
-    done = w.verdict("12", "--tier", "routine", "--file", review_file(tmp_path, head, "FAIL"))
+    done = w.verdict("12", "--tier", "routine", "--reviewed", head, "--file", review_file(tmp_path, head, "FAIL"))
     assert done.returncode == 0, done.stderr
     assert w.comments()[0]["body"].startswith(f"🤖 Review: fail (routine tier)\n{REVIEW} sha={head} state=failure ")
 
 
+def routine_output(tmp: Path, text: str) -> str:
+    p = tmp / "o.txt"
+    p.write_text(text)
+    return str(p)
+
+
 @pytest.mark.parametrize("args, why", [
-    (["--result", "pass"], "contradicts the verifier's VERDICT line"),
+    (["--result", "pass", "--reviewed", "{head}"], "contradicts the verifier's VERDICT line"),
     (["--reviewed", "c" * 40], "but --reviewed is"),
+    ([], "--reviewed is the full sha of the commit the verifier read"),  # the output's commit is never assumed
 ])
 def test_verdict_routine_refuses_what_contradicts_a_given_verifier_output(w: World, tmp_path: Path, args: list[str],
                                                                          why: str) -> None:
     head = w.commit({"docs/a.md": "x\n"})
+    args = [x.format(head=head) for x in args]
     done = w.verdict("12", "--tier", "routine", *args, "--file", review_file(tmp_path, head, "FAIL"))
     assert done.returncode == 2 and why in done.stderr and w.comments() == [], done.stderr
 
 
-def test_verdict_routine_refuses_a_file_that_is_no_verifier_output(w: World, tmp_path: Path) -> None:
-    w.commit({"docs/a.md": "x\n"})
-    p = tmp_path / "notes.txt"
-    p.write_text("looked fine to me\n")
-    done = w.verdict("12", "--tier", "routine", "--file", str(p))
-    assert done.returncode == 2 and "not finding-verifier's output" in done.stderr and w.comments() == [], done.stderr
+@pytest.mark.parametrize("text, why", [
+    ("", "must not be empty"),  # an output that came back empty is not "no file given"
+    ("looked fine to me\n", "not finding-verifier's output"),
+    ("VERDICT: PASS {h}\nReviewed: {e}\nBlocking: none\n{d}\n\nNo findings.\n", "names commit"),  # its Reviewed: line
+    ("VERDICT: PASS {h}\nReviewed: {h}\n{b}\n{d}\n\n## Must-fix\n### COR-1\n", "lists 1 must-fix"),  # a PASS over a must-fix
+])
+def test_verdict_routine_applies_every_tier_s_output_checks_to_a_given_file(w: World, tmp_path: Path, text: str,
+                                                                           why: str) -> None:
+    head = w.commit({"docs/a.md": "x\n"})
+    out = routine_output(tmp_path, text.format(h=head, e="e" * 40, d=DISMISSED, b=BLOCKING_LINE))
+    done = w.verdict("12", "--tier", "routine", "--reviewed", head, "--file", out)
+    assert done.returncode == 2 and why in done.stderr and w.comments() == [], done.stderr
 
 
 def test_verdict_allows_a_higher_tier(w: World, tmp_path: Path) -> None:
@@ -959,7 +973,8 @@ def test_verdict_takes_a_listed_id_only_from_a_heading_that_opens_with_it(w: Wor
     head = w.commit({"src/app.py": "x = 2\n"})
     for text in ("Settled in the brief: - COR-1: must-fix, fixed\n## Must-fix\n### COR-10\n- rank: must-fix\n",
                  "## Must-fix\n### CLM-2 (re-raises COR-1)\n- evidence: -> COR-1\n",
-                 "## Must-fix\n### ###\n### PRE-COR-1, COR-1-2\n"):
+                 "## Must-fix\n### ###\n### PRE-COR-1, COR-1-2\n",
+                 "## Must-fix\n## COR-1\n- rank: must-fix\n", "# COR-1\n"):  # a heading, but not a `###` one
         done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head,
                      "--file", review_file(tmp_path, head, "FAIL", text, blocking=BLOCKING_LINE))
         assert done.returncode == 2 and "names COR-1, which no" in done.stderr, done.stderr
