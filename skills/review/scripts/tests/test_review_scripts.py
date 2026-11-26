@@ -516,6 +516,33 @@ def review_file(tmp: Path, sha: str, verdict: str = "PASS", text: str | None = N
     return str(p)
 
 
+@pytest.mark.parametrize("quoted", ["a\u200bb", "x\u200c\u200d\u2060\ufeffy", "rtl \u202e\u2066flip\u2069\u202c",
+                                    "mark \u200e\u200f\u061c", "(?<![\\w-])", "see ![a](b)", "< ![x]", "<!-- loadout:review -->"])
+def test_verdict_posts_an_output_holding_what_github_drops_and_reads_it_back(w: World, tmp_path: Path,
+                                                                            quoted: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    out = review_file(tmp_path, head, text=f"No findings.\n- evidence: `{quoted}`\n```\n{quoted}\n```\n")
+    done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head, "--file", out)
+    assert done.returncode == 0, done.stderr
+    [c] = w.comments()
+    assert c["body"].split("\n")[1].startswith(f"{REVIEW} sha={head} state=success")
+    below = "\n".join(c["body"].split("\n")[3:])  # under the title, marker and round line: the quoted output
+    assert not re.search("[\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff\u061c]|!\\[", below), below
+
+
+def test_stored_is_what_the_stub_github_keeps_and_is_idempotent() -> None:
+    sys_path = str(SCRIPTS)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("record_under_test", SCRIPTS / "record.py")
+    rec = importlib.util.module_from_spec(spec)
+    assert spec.loader and sys_path
+    spec.loader.exec_module(rec)
+    for t in ["(?<![a])", "a\u200bb\u202e", "!![[", "x !\u200b[y]", "<!--x-->"]:
+        once = rec.stored(t)
+        assert rec.stored(once) == once and "![" not in once and "\u200b" not in once and "\u202e" not in once
+    assert rec.stored("<!--x--> a!b") == "<!--x--> a!b"  # GitHub keeps these as sent
+
+
 def test_verdict_pass_posts_a_review_record(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
     done = w.verdict("12", "--tier", "standard", "--result", "pass", "--reviewers", PLANNED,

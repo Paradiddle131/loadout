@@ -16,6 +16,10 @@
     prints the review path's version (`metadata.version` in ../SKILL.md) or the collection commit (below).
   record.py same <comment json> <sent body file>
     exits 0 when the comment's body is the one sent (line endings and trailing newlines aside), else 1.
+  record.py stored <file>
+    prints the file as GitHub stores a comment holding it (stored() below); build applies the same to its raw output
+    and lines, and blocking.py and the Dismissals reader read the output that way, so a record's read-back matches
+    what was sent and its counts come from the text it holds.
 
 The round line is a record's third line, for audits and people; the merge guard reads only the first two:
   <!-- loadout + :round v=<version> kit=<commit> [<key>=<value>]... -->   (one word, `loadout` and `:round` joined)
@@ -177,7 +181,7 @@ def dismissals(path: str | None) -> tuple[int, int] | None:
         return None
     found: list[tuple[int, int]] = []
     fence = ""
-    for ln in open(path, encoding="utf-8", errors="replace").read().split("\n"):
+    for ln in stored(open(path, encoding="utf-8", errors="replace").read()).split("\n"):
         if m := re.match(r"\s*(`{3,}|~{3,})", ln):
             if not fence:
                 fence = m.group(1)
@@ -245,6 +249,19 @@ def review_round(a: argparse.Namespace) -> list[str]:
     return [" ".join(pairs), *table]
 
 
+# What a comment body loses on its way to GitHub's storage, as probed by posting and reading back: zero-width
+# characters, bidirectional controls, and the `!` of every `![` (markdown image syntax), inside code fences too, while
+# `<!`, `<!--` and a `!` elsewhere are kept. A record holds such text only where it quotes a reviewer, so it is sent
+# already as it will be stored: nothing changes on the way, and the read-back matches. `![` becomes `! [`, which is
+# kept.
+DROPPED = re.compile("[\u200b\u200c\u200d\u2060\ufeff\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069]")
+
+
+def stored(text: str) -> str:
+    """`text` as GitHub stores it in a comment body (DROPPED above); stored(stored(t)) == stored(t)."""
+    return DROPPED.sub("", text).replace("![", "! [")
+
+
 def build(a: argparse.Namespace) -> str:
     if not SHA.fullmatch(a.sha) or (a.reviewed and not SHA.fullmatch(a.reviewed)):
         sys.exit("record.py: a sha must be 40 hex characters")
@@ -266,8 +283,8 @@ def build(a: argparse.Namespace) -> str:
         third = round_line(a.round)
     except (OSError, ValueError) as exc:
         sys.exit(f"record.py: {exc}")
-    head = "\n".join([a.title, marker, third, "", *a.line]) + "\n"
-    raw = open(a.file, encoding="utf-8", errors="replace").read() if a.file else ""
+    head = "\n".join([a.title, marker, third, "", *map(stored, a.line)]) + "\n"
+    raw = stored(open(a.file, encoding="utf-8", errors="replace").read()) if a.file else ""
     if not raw.strip():
         return head
     fence = "```"
@@ -325,6 +342,8 @@ def main() -> int:
     r.add_argument("--repost", action="store_true")
     sub.add_parser("version")
     sub.add_parser("kit")
+    st = sub.add_parser("stored")
+    st.add_argument("file")
     s = sub.add_parser("same")
     s.add_argument("comment")
     s.add_argument("sent")
@@ -348,6 +367,9 @@ def main() -> int:
         return 0
     if a.cmd == "kit":
         print(kit())
+        return 0
+    if a.cmd == "stored":
+        sys.stdout.write(stored(open(a.file, encoding="utf-8", errors="replace").read()))
         return 0
     return same(a.comment, a.sent)
 
