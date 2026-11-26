@@ -423,7 +423,8 @@ def record_main(a: argparse.Namespace) -> int:
         print(f"head {change.head}\ntier {change.tier}\ndepth none\npairs {' '.join(pairs)}")
         return 0
     if a.repost:
-        f = record_fields(newest_review(comments) or {})
+        reposted = newest_review(comments) or {}
+        f = record_fields(reposted)
         planned = (f or {}).get("round", {}).get("planned")
         if not f or f["reviewed"] != a.reviewed or "depth" not in f or not planned:
             raise Refused("--repost posts the PR's newest trusted review record again, and that record must have "
@@ -442,6 +443,8 @@ def record_main(a: argparse.Namespace) -> int:
         print(f"head {change.head}\ntier {change.tier}\ndepth {f['depth']}\npairs {' '.join(pairs)}")
         if carried is not None:
             print(f"override {carried}")
+        if reposted.get("html_url"):
+            print(f"record {reposted['html_url']}")
         return 0
     p = make_plan(change, prior_round(newest_review(comments), change), a.depth, a.owner)
     check_round(p, a.reviewers, a.lens)

@@ -13,8 +13,10 @@ PR's current head as a success. In a local clone holding the head and the defaul
 `plan.py floor` (tier.sh's tier and the paths' depth floor) runs against that branch's tip as GitHub's branches API
 names it when the clone holds that commit, else against `origin/<that branch>`; a review below the paths' tier
 refuses, as does a record whose `depth` is below the floor unless its `override` names that depth (the owner's
-override, which verdict.sh records with the owner's words), and so does a check that fails or runs out of time; with
-no such clone the check is skipped. A review record without `depth` (one from before review depths) never counts.
+override, which verdict.sh records with the owner's words, and which counts only on a record that quotes them), and so
+does a check that fails or runs out of time. The clone is the session's working directory, else the cloud's
+`/home/user/<repo name>`; with neither holding the head and a copy of the default branch the floor cannot be
+computed, and the merge is refused. A review record without `depth` never counts.
 When the floor is `none` and it was computed against GitHub's tip, no review record is needed: the gates record
 alone lets the merge go when the newest trusted review record is absent, for an older head, or an unedited,
 well-formed success; an edited, malformed, depth-less or failing one holds the merge. The merge must name the head checked (`expectedHeadSha`), so
@@ -63,6 +65,11 @@ TITLE = {"gates": re.compile(r"🤖 Gates: (success|failure)"),
          "review": re.compile(r"🤖 Review: (pass|fail) \((routine|standard|sensitive) tier\)")}
 FIELDS = {"gates": {"sha", "state"}, "review": {"sha", "state", "tier", "reviewed", "depth", "override"}}
 OVERRIDES = ("light", "focused", "full")  # what verdict.sh's --owner may set a round's depth to
+# The line verdict.sh writes under the marker of an overridden round: the owner's words, or a repost's pointer to the
+# record that quotes them.
+OVERRIDE_QUOTE = re.compile(r'- Owner override: depth (light|focused|full), (by the owner\'s words: ".*\S.*"'
+                            r"|carried from the reposted round's record.*, which quotes the owner)")
+CLONES = Path("/home/user")  # where a cloud session's clones live, one per repo, by its name
 RANK = {"routine": 0, "standard": 1, "sensitive": 2}
 DEPTH = {"none": 0, "light": 1, "focused": 2, "full": 3}
 PLAN_PY = ROOT / "skills/review/scripts/plan.py"
@@ -190,7 +197,12 @@ def record_problem(kind: str, c: dict, head: str) -> tuple[str, dict]:
         return (f"{where} is for {fields['sha']}, not the head {head}: a record for an older head does not "
                 "count"), {"older": True}
     if kind == "review" and "depth" not in fields:
-        return (f"{where} carries no depth (it predates review depths), so its depth floor cannot be checked"), {}
+        return f"{where} carries no depth, so its depth floor cannot be checked", {}
+    if kind == "review" and "override" in fields and not any(
+            OVERRIDE_QUOTE.fullmatch(ln.strip()) and ln.strip().startswith(f"- Owner override: depth {fields['override']},")
+            for ln in lines[3:]):
+        return (f"{where} carries override={fields['override']} but no `- Owner override:` line quoting the "
+                "owner's words, so the override does not count"), {}
     if state != "success":
         return f"{where} says {state}", {"state": state}
     return "", fields
@@ -278,6 +290,9 @@ def check_merge(repo: str | None, number: str | None, expected: str | None, cwd:
             ignored[m.group(1)].add(str(c.get("author_association")))
     base = ((pr.get("base") or {}).get("repo") or {}).get("default_branch")
     rated = paths_rating(repo, head, base, cwd)
+    cloud_clone = CLONES / repo.split("/")[-1]
+    if rated is None and cloud_clone.is_dir() and cloud_clone.resolve() != Path(cwd).resolve():
+        rated = paths_rating(repo, head, base, str(cloud_clone))
     gates_alone = bool(rated and rated[2] and rated[1] == "none")
     # Floor none, but against the clone's own ref: the relief needs GitHub's tip, so say how to get it.
     unpinned_none = bool(rated and not rated[2] and rated[1] == "none")
@@ -286,6 +301,10 @@ def check_merge(repo: str | None, number: str | None, expected: str | None, cwd:
             + (", or record it with skills/review/scripts/verdict.sh <pr> --tier routine" if rated[0] == "routine"
                else "")) if unpinned_none else ""
     problems, review = [], {}
+    if rated is None:
+        problems.append(f"no local clone of {repo} holds the head {head} and a copy of {base or 'its default branch'}, "
+                        f"so the head's tier and depth floor cannot be checked: merge from a clone of it (here, or "
+                        f"{cloud_clone}) after `git fetch origin {base or '<default branch>'} {head}`")
     for kind in ("gates", "review"):
         if kind == "review" and gates_alone:
             # Floor none on GitHub's tip: no review is needed. The newest trusted review record still holds the merge
