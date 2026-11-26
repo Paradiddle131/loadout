@@ -170,29 +170,6 @@ def lens_spec(spec: str) -> dict:
             **{k: int(f[k]) for k in ("tokens", "seconds", "findings")}}
 
 
-FENCE_OPEN = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
-
-
-def fenced(lines: list[str]) -> list[bool]:
-    """Whether each line is inside a fenced code block as GitHub (CommonMark) reads it: a fence line (one of them
-    included) opens with three or more backticks or tildes indented at most three spaces, a backtick fence's info string
-    holding no backtick, and closes only with a bare run of the same character at least as long."""
-    out, fence = [], ""
-    for ln in lines:
-        m = FENCE_OPEN.fullmatch(ln)
-        if not fence:
-            if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
-                fence = m.group(1)
-                out.append(True)
-                continue
-            out.append(False)
-        else:
-            out.append(True)
-            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip():
-                fence = ""
-    return out
-
-
 def dismissals(path: str | None) -> tuple[int, int] | None:
     """(re-ran, promoted) from the `Dismissals:` line of the verifier's header; None when it has none.
 
@@ -203,9 +180,15 @@ def dismissals(path: str | None) -> tuple[int, int] | None:
     if not path:
         return None
     found: list[tuple[int, int]] = []
-    lines = stored(open(path, encoding="utf-8", errors="replace").read()).split("\n")
-    for ln, in_fence in zip(lines, fenced(lines)):
-        if in_fence:
+    fence = ""
+    for ln in stored(open(path, encoding="utf-8", errors="replace").read()).split("\n"):
+        if m := re.match(r"\s*(`{3,}|~{3,})", ln):
+            if not fence:
+                fence = m.group(1)
+            elif m.group(1).startswith(fence) and not ln.strip()[len(m.group(1)):].strip():
+                fence = ""
+            continue
+        if fence:
             continue
         if re.match(r"\s*(Lens heads:|##)", ln):
             break

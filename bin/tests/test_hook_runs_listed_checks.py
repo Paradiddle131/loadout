@@ -27,6 +27,23 @@ def test_agents_md_lists_the_checks() -> None:
                                "bin/check-generic.sh", "cloud/githooks/check-process-ids.py"]
 
 
+def without_gitleaks(mirror: Path) -> list[str]:
+    """The PATH directories, each one that holds a `gitleaks` replaced by a mirror of its other entries, so the hook
+    finds every tool it needs but no scanner, wherever the host installed one."""
+    dirs = []
+    for i, d in enumerate(os.environ["PATH"].split(":")):
+        if not (Path(d) / "gitleaks").exists():
+            dirs.append(d)
+            continue
+        m = mirror / str(i)
+        m.mkdir(parents=True)
+        for entry in Path(d).iterdir():
+            if entry.name != "gitleaks":
+                (m / entry.name).symlink_to(entry)
+        dirs.append(str(m))
+    return dirs
+
+
 def run_hook(tmp: Path, hook_text: str, failing: str | None = None, gitleaks: bool = True,
              expect: int = 0) -> list[str]:
     """Run `hook_text` as the pre-commit hook of a scratch repo whose checks are logging stubs; the checks it ran.
@@ -36,8 +53,7 @@ def run_hook(tmp: Path, hook_text: str, failing: str | None = None, gitleaks: bo
     path_dir.mkdir()
     env = {**os.environ, "HOME": str(tmp / "home"), "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
-           "PATH": ":".join([str(path_dir)] + [d for d in os.environ["PATH"].split(":")
-                                               if not (Path(d) / "gitleaks").exists()])}
+           "PATH": ":".join([str(path_dir)] + without_gitleaks(tmp / "mirror"))}
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True, env=env)
     for check in listed_checks():
         if check == "gitleaks" and not gitleaks:
@@ -74,4 +90,17 @@ def test_a_failing_check_stops_the_commit(tmp_path: Path, check: str) -> None:
 
 def test_a_commit_without_gitleaks_is_refused_not_left_unscanned(tmp_path: Path) -> None:
     ran = run_hook(tmp_path, HOOK.read_text(encoding="utf-8"), gitleaks=False, expect=1)
+    assert "gitleaks" not in ran and "commit is refused" in run_hook.stderr  # type: ignore[attr-defined]
+
+
+def test_the_hook_finds_its_tools_beside_a_system_gitleaks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    system = tmp_path / "system"  # one directory holding git, python3 and a gitleaks, as an apt install leaves it
+    system.mkdir()
+    for tool in ("git", "python3", "bash", "env", "grep", "sed", "cat", "mkdir", "dirname", "tr", "head", "uname"):
+        if found := shutil.which(tool):
+            (system / tool).symlink_to(found)
+    (system / "gitleaks").write_text("#!/bin/sh\nexit 0\n")
+    (system / "gitleaks").chmod(0o755)
+    monkeypatch.setenv("PATH", str(system))
+    ran = run_hook(tmp_path / "run", HOOK.read_text(encoding="utf-8"), gitleaks=False, expect=1)
     assert "gitleaks" not in ran and "commit is refused" in run_hook.stderr  # type: ignore[attr-defined]

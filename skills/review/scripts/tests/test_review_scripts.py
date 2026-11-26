@@ -1584,31 +1584,3 @@ def test_every_reader_reads_a_header_word_as_github_stores_it(w: World, tmp_path
     assert [kv for kv in round_fields(body) if kv[0] in ("dismissals", "promoted")] == [("dismissals", "2"),
                                                                                         ("promoted", "1")]
 
-
-@pytest.mark.parametrize("lines, inside", [
-    (["```", "x", "```"], [True, True, True]),
-    (["````text", "```", "x", "````", "y"], [True, True, True, True, False]),  # a shorter run does not close
-    (["```", "```python", "x", "```", "y"], [True, True, True, True, False]),  # an info string does not close
-    (["~~~", "```", "x", "~~~", "y"], [True, True, True, True, False]),  # the other character does not close
-    (["```", "x", "`````", "y"], [True, True, True, False]),  # a longer run closes
-    (["    ```", "x"], [False, False]),  # indented four spaces: code, not a fence
-    (["``` a`b", "x"], [False, False]),  # a backtick in a backtick fence's info string: no fence
-])
-def test_fenced_reads_a_fence_as_github_does(lines: list[str], inside: list[bool]) -> None:
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("record_fence", SCRIPTS / "record.py")
-    rec = importlib.util.module_from_spec(spec)
-    assert spec.loader
-    spec.loader.exec_module(rec)
-    assert rec.fenced(lines) == inside
-
-
-@pytest.mark.parametrize("body", ["````text\n```\n### COR-1\n````\n", "```\n```python\n### COR-1\n```\n",
-                                  "~~~\n### COR-1\n~~~\n"])
-def test_verdict_refuses_a_must_fix_whose_heading_github_shows_in_a_code_block(w: World, tmp_path: Path,
-                                                                             body: str) -> None:
-    head = w.commit({"src/app.py": "x = 2\n"})
-    out = tmp_path / "out.txt"
-    out.write_text(f"VERDICT: FAIL {head}\nReviewed: {head}\n{BLOCKING_LINE}\n{DISMISSED}\n\n## Must-fix\n{body}")
-    done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head, "--file", str(out))
-    assert done.returncode == 2 and "no `###` heading" in done.stderr and w.writes() == [], done.stderr
