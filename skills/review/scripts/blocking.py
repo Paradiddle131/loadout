@@ -24,7 +24,8 @@ A harm has at least two words, is not the template's unfilled `<...>` slot, and 
 in FILLER below (`none`, `no harm`, `TBD` and the like); a short dismissal off that list, such as `wording only`,
 passes, so the check catches a forgotten harm, not a weak or false one.
 Each listed id must be one of the ids a `###` line outside a code fence below the header opens with; the line is
-not otherwise compared with the finding blocks, and an unclosed fence hides the headings after it (a refusal).
+not otherwise compared with the finding blocks; a top-level fence is read by CommonMark's rules (record.py § fenced;
+containers are not modelled), and an unclosed fence hides the headings after it (a refusal).
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ import json
 import re
 import sys
 
-from record import stored  # the text as GitHub stores it: a record's counts come from what it holds
+from record import fenced, stored  # the text as GitHub stores it: a record's counts come from what it holds
 
 WS = r"[ \t\v\f\r]"  # what grep's [[:space:]] matches inside a line in the C locale, which verdict.sh sets
 LINE = re.compile(rf"^{WS}*Blocking:{WS}*(.*?){WS}*$")
@@ -101,12 +102,9 @@ def read(text: str) -> list[dict]:
         raise ValueError(f"the `Blocking:` line is neither `none` nor a JSON list ({e.msg})") from None
     if not isinstance(items, list) or not items:
         raise ValueError("the `Blocking:` line is neither `none` nor a non-empty JSON list")
-    heads, fence = set(), None
-    for n, ln in enumerate(lines):  # finding ids: the comma-separated ids of each `###` line outside a code fence
-        mark = re.match(r"\s*(`{3,}|~{3,})", ln)
-        if mark:
-            fence = None if fence and mark.group(1)[0] == fence[0] else (fence or mark.group(1))
-        elif n > at + 1 and fence is None and ln.startswith("###"):
+    heads = set()
+    for n, (ln, in_fence) in enumerate(zip(lines, fenced(lines))):  # the ids of each `###` line outside a code fence
+        if n > at + 1 and not in_fence and ln.startswith("###"):
             heads.update(p.strip(" `*_").split(" ")[0].strip("`*_") for p in ln.lstrip("#").split(","))
     for i, b in enumerate(items):
         ids = b.get("ids") if isinstance(b, dict) else None
@@ -126,14 +124,14 @@ PATCHED = re.compile(rf"^{WS}*-{WS}+class:{WS}*patched, not fixed{WS}*\(`?([A-Z]
 
 def patched(text: str) -> list[tuple[str, str]]:
     """(the block's ids, the settled id) for each finding block outside a code fence marked `patched, not fixed`."""
-    found, fence, ids = [], None, ""
-    for ln in text.split("\n"):
-        mark = re.match(r"\s*(`{3,}|~{3,})", ln)
-        if mark:
-            fence = None if fence and mark.group(1)[0] == fence[0] else (fence or mark.group(1))
-        elif fence is None and ln.startswith("###"):
+    found, ids = [], ""
+    lines = text.split("\n")
+    for ln, in_fence in zip(lines, fenced(lines)):
+        if in_fence:
+            continue
+        if ln.startswith("###"):
             ids = ln.lstrip("#").strip()
-        elif fence is None and ids and (m := PATCHED.match(ln)):
+        elif ids and (m := PATCHED.match(ln)):
             found.append((ids.replace(" ", ""), m.group(1)))
     return found
 

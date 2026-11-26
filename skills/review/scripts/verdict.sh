@@ -25,8 +25,8 @@
 #   the verifier's `Dismissals: re-ran <n>, promoted <m>` line adds both numbers: an output whose header lacks it, holds
 #   two, or promotes more than it re-ran is refused.
 #   They go on the record's round line (record.py has its shape; the merge guard ignores it) and in a table below.
-#   In a clone of this collection (it holds bin/check-review-version), that check runs on the head first and
-#   refuses a review-path change whose version is not bumped.
+#   In a clone of this collection (its default branch holds bin/check-review-version), the default branch's copy of
+#   that check runs on the head first and refuses a review-path change whose version is not bumped.
 #   --repost posts an earlier round's verdict again on a head that differs from --reviewed only by clean merges of the
 #   default branch (the same --reviewers and output): no agent ran, so it takes no --cycle, --dupes, --nits or --lens,
 #   and its round line says repost=1 with no usage, so an audit counts that round's cost once.
@@ -60,7 +60,7 @@
 # writes the change posts the verdict; the script cannot tell a real reviewer's output from a typed one, only
 # keep the output beside the verdict where the owner can read it.
 set -euo pipefail
-export LC_ALL=C # grep's [[:space:]] and blocking.py's blanks agree only in the C locale
+export LC_ALL=C # bash's [[:space:]] in the header patterns and blocking.py's blanks agree only in the C locale
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 usage='usage: verdict.sh <pr> --tier routine|standard|sensitive [--result pass|fail] --reviewers "<names>" --reviewed <sha> --file <verifier output> --cycle <n> --dupes <n> --nits <n> --lens "<name> model=<m> effort=<e> tokens=<n> seconds=<n> findings=<n>"... [--depth <d>] [--owner "<words>"] [--repost] [--dry-run]'
 pr='' tier='' result='' reviewers='' reviewed='' file='' cycle='' dupes='' nits='' repost='' depth='' owner='' has_owner=''
@@ -188,9 +188,16 @@ done
 paths=$(bash "$here/tier.sh" --base "origin/$default" --head "$head") || die "tier.sh could not read PR $pr's paths"
 # In a clone of this collection, the review path's version bump is checked here too, so a commit made without the
 # pre-commit hook (a file pushed through an API, a clone without core.hooksPath) cannot reach a record unbumped.
-if [ -f bin/check-review-version ] && [ -f skills/review/SKILL.md ]; then
-  bumped=$(python3 bin/check-review-version --base "origin/$default" --head "$head" 2>&1) ||
-    die "the review path's version check refuses PR $pr's head: $bumped"
+# The default branch decides that this is the collection and supplies the checker (with the reader it imports), so a
+# head that deletes or rewrites the checker is checked all the same.
+if git cat-file -e "origin/$default:bin/check-review-version" 2>/dev/null &&
+  git cat-file -e "origin/$default:skills/review/SKILL.md" 2>/dev/null; then
+  checker=$(mktemp -d)
+  git archive "origin/$default" bin/check-review-version skills/review/scripts/record.py | tar -x -C "$checker" ||
+    { rm -rf "$checker"; die "cannot read the review path's version check from origin/$default"; }
+  bumped=$(python3 "$checker/bin/check-review-version" --base "origin/$default" --head "$head" 2>&1) ||
+    { rm -rf "$checker"; die "the review path's version check refuses PR $pr's head: $bumped"; }
+  rm -rf "$checker"
 fi
 computed=${paths%%$'\n'*}
 # A routine record is accepted on a change whose depth floor is none (plan.py checked it), whatever its tier.

@@ -10,11 +10,12 @@ bin/check-refs
 bin/check-review-version
 # No process id (an issue, PR, phase or decision reference) added to a checked-in file (RULES.md).
 python3 cloud/githooks/check-process-ids.py
-# No secrets in what is staged.
+# No secrets in what is staged: with no scanner, the commit stops rather than goes on unscanned.
 if command -v gitleaks >/dev/null || [ -x ~/.local/bin/gitleaks ]; then
   "$(command -v gitleaks || echo ~/.local/bin/gitleaks)" protect --staged --no-banner --redact -v
 else
-  echo "pre-commit: gitleaks is not installed, so staged files were NOT scanned for secrets (https://github.com/gitleaks/gitleaks)" >&2
+  echo "pre-commit: gitleaks is not installed, so the staged files cannot be scanned for secrets and the commit is refused; install it on PATH or in ~/.local/bin (https://github.com/gitleaks/gitleaks)" >&2
+  exit 1
 fi
 # Content stays generic (AGENTS.md).
 mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACM | grep -vE '(^|/)tests/' | grep -vx 'bin/check-generic.sh' || true)
