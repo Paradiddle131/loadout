@@ -20,3 +20,7 @@ CAPS = [
 @pytest.mark.parametrize("path, cap", CAPS)
 def test_each_prose_cap_still_stands(path: str, cap: str) -> None:
     assert cap in (ROOT / path).read_text(encoding="utf-8"), f"{path} no longer says: {cap}"
+
+
+def test_every_named_cap_is_pinned() -> None:
+    assert len(CAPS) == 4  # dropping a row would drop its pin with nothing red
