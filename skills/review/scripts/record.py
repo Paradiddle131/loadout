@@ -174,9 +174,10 @@ FENCE_OPEN = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
 
 
 def fenced(lines: list[str]) -> list[bool]:
-    """Whether each line is inside a fenced code block as GitHub (CommonMark) reads it: a fence line (one of them
+    """Whether each line is inside a top-level fenced code block by CommonMark's fence rules: a fence line (one of them
     included) opens with three or more backticks or tildes indented at most three spaces, a backtick fence's info string
-    holding no backtick, and closes only with a bare run of the same character at least as long."""
+    holding no backtick, and closes only with a bare run of the same character at least as long. Containers are not
+    modelled: a fence that opens inside a list item, a block quote or an HTML block is read as a top-level one."""
     out, fence = [], ""
     for ln in lines:
         m = FENCE_OPEN.fullmatch(ln)

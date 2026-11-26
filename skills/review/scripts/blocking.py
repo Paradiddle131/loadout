@@ -24,8 +24,8 @@ A harm has at least two words, is not the template's unfilled `<...>` slot, and 
 in FILLER below (`none`, `no harm`, `TBD` and the like); a short dismissal off that list, such as `wording only`,
 passes, so the check catches a forgotten harm, not a weak or false one.
 Each listed id must be one of the ids a `###` line outside a code fence below the header opens with; the line is
-not otherwise compared with the finding blocks; a fence is read as GitHub reads it (record.py § fenced), and an
-unclosed fence hides the headings after it (a refusal).
+not otherwise compared with the finding blocks; a top-level fence is read by CommonMark's rules (record.py § fenced;
+containers are not modelled), and an unclosed fence hides the headings after it (a refusal).
 """
 
 from __future__ import annotations
