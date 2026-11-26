@@ -170,22 +170,27 @@ def body_lines(c: dict) -> list[str]:
     return (c.get("body") or "").replace("\r\n", "\n").split("\n")
 
 
-def owner_quoted(override: str, c: dict, trusted: list[dict], seen: frozenset = frozenset()) -> bool:
+def owner_quoted(override: str, c: dict, trusted: list[dict]) -> bool:
     """Whether review record `c` quotes the owner's words for `override`: on its own `by the owner's words` line, or on a
     repost's `carried from` line whose link names another trusted, unedited review record of this PR, with the same
-    override, that does (followed to the end of the chain; a loop, a dead link or a record without words fails)."""
-    for ln in body_lines(c)[3:]:
-        s = ln.strip()
-        if (m := OWNER_WORDS.fullmatch(s)) and m.group(1) == override:
-            return True
-        if (m := OWNER_CARRIED.fullmatch(s)) and m.group(1) == override and m.group(2) not in seen:
-            for o in trusted:
-                lines = body_lines(o)
+    override, that does (followed to the end of the chain; a loop, a dead link or a record without words fails).
+
+    Each linked record is read once, whatever links lead to it, so the walk is linear in the PR's comments."""
+    by_url = {o.get("html_url"): o for o in trusted}
+    todo, seen = [c], set()
+    while todo:
+        for ln in body_lines(todo.pop())[3:]:
+            s = ln.strip()
+            if (m := OWNER_WORDS.fullmatch(s)) and m.group(1) == override:
+                return True
+            if (m := OWNER_CARRIED.fullmatch(s)) and m.group(1) == override and m.group(2) not in seen:
+                seen.add(m.group(2))
+                o = by_url.get(m.group(2))
+                lines = body_lines(o) if o else []
                 marker = MARKER.fullmatch(lines[1].strip()) if len(lines) > 1 else None
-                if (o.get("html_url") == m.group(2) and o.get("updated_at") == o.get("created_at") and marker
-                        and marker.group(1) == "review" and f" override={override} " in f" {marker.group(2)} "
-                        and owner_quoted(override, o, trusted, seen | {m.group(2)})):
-                    return True
+                if (o and o.get("updated_at") == o.get("created_at") and marker and marker.group(1) == "review"
+                        and f" override={override} " in f" {marker.group(2)} "):
+                    todo.append(o)
     return False
 
 
@@ -233,12 +238,12 @@ def paths_rating(repo: str, head: str, base: object, cwd: str) -> tuple[str, str
 
     The base is the default branch's tip as GitHub's branches API names it when the clone holds that commit (pinned),
     else `origin/<base>` in the clone (not pinned: a local ref the session can move). None when no local clone holds
-    both the head and a base (the check cannot run, and is skipped). Once one does, the check must finish: plan.py
+    both the head and a base (the check cannot run, and check_merge refuses the merge). Once one does, the check must finish: plan.py
     failing, or running out of time, refuses as unreadable.
     """
     top_done = git_out("-C", cwd, "rev-parse", "--show-toplevel")
     top = top_done.stdout.strip() if top_done else ""
-    if not top or origin_repo(top) != repo or not PLAN_PY.is_file():
+    if not top or (origin_repo(top) or "").lower() != repo.lower() or not PLAN_PY.is_file():  # GitHub ignores case
         return None
     held = git_out("-C", top, "cat-file", "-e", f"{head}^{{commit}}")
     if held is None:

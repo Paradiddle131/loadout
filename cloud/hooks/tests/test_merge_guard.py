@@ -876,6 +876,11 @@ def test_a_repost_s_override_counts_when_its_link_leads_to_the_owner_s_words(fx:
     ([QUOTED, carried(1)], "edited"),  # the linked record was edited after it was posted
     ([QUOTED, carried(1)], "outsider"),  # the linked record is not by the owner, a member or a collaborator
     ([QUOTED, carried(1)], "no-override"),  # the linked record's marker carries no override
+    ([QUOTED, carried(9)], None),  # words on another record, but the link names none of the PR's comments
+    ([QUOTED, carried(1).replace("depth light", "depth focused")], None),  # the carried line names another depth
+    ([QUOTED, carried(1).replace(", which quotes the owner", ", which quotes the owner, honest")], None),  # extra text
+    ([QUOTED, carried(1).replace("carried from the reposted round's record", "carried from somewhere")], None),
+    ([QUOTED, carried(1)], "gates"),  # the linked comment is a gates record, not a review record
 ])
 def test_a_repost_s_override_without_a_path_to_the_owner_s_words_refuses(fx: Fx, tmp_path: Path, chain: list[str],
                                                                        spoil: str | None) -> None:
@@ -883,6 +888,8 @@ def test_a_repost_s_override_without_a_path_to_the_owner_s_words_refuses(fx: Fx,
     bodies = [overridden(head, q) for q in chain]
     if spoil == "no-override":
         bodies[0] = bodies[0].replace(" override=light", "", 1)
+    if spoil == "gates":
+        bodies[0] = record("gates", sha=head).replace(" -->", " override=light -->", 1) + chain[0]
     first = comment(bodies[0], assoc="NONE" if spoil == "outsider" else "OWNER", edited=spoil == "edited")
     fx.comments(comment(record("gates", sha=head)), first, *[comment(b) for b in bodies[1:]])
     reason = mcp(fx, r, expectedHeadSha=head)
@@ -1085,3 +1092,25 @@ def test_a_session_above_its_clones_finds_the_repo_s_clone_by_name(fx: Fx, tmp_p
         guard.write_text(GUARD.read_text().replace('CLONES = Path("/home/user")', f"CLONES = Path({str(where)!r})", 1))
         done = run_copy(fx, guard, event)
         assert done.returncode == 0 and ("cannot be checked" in done.stdout) == refused, done.stdout + done.stderr
+
+
+
+def test_a_floor_none_head_merges_past_a_repost_whose_link_leads_to_the_owner_s_words(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"docs/guide.md": "x\n"})
+    fx.comments(comment(record("gates", sha=head)), *[comment(overridden(head, q)) for q in [QUOTED, carried(1)]])
+    assert mcp(fx, r, expectedHeadSha=head) is None
+
+
+def test_a_dense_web_of_reposts_is_read_in_linear_time(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"})
+    links = "".join(carried(j) for j in range(1, 31))  # 30 records, each linking all 30, none quoting the owner
+    fx.comments(comment(record("gates", sha=head)), *[comment(overridden(head, links)) for _ in range(30)])
+    started = time.monotonic()
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "quoting the owner's words" in reason and time.monotonic() - started < 15, reason
+
+
+def test_a_merge_naming_the_repo_in_another_case_reads_the_same_clone(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"src/app.py": "x = 2\n"})
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head)))
+    assert mcp(fx, r, owner="Example-Owner", repo="Example-Repo", expectedHeadSha=head) is None
