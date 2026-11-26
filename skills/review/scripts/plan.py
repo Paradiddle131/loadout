@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Plans a review round from a PR's paths and the repo's policy: its depth, its lenses in order and each lens's effort.
 
-  plan.py [--pr <n>] [--depth none|light|focused|full] [--json]
+  plan.py [--pr <n>] [--depth none|light|focused|full] [--owner "<the owner's words>"] [--json]
       the lead's preview: what verdict.sh will require of the round it records for PR <n> (the current branch's
-      open PR when --pr is left out); --depth raises the depth, never lowers it below the floor.
-  plan.py record --pr <n> [--depth <d>] --reviewers <names> --lens "<name> ... effort=<e> ..."...
+      open PR when --pr is left out); --depth raises the depth, never lowers it below the floor, unless --owner
+      quotes the owner's instruction that set it (an owner override: light, focused or full, on any path).
+  plan.py record --pr <n> [--depth <d>] [--owner "<words>"] --reviewers <names> --lens "<name> ... effort=<e> ..."...
       what verdict.sh runs: the same plan, then refuses a reviewer set missing a planned lens or the verifier, or a
       planned lens run below its planned effort; prints the marker's depth and the round line's pairs.
   plan.py floor --base <ref> --head <ref>
@@ -22,9 +23,10 @@ Inputs, where each is read from, who controls it, and how a lead-controlled one 
 | Default branch tip | `gh api repos/<r>/branches/<name>`, `.commit.sha`; then `git fetch --force origin +refs/heads/<name>:refs/remotes/origin/<name>` | GitHub (the sha), the remote (the objects) | the forced fetch overwrites a locally moved ref; a fetched tip other than GitHub's sha refuses |
 | Changed paths | `git diff --name-only --no-renames $(git merge-base <tip> <head>) <head>` | the two shas above | computed from content-addressed commits only |
 | Policy | `REVIEW.md` at the tip, parsed by tiers.py (tier.sh's parser), and the tip's instruction imports | the default branch on the remote | the change's own `REVIEW.md` is never read; an unparsable one rates every path sensitive; no line lowers a path below the built-in floor or below `## Sensitive` |
-| Previous round | `gh api repos/<r>/issues/<n>/comments`, paged by hand: the newest review-marker comment by the owner, a member or a collaborator | a trusted record on the PR | used only when unedited, in verdict.sh's exact shape, above routine, its raw output's first `Reviewed:` naming its `reviewed=`, its `Blocking:` line readable, and `reviewed=` an ancestor of the head and not of the merge-base; else a first review (the widest plan); an older record is never used in its place; untrusted authors are ignored |
-| Answered lenses | that record's `Blocking:` ids, by prefix | a trusted record | an id whose prefix names no lens plans the whole set |
+| Previous round | `gh api repos/<r>/issues/<n>/comments`, paged by hand: the newest review-marker comment by the owner, a member or a collaborator | a trusted record on the PR | used only when unedited, in verdict.sh's exact shape, at or above the change's tier and this round's depth, its raw output's first `Reviewed:` naming its `reviewed=`, its `Blocking:` line readable, and `reviewed=` an ancestor of the head and not of the merge-base; else a first review (the widest plan); an older record is never used in its place; untrusted authors are ignored |
+| Answered lenses | that record's `Blocking:` ids, by their first part | a trusted record | a part that names no lens plans correctness-reviewer; the record narrows only when its depth is at least this round's |
 | `--depth` | the lead's argument | the lead | the depth is the higher of it and the floor; one below the floor refuses |
+| `--owner` | the lead's argument, quoting the owner's instruction | the owner, by the review skill's rule | sets the depth to `--depth` exactly (light at least), recorded as `override=` with the quote; a later round narrows from it only at no greater depth |
 | `--reviewers`, `--lens` | the lead's arguments to verdict.sh | the lead | must cover every planned lens and the verifier, each planned lens at its planned effort or above; extra lenses are accepted |
 | `--pr` | the lead's argument | the lead | names the PR the record is posted on, so it can only describe that PR |
 | Repo (`REVIEW_REPO`, else `origin`'s URL) and the object store | the local clone | the lead | every object is read by a sha GitHub named; the code these scripts run from is stamped as `kit=` on the round line |
@@ -37,22 +39,23 @@ Depths, ranked none < light < focused < full; the floor is the highest depth amo
   A REVIEW.md line's `; depth: <d>` sets its paths' depth: higher anywhere, lower only on a path that is not
   sensitive (no line lowers a sensitive path, and a `## Sensitive` line below focused makes REVIEW.md unparsable).
 Lenses by depth (the tier's set: routine claims-auditor; standard correctness-reviewer; sensitive correctness-reviewer,
-claims-auditor, guardrail-reviewer and the lenses REVIEW.md names for the changed paths):
+guardrail-reviewer and the lenses REVIEW.md names for the changed paths):
   none     no reviewer: gates only.
   light    one lens and the verifier: correctness-reviewer, or claims-auditor when the tier is routine.
   focused  the tier's set, correctness-reviewer first and alone (`first`), then the rest (`then`) with its findings in
            their briefs.
   full     the tier's set at once.
-A fix round is a round after the PR's newest trusted review record (the table's "Previous round"); its paths are those
-changed since that record's `reviewed=` commit that the change still changes. In focused it runs each lens a must-fix
-on the record's `Blocking:` line came from (by its id's prefix, PREFIX), the lenses REVIEW.md names for its paths,
-correctness-reviewer when one of its paths is not routine, claims-auditor when every one is, and the sensitive set when
-one is sensitive; an id whose prefix names no lens runs the whole set. In light it reruns the one lens; in full, the
-whole set. The verifier runs on every round with a lens.
+A fix round is a round after the PR's newest trusted review record (the table's "Previous round") whose tier and
+depth are at least this round's (a round below either, such as one the owner overrode lighter, never narrows a deeper
+one); its paths are those changed since that record's `reviewed=` commit that the change still changes. In focused it
+runs each lens a must-fix on the record's `Blocking:` line came from (by its id's first part, PREFIX, so a promoted
+dismissal `COR-RO-1` is correctness-reviewer's; a part that names no lens, correctness-reviewer), the lenses REVIEW.md
+names for its paths, and the sensitive set when one of its paths is sensitive.
+In light it reruns the one lens; in full, the whole set. The verifier runs on every round with a lens.
 Effort per lens, the highest over the round's paths: a REVIEW.md `; effort: <lens>=<level>` on a line matching the
-path (raising or lowering it), else high for correctness-reviewer and control-prober on a sensitive path that is not
-prose (*.md, *.txt, licence files), else medium. The verifier is medium unless a line sets it. A lens may run above
-its planned effort, never below; the merge guard never reads effort.
+path (raising or lowering it), else high for correctness-reviewer and control-prober at depth full on a sensitive path
+that is not prose (*.md, *.txt, licence files), else medium. The verifier is medium unless a line sets it. A lens may
+run above its planned effort, never below; the merge guard never reads effort.
 """
 
 from __future__ import annotations
@@ -76,7 +79,7 @@ COR, CLM, GRD, CTL, LEAK = ("correctness-reviewer", "claims-auditor", "guardrail
 VERIFIER = "finding-verifier"
 LENSES = [COR, CLM, GRD, CTL, LEAK]
 PREFIX = {"COR": COR, "CLM": CLM, "GRD": GRD, "CTL": CTL, "LEAK": LEAK}
-TIER_SET = {"routine": [CLM], "standard": [COR], "sensitive": [COR, CLM, GRD]}
+TIER_SET = {"routine": [CLM], "standard": [COR], "sensitive": [COR, GRD]}
 DEPTHS = tiers.DEPTHS
 DRANK = {d: i for i, d in enumerate(DEPTHS)}
 ERANK = {e: i for i, e in enumerate(tiers.EFFORTS)}
@@ -84,7 +87,7 @@ HIGH_ON_CODE = {COR, CTL}
 TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
 MARKER = re.compile(r"<!-- loadout:review((?: [a-z]+=[^\s=]+)+) -->")
 TITLE = re.compile(r"🤖 Review: (pass|fail) \((routine|standard|sensitive) tier\)")
-FIELDS = {"sha", "state", "tier", "reviewed", "depth"}
+FIELDS = {"sha", "state", "tier", "reviewed", "depth", "override"}
 ROUND = re.compile("<!-- loadout" r":round((?: [a-z]+=[A-Za-z0-9._,:-]+)+) -->")
 RAW = re.compile(r"<details><summary>[^<\n]*</summary>\n\n(?:Clipped[^\n]*\n\n)?(`{3,})text\n(.*?)\1\n\n</details>",
                  re.S)
@@ -188,14 +191,15 @@ class Change:
         top = self.tier_of(paths)
         return set(TIER_SET[top]) | (self.named(paths) if top == "sensitive" else set())
 
-    def effort(self, lens: str, paths: list[str]) -> str:
+    def effort(self, lens: str, paths: list[str], depth: str) -> str:
         def one(p: str) -> str:
             r = self.rated[p]
             set_by = [e[lens] for e in r["efforts"] if lens in e]
             if set_by:
                 return max(set_by, key=ERANK.get)
             code = not any(g.match(p) for g in PROSE)
-            return "high" if lens in HIGH_ON_CODE and r["tier"] == "sensitive" and code else "medium"
+            deep = depth == "full" and lens in HIGH_ON_CODE and r["tier"] == "sensitive" and code
+            return "high" if deep else "medium"
         return max((one(p) for p in paths), key=ERANK.get)
 
 
@@ -238,10 +242,14 @@ def record_fields(c: dict) -> dict | None:
     return f
 
 
-def prior_round(c: dict | None, change: Change) -> tuple[str, list[dict]] | None:
-    """(reviewed commit, its must-fix items) when `c` can start a fix round of `change`; else None (a first review)."""
+def prior_round(c: dict | None, change: Change) -> tuple[str, list[dict], str] | None:
+    """(reviewed commit, its must-fix items, its depth) when `c` can start a fix round of `change`; else None.
+
+    A record below the change's tier (a routine one included) never starts one: it reviewed less than the change now
+    needs.
+    """
     f = record_fields(c) if c else None
-    if not f or f["tier"] == "routine":
+    if not f or tiers.RANK[f["tier"]] < tiers.RANK[change.tier] or f.get("depth") not in DRANK:
         return None
     raw = RAW.search("\n".join(body_lines(c)))
     if not raw:
@@ -259,7 +267,7 @@ def prior_round(c: dict | None, change: Change) -> tuple[str, list[dict]] | None
     if (run("git", "cat-file", "-e", f"{reviewed}^{{commit}}").returncode or reviewed == change.head
             or not is_ancestor(reviewed, change.head) or is_ancestor(reviewed, change.mb)):
         return None
-    return reviewed, items
+    return reviewed, items, f["depth"]
 
 
 # The plan.
@@ -269,19 +277,37 @@ def ordered(lenses: set[str]) -> list[str]:
     return sorted(lenses, key=lambda x: (LENSES.index(x) if x in LENSES else len(LENSES), x))
 
 
-def make_plan(change: Change, prior: tuple[str, list[dict]] | None, want: str | None) -> dict:
+def owner_quote(quote: str | None, want: str | None) -> str | None:
+    """The owner's words for an override, checked: one line, light or deeper; None when there is no override."""
+    if quote is None:
+        return None
+    if not quote.strip() or "\n" in quote or "\r" in quote or "-->" in quote or len(quote) > 300:
+        raise Refused("--owner quotes the owner's instruction: one line of at most 300 characters, without `-->`")
+    if want not in ("light", "focused", "full"):
+        raise Refused("--owner sets the depth --depth names: light, focused or full (an override never skips review)")
+    return quote
+
+
+def make_plan(change: Change, prior: tuple[str, list[dict], str] | None, want: str | None,
+              owner: str | None = None) -> dict:
     if want is not None and want not in DEPTHS:
         raise Refused(f"--depth is one of {', '.join(DEPTHS)} (got {want!r})")
-    if want is not None and DRANK[want] < DRANK[change.floor]:
+    owner = owner_quote(owner, want)
+    if owner is None and want is not None and DRANK[want] < DRANK[change.floor]:
         raise Refused(f"--depth {want} is below the floor the paths set, {change.floor}: a depth may be raised, never "
-                      "lowered")
-    depth = max(change.floor, want or "none", key=DRANK.get)
+                      "lowered, except by the owner's override (--owner)")
+    depth = want if owner is not None else max(change.floor, want or "none", key=DRANK.get)
     why = [f"the paths make it {change.tier} with depth floor {change.floor}"]
-    if want and want != change.floor:
+    if owner is not None:
+        why.append(f"set to {depth} by the owner's override")
+    elif want and want != change.floor:
         why.append(f"raised to {depth}")
     whole = change.tier_set(change.paths)
     light = {CLM} if change.tier == "routine" else {COR}
     paths, since, kind = change.paths, None, "first"
+    if prior and DRANK[prior[2]] < DRANK[depth]:
+        why.append(f"the previous round ran at {prior[2]}, below {depth}, so this round reviews the whole change")
+        prior = None
     if prior:
         fix = [p for p in git("diff", "--name-only", "--no-renames", prior[0], change.head).splitlines()
                if p in change.rated]
@@ -297,26 +323,23 @@ def make_plan(change: Change, prior: tuple[str, list[dict]] | None, want: str | 
         if kind == "fix":
             why.append("full: a fix round reruns the whole set")
     else:
-        prefixes = {x.strip().rsplit("-", 1)[0] for b in prior[1] for x in b["ids"].split(",") if x.strip()}
-        if prefixes - set(PREFIX):
-            lenses = whole
-            why.append("a blocking id's prefix names no lens, so the whole set runs")
-        else:
-            top = change.tier_of(paths)
-            lenses = {PREFIX[x] for x in prefixes} | change.named(paths) | ({CLM} if top == "routine" else {COR})
-            if top == "sensitive":
-                lenses |= set(TIER_SET["sensitive"])
-            why.append("a fix round: the lenses whose must-fix it answers and those its paths call for")
+        prefixes = {x.strip().split("-", 1)[0] for b in prior[1] for x in b["ids"].split(",") if x.strip()}
+        lenses = {PREFIX.get(x, COR) for x in prefixes} | change.named(paths) or {COR}
+        why.append("a fix round: the lenses whose must-fix it answers and those REVIEW.md names for its paths")
+        if change.tier_of(paths) == "sensitive":
+            lenses |= set(TIER_SET["sensitive"])
+            why.append("a fix path is sensitive, so the sensitive set runs too")
     run_ = ordered(lenses)
     first = [COR] if depth == "focused" and COR in run_ and len(run_) > 1 else []
     then = [x for x in run_ if x not in first]
-    effort = {x: change.effort(x, paths) for x in run_}
+    effort = {x: change.effort(x, paths, depth) for x in run_}
     if run_:
         set_by = [e[VERIFIER] for p in paths for e in change.rated[p]["efforts"] if VERIFIER in e]
         effort[VERIFIER] = max(set_by, key=ERANK.get) if set_by else "medium"
     return {"head": change.head, "tier": change.tier, "floor": change.floor, "depth": depth, "round": kind,
             "since": since, "first": first, "then": then, "verifier": VERIFIER if run_ else "", "effort": effort,
-            "planned": run_ + ([VERIFIER] if run_ else []), "why": why}
+            "planned": run_ + ([VERIFIER] if run_ else []), "override": depth if owner is not None else None,
+            "why": why}
 
 
 def read_pr(repo: str, number: str) -> tuple[Change, list[dict], str]:
@@ -383,6 +406,8 @@ def record_main(a: argparse.Namespace) -> int:
         raise Refused(f"PR {a.pr}'s paths make it {change.tier}, so --tier {a.tier} is too low (tier.sh lists the "
                       "paths)")
     if a.routine:
+        if a.owner is not None:
+            raise Refused("--tier routine runs no reviewer, so it takes no --owner")
         if a.depth not in (None, "none"):
             raise Refused("--tier routine runs no reviewer, so its depth is none")
         if change.floor != "none":
@@ -397,18 +422,27 @@ def record_main(a: argparse.Namespace) -> int:
         if not f or f["reviewed"] != a.reviewed or "depth" not in f or not planned:
             raise Refused("--repost posts the PR's newest trusted review record again, and that record must have "
                           "reviewed --reviewed and carry its depth and plan: record the round anew")
-        if DRANK[f["depth"]] < DRANK[change.floor]:
+        if a.owner is not None:
+            raise Refused("--repost carries the reposted record's own override, if it has one: pass no --owner")
+        carried = f.get("override")
+        if carried is not None and carried != f["depth"]:
+            raise Refused("the reposted record's override= names another depth than its depth=: record the round anew")
+        if DRANK[f["depth"]] < DRANK[change.floor] and carried is None:
             raise Refused(f"the reposted round ran depth {f['depth']}, below the floor {change.floor} at the head")
         p = {"planned": [] if planned == "none" else planned.split(","), "effort": {}, "depth": f["depth"],
              "round": "reposted"}
         check_round(p, a.reviewers, [])
         pairs = [f"depth={f['depth']}", f"floor={change.floor}", f"planned={planned}"]
         print(f"head {change.head}\ntier {change.tier}\ndepth {f['depth']}\npairs {' '.join(pairs)}")
+        if carried is not None:
+            print(f"override {carried}")
         return 0
-    p = make_plan(change, prior_round(newest_review(comments), change), a.depth)
+    p = make_plan(change, prior_round(newest_review(comments), change), a.depth, a.owner)
     check_round(p, a.reviewers, a.lens)
     pairs = [f"depth={p['depth']}", f"floor={p['floor']}", f"planned={','.join(p['planned']) or 'none'}"]
     print(f"head {change.head}\ntier {change.tier}\ndepth {p['depth']}\npairs {' '.join(pairs)}")
+    if p["override"]:
+        print(f"override {p['override']}")
     return 0
 
 
@@ -416,12 +450,14 @@ def preview_main(a: argparse.Namespace) -> int:
     repo = repo_name()
     change, comments, default = read_pr(repo, a.pr or current_pr(repo))
     p = {"pr": int(a.pr) if a.pr else None, "base": default, "tip": change.base,
-         **make_plan(change, prior_round(newest_review(comments), change), a.depth)}
+         **make_plan(change, prior_round(newest_review(comments), change), a.depth, a.owner)}
     if a.json:
         print(json.dumps(p))
         return 0
     for k in ("tier", "floor", "depth", "round"):
         print(f"{k}: {p[k]}")
+    if p["override"]:
+        print(f"override: depth {p['override']}, by the owner's words")
     print(f"since: {p['since'] or 'none (a first review)'}")
     for k in ("first", "then"):
         shown = ", ".join(f"{x} ({p['effort'][x]})" for x in p[k])
@@ -443,6 +479,7 @@ def main(argv: list[str]) -> int:
         if argv[0] == "record":
             p.add_argument("--pr", required=True)
             p.add_argument("--depth")
+            p.add_argument("--owner")
             p.add_argument("--reviewers", default="")
             p.add_argument("--lens", action="append", default=[])
             p.add_argument("--reviewed", default="")
@@ -458,6 +495,7 @@ def main(argv: list[str]) -> int:
         p = argparse.ArgumentParser(prog="plan.py")
         p.add_argument("--pr")
         p.add_argument("--depth")
+        p.add_argument("--owner")
         p.add_argument("--json", action="store_true")
         a = p.parse_args(argv)
         handler = preview_main

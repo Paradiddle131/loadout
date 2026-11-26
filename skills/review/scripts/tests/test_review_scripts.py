@@ -421,7 +421,7 @@ def test_tier_reads_this_repos_review_md_with_its_lenses(w: World) -> None:
     w.commit({"cloud/gcp/guard.py": "x\n"})
     code, out, err = tier(w)
     assert code == 0 and err == "", err
-    assert out == ["sensitive", "cloud/gcp/guard.py (lenses: control-prober, guardrail-reviewer)"]
+    assert out == ["sensitive", "cloud/gcp/guard.py (lenses: control-prober)"]
 
 
 def test_tier_takes_the_debrief_skill_as_sensitive_by_this_repos_review_md(w: World) -> None:
@@ -429,7 +429,7 @@ def test_tier_takes_the_debrief_skill_as_sensitive_by_this_repos_review_md(w: Wo
     w.commit({"skills/debrief/landings.md": "x\n"})
     code, out, err = tier(w)
     assert code == 0 and err == "", err
-    assert out == ["sensitive", "skills/debrief/landings.md (lenses: claims-auditor, guardrail-reviewer)"]
+    assert out == ["sensitive", "skills/debrief/landings.md (lenses: claims-auditor)"]
 
 
 @pytest.mark.parametrize("line, lenses", [

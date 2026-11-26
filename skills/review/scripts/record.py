@@ -2,8 +2,8 @@
 """Builds and compares the PR comments gate_stamp.sh and verdict.sh post as records (lib.sh has the format).
 
   record.py build --kind gates|review --sha <head> --state success|failure --title <first line>
-                  [--tier <tier>] [--reviewed <sha>] [--depth <d>] [--round <key=value>]... [--line <markdown line>]...
-                  [--file <raw output>] [--details <summary>]
+                  [--tier <tier>] [--reviewed <sha>] [--depth <d>] [--override <d>] [--round <key=value>]...
+                  [--line <markdown line>]... [--file <raw output>] [--details <summary>]
     prints the body: the title, the marker line, the round line, the lines, and the raw output under <details> in
     a fence longer than any backtick run in it, clipped (with a note) so the whole body fits GitHub's comment limit.
   record.py review-round --reviewers <names> --cycle <n> --dupes <n> --nits <n> --mustfix <n>
@@ -26,7 +26,8 @@ skill); never the repo under review. Keys are lowercase letters; values are lett
 only `lens` may repeat. A review round adds cycle, lenses, dupes, mustfix, nits, one lens=<name>:<model>:<effort>:
 <tokens>:<seconds>:<findings> per agent, and dismissals and promoted from the verifier's one header line (a re-post:
 repost=1, lenses and mustfix only); a review record also carries depth, floor and planned (plan.py's: the depth
-the round ran at, the paths' floor, and the planned lenses with the verifier, or `none`).
+the round ran at, the paths' floor, and the planned lenses with the verifier, or `none`); a round whose depth the
+owner set carries override=<that depth> on its marker.
 """
 
 from __future__ import annotations
@@ -256,6 +257,10 @@ def build(a: argparse.Namespace) -> str:
         marker += f" reviewed={a.reviewed}"
     if a.depth:
         marker += f" depth={a.depth}"
+    if a.override:
+        if a.override != a.depth or a.override == "none":
+            sys.exit("record.py: --override names the depth the owner set (light, focused or full), the same as --depth")
+        marker += f" override={a.override}"
     marker += " -->"
     try:
         third = round_line(a.round)
@@ -306,6 +311,7 @@ def main() -> int:
     b.add_argument("--tier", choices=["routine", "standard", "sensitive"])
     b.add_argument("--reviewed")
     b.add_argument("--depth", choices=["none", "light", "focused", "full"])
+    b.add_argument("--override")
     b.add_argument("--round", action="append", default=[])
     b.add_argument("--line", action="append", default=[])
     b.add_argument("--file")
