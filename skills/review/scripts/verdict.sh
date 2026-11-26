@@ -39,7 +39,7 @@
 #   its `VERDICT: PASS|FAIL <sha>` line and its `Reviewed: <sha>` line (agents/finding-verifier.md § Output; a sha
 #   may be abbreviated to 7 or more characters) must both name --reviewed, and the result is that VERDICT; a
 #   --result that differs is refused, and so is an output with a second `VERDICT:`, `Reviewed:` or `Blocking:` line
-#   outside a code fence.
+#   outside a code fence; a header line inside a fence is never read.
 #   The line after `Reviewed:` must be the verifier's `Blocking:` line (blocking.py has the shape and its limits):
 #   `none` for a PASS; for a FAIL the must-fix findings it lists, each heading a `###` block below, with a harm of two
 #   words or more not made only of blocking.py's filler words. The lead acts on the line (the review skill).
@@ -101,13 +101,10 @@ if [ "$tier" != routine ]; then
   sha_re='`?([0-9a-f]{7,40})`?'
   verdict_re="^[[:space:]]*VERDICT: (PASS|FAIL) ${sha_re}[[:space:]]*\$"
   reviewed_re="^[[:space:]]*Reviewed: ${sha_re}[[:space:]]*\$"
-  # Every reader reads the output as GitHub will store it, so a character it drops cannot make two of them pick
-  # different lines; -a: a NUL byte in the output can make grep call the file binary and print no line.
-  as_stored=$(mktemp)
-  python3 "$here/blocking.py" --stored "$file" >"$as_stored" || { rm -f "$as_stored"; die "--file $file cannot be read"; }
-  verdict_line=$(grep -a -m 1 -E '^[[:space:]]*VERDICT:' "$as_stored" || true)
-  reviewed_line=$(grep -a -m 1 -E '^[[:space:]]*Reviewed:' "$as_stored" || true)
-  rm -f "$as_stored"
+  # blocking.py picks the header lines as it reads the rest: from the output as GitHub will store it, the first of
+  # each outside a code fence, so a dropped character or a fenced decoy cannot make two readers pick different lines.
+  header=$(python3 "$here/blocking.py" --header "$file") || die "--file $file cannot be read"
+  verdict_line=$(sed -n 1p <<<"$header") reviewed_line=$(sed -n 2p <<<"$header")
   shape="--file is not finding-verifier's output: it needs a \`VERDICT: PASS|FAIL <sha>\` line and a \`Reviewed: <sha>\` line"
   [[ "$verdict_line" =~ $verdict_re ]] ||
     die "$shape (its verdict line: '${verdict_line:-none}')."

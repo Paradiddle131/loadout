@@ -618,16 +618,15 @@ def test_verdict_refuses_output_without_the_verifiers_lines(w: World, tmp_path: 
     assert w.writes() == []
 
 
-def test_verdict_reads_the_first_verdict_lines_in_a_fence_and_an_abbreviated_sha(w: World, tmp_path: Path) -> None:
-    other = w.commit({"src/app.py": "x = 3\n"})
+def test_verdict_never_reads_a_header_in_a_fence_and_takes_an_abbreviated_sha(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    text = (f"{DISMISSED}\n```\nVERDICT: FAIL `{head[:12]}`\nReviewed: {head[:12]}\n{BLOCKING_LINE}\n```\n" + BLOCKING
-            + f"- evidence: verdict.sh ->\nVERDICT: PASS {head}\nReviewed: {other}\n")
+    text = (f"```\nVERDICT: PASS {head}\nReviewed: {head}\nBlocking: none\n```\n\n"  # a decoy quoted above the header
+            f"VERDICT: FAIL `{head[:12]}`\nReviewed: {head[:12]}\n{BLOCKING_LINE}\n{DISMISSED}\n\n{BLOCKING}")
     (tmp_path / "out.txt").write_text(text)
     done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head,
                  "--file", str(tmp_path / "out.txt"))
     assert done.returncode == 0, done.stderr
-    assert f"{REVIEW} sha={head} state=failure" in w.comments()[0]["body"]
+    assert f"{REVIEW} sha={head} state=failure" in w.comments()[0]["body"] and "mustfix=1" in w.comments()[0]["body"]
 
 
 def test_verdict_reads_its_lines_past_a_nul_byte(w: World, tmp_path: Path) -> None:
@@ -964,7 +963,7 @@ def test_verdict_refuses_when_the_reader_prints_no_count(w: World, tmp_path: Pat
     head = w.commit({"src/app.py": "x = 2\n"})
     bad = tmp_path / "talking-python"
     bad.mkdir()
-    (bad / "python3").write_text('#!/bin/sh\n[ "$2" = --stored ] && exec cat "$3"\necho many\n')
+    (bad / "python3").write_text('#!/bin/sh\n[ "$2" = --header ] && { grep -m1 "^VERDICT:" "$3"; grep -m1 "^Reviewed:" "$3"; exit 0; }\necho many\n')
     (bad / "python3").chmod(0o755)
     done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head,
                  "--file", review_file(tmp_path, head, "FAIL"), PATH=f"{bad}:{w.env['PATH']}")
@@ -987,7 +986,7 @@ def test_verdict_refuses_when_it_cannot_read_the_blocking_line(w: World, tmp_pat
     head = w.commit({"src/app.py": "x = 2\n"})
     bad = tmp_path / "failing-python"
     bad.mkdir()
-    (bad / "python3").write_text('#!/bin/sh\n[ "$2" = --stored ] && exec cat "$3"\nexit 1\n')
+    (bad / "python3").write_text('#!/bin/sh\n[ "$2" = --header ] && { grep -m1 "^VERDICT:" "$3"; grep -m1 "^Reviewed:" "$3"; exit 0; }\nexit 1\n')
     (bad / "python3").chmod(0o755)
     for verdict in ("PASS", "FAIL"):
         done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head,

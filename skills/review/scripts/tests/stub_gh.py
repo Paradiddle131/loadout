@@ -12,7 +12,8 @@ State lives in $STUB_DIR:
 STUB_FAIL=<text>: a call whose endpoint contains it fails the way gh does on an HTTP error.
 A posted body is stored as GitHub stores it (probed by posting and reading back, record.py § stored has the list):
 format characters dropped; CR, CRLF and the other line breaks made a newline; Unicode spaces made a space; the
-other C0 and C1 controls made caret notation; and a `!` run before a `[` dropped where a `]` follows later.
+other C0 and C1 controls made caret notation; and a `!` run before a `[` dropped where a `]` follows it in the same
+paragraph (before a blank line).
 STUB_MANGLE=1: a comment read back by id differs from the one posted.
 STUB_SLEEP=<seconds>: every call waits that long first (a slow GitHub).
 """
@@ -80,7 +81,7 @@ if method == "POST" and re.search(r"/issues/\d+/comments$", ep):
     stored = re.sub("[\x1f\xa0\u1680\u2000-\u200a\u202f\u205f\u3000]", " ", stored)
     stored = re.sub("[\x01-\x07\x0e-\x1b\x80-\x84\x86-\x9f]",
                     lambda m: "^" + chr(ord(m.group()) + (0x40 if ord(m.group()) < 0x80 else -0x40)), stored)
-    stored = re.sub(r"!+(?=\[[\s\S]*\])", "", stored)  # a `!` run before a `[`, where a `]` follows later
+    stored = re.sub(r"!+(?=\[(?:(?!\n[ \t]*\n)[\s\S])*\])", "", stored)  # a `!` run before a `[`, where a `]` follows in its paragraph
     new = {"id": 1000 + len(comments), "body": stored, "author_association": "OWNER",
            "created_at": f"2000-01-01T00:{len(comments):02d}:00Z",
            "html_url": f"https://github.com/example-owner/example-repo/pull/{n}#issuecomment-{1000 + len(comments)}"}

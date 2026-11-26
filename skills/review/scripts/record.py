@@ -254,7 +254,7 @@ def review_round(a: argparse.Namespace) -> list[str]:
 # vowel separator, the invisible math operators and the interlinear annotation marks. Made a newline: CR, CRLF, VT,
 # FF, NEL, U+001C to U+001E and the line and paragraph separators. Made a space: U+001F and the Unicode spaces. Made
 # caret notation (`^A`, `^[`): the other C0 and C1 controls but tab and backspace. And a run of `!` right before a `[`
-# loses its `!`s wherever a `]` follows it later in the body (markdown image syntax), inside code fences too. A record
+# loses its `!`s where a `]` follows it in the same paragraph (markdown image syntax), inside code fences too. A record
 # holds such text only where it quotes a reviewer, so it is sent already as it will be stored: nothing changes on the
 # way, and the read-back matches. Every `![` becomes `! [`, which is kept wherever it stands.
 DROPPED = "\u200b\u200c\u200d\u2060\ufeff\u200e\u200f\u061c\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069" \
