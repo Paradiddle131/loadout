@@ -258,7 +258,9 @@ def prior_round(c: dict | None, change: Change) -> tuple[str, list[dict], str] |
     if not raw:
         return None
     text = raw.group(2)
-    try:  # the header verdict.sh read: the output's first lines, any other header-shaped line refusing it
+    # The header verdict.sh read: the output's first lines. blocking.read refuses any other header-shaped line, so the
+    # header's `Reviewed:` line is the output's only one, and the reviewed-mismatch test pins that it names the record's.
+    try:
         items = blocking.read(text)
         named = REVIEWED_SHA.match(blocking.header(text.split("\n"))[1][1])
     except ValueError:

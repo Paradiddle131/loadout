@@ -13,7 +13,8 @@ its fields are `- <name>: <value>` lines at the start of a line; its section is 
 above it (Must-fix, Nits, Pre-existing, Settled, Dropped, Unverified, Not checked); other headings are quoted text.
 It is a must-fix when its `rank:` line says so, or, with no rank line, when its section is the must-fix one;
 a must-fix needs a `harm:` line with a real value (text that may wrap onto the next indented lines).
-Lines inside a fence (```, ~~~) are quoted material, so a heading or a field there counts for nothing.
+Lines inside a fence (```, ~~~, indented at most three spaces) are quoted material, so a heading or a field there
+counts for nothing; containers (list items, HTML blocks) are not modelled, so a count may shift, never a verdict.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ import json
 import re
 import sys
 
-FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")  # four spaces in, a run is indented code, not a fence
 H2 = re.compile(r"^##\s+(\S.*?)\s*$")
 H3 = re.compile(r"^###\s+(\S.*?)\s*$")
 SECTION = re.compile(r"(must[\s_-]*fix|nits?|pre-?existing|settled|dropped|unverified|not checked)\b", re.I)

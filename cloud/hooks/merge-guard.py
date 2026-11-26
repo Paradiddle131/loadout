@@ -233,6 +233,16 @@ def record_problem(kind: str, c: dict, head: str, trusted: list[dict] | None = N
     return "", fields
 
 
+def clones_by_name(name: str) -> list[Path]:
+    """The folders under CLONES named `name` in any letter case, the exact spelling first: where a cloud session keeps
+    the repo's clone; paths_rating still checks each one's origin."""
+    try:
+        found = [d for d in CLONES.iterdir() if d.name.lower() == name.lower() and d.is_dir()]
+    except OSError:
+        return []
+    return sorted(found, key=lambda d: (d.name != name, d.name))
+
+
 def paths_rating(repo: str, head: str, base: object, cwd: str) -> tuple[str, str, bool] | None:
     """(tier, depth floor, pinned) of the head's paths, from `plan.py floor` in a local clone of `repo`.
 
@@ -318,8 +328,11 @@ def check_merge(repo: str | None, number: str | None, expected: str | None, cwd:
     base = ((pr.get("base") or {}).get("repo") or {}).get("default_branch")
     rated = paths_rating(repo, head, base, cwd)
     cloud_clone = CLONES / repo.split("/")[-1]
-    if rated is None and cloud_clone.is_dir() and cloud_clone.resolve() != Path(cwd).resolve():
-        rated = paths_rating(repo, head, base, str(cloud_clone))
+    for named in clones_by_name(repo.split("/")[-1]):  # GitHub ignores case, so a merge may name it in any
+        if rated is not None:
+            break
+        if named.resolve() != Path(cwd).resolve():
+            rated = paths_rating(repo, head, base, str(named))
     gates_alone = bool(rated and rated[2] and rated[1] == "none")
     # Floor none, but against the clone's own ref: the relief needs GitHub's tip, so say how to get it.
     unpinned_none = bool(rated and not rated[2] and rated[1] == "none")
