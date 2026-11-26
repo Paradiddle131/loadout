@@ -1612,3 +1612,20 @@ def test_verdict_refuses_a_must_fix_whose_heading_github_shows_in_a_code_block(w
     out.write_text(f"VERDICT: FAIL {head}\nReviewed: {head}\n{BLOCKING_LINE}\n{DISMISSED}\n\n## Must-fix\n{body}")
     done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head, "--file", str(out))
     assert done.returncode == 2 and "no `###` heading" in done.stderr and w.writes() == [], done.stderr
+
+
+@pytest.mark.parametrize("body, kept", [
+    ("a ![x] b", "a [x] b"),  # a `]` in the same paragraph: GitHub drops the `!`
+    ("a !![x]", "a [x]"),
+    ("a ![b\nc] d", "a [b\nc] d"),  # the `]` on the next line, same paragraph
+    ("a ![b\n\nc]", "a ![b\n\nc]"),  # the `]` only after a blank line: kept
+    ("a ![b", "a ![b"),  # no `]` at all: kept
+])
+def test_the_stub_drops_a_bang_before_a_bracket_only_within_its_paragraph(tmp_path: Path, body: str,
+                                                                          kept: str) -> None:
+    (tmp_path / "comments.json").write_text("[]")
+    done = subprocess.run(["python3", str(SCRIPTS / "tests" / "stub_gh.py"), "api",
+                           "repos/example-owner/example-repo/issues/1/comments", "-f", f"body={body}"],
+                          capture_output=True, text=True, env={**os.environ, "STUB_DIR": str(tmp_path)})
+    assert done.returncode == 0, done.stderr
+    assert json.loads((tmp_path / "comments.json").read_text())[0]["body"] == kept
