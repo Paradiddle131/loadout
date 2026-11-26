@@ -18,7 +18,10 @@ back on the PRs, and sums both up. GitHub holds every record; the JSONL files ar
       the branch's first-parent line (default origin/main) within --days (30) of its merge that change or delete a
       line the PR added, by `git blame` on each such commit's parent; each is a candidate escape, never a finding,
       until an auditor confirms it. Each clone must hold full history (not shallow); a passed PR whose repo has no
-      --clone, or that git cannot read, keeps a row with its error and counts as skipped.
+      --clone, that git cannot read or whose merge commit is not on the branch keeps a row with its error and counts
+      as skipped; a single-parent merge of a PR with more than one commit (rebase or squash, which git cannot tell
+      apart) is read from its last commit only and counted so, and so is a PR whose window the branch has not
+      reached yet.
   audit.py summary --dir <dir> [--session <id>] [--json]
       prints the batch's numbers: rounds, passes, convergence, lens yield and, from the audits, how often a
       checkable finding was wrong or mattered and a must-fix was ranked too high, each with its 95% interval,
@@ -212,9 +215,8 @@ def harvest(a: argparse.Namespace) -> int:
             row = {"repo": repo, "pr": n, "title": pr["title"], "state": pr["state"],
                    "created_at": pr["created_at"], "merged_at": pr.get("merged_at"),
                    "head": pr["head"]["sha"], "branch": pr["head"]["ref"], "merge_commit": pr.get("merge_commit_sha")}
-            if row["merged_at"]:  # tells a rebase merge from a squash: the PR's own commits, by subject
-                row["commit_subjects"] = [(c.get("commit", {}).get("message") or "").split("\n")[0]
-                                          for c in pages(f"repos/{repo}/pulls/{n}/commits")]
+            if row["merged_at"]:  # one commit, or more that a single-parent merge may hold only the last of
+                row["commits"] = sum(1 for _ in pages(f"repos/{repo}/pulls/{n}/commits"))
             rows["prs"].append(row)
             newest = None  # the newest trusted comment with a review marker line, picked as the merge guard picks it
             for c in pages(f"repos/{repo}/issues/{n}/comments"):
@@ -300,21 +302,35 @@ def harvest(a: argparse.Namespace) -> int:
 
 
 def git_out(clone: str, *args: str) -> str:
-    return subprocess.run(["git", "-C", clone, *args], capture_output=True, text=True, check=True).stdout
+    """One git command's output, as git wrote it whatever the bytes (a name or line that is not UTF-8 survives the
+    round trip back into a later git argument). Pathspecs are literal, so a file name is never read as a pattern."""
+    return subprocess.run(["git", "--literal-pathspecs", "-C", clone, *args], capture_output=True, check=True,
+                          encoding="utf-8", errors="surrogateescape").stdout
+
+
+def shown(path: str) -> str:
+    """A file name git gave as bytes, made printable for the JSON rows (a byte that is not UTF-8 reads as U+FFFD)."""
+    return path.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+
+
+# Plumbing only (diff-tree, rev-list, blame --porcelain): none reads colour, prefix, external-diff or textconv
+# settings, and names come NUL-separated, so the user's or the clone's git config cannot change what is parsed.
+# Blame is the one command that reads a config that changes its answer (an ignore-revs file), so it is cleared.
+DIFF = ("diff-tree", "-r", "--no-renames", "--no-color", "--no-ext-diff", "--no-textconv")
+BLAME = ("blame", "--porcelain", "--no-ignore-revs-file")
+BLAME_HEADER = re.compile(r"([0-9a-f]{40,64}) \d+ \d+")  # the first line of each blamed line's entry in porcelain
 
 
 def touched_lines(clone: str, commit: str) -> dict[str, list[tuple[int, int]]]:
     """The old-side line ranges (start, count) each file loses or changes in `commit` against its first parent.
 
-    File names come NUL-separated (no quoting), and each file's hunks from its own diff, so no header line is parsed.
+    File names come NUL-separated (no quoting), and each file's hunks from its own diff, so only hunk lines are read:
+    with no context lines, every other line of a hunk starts with `+`, `-` or `\\`, never with `@@`.
     """
     out: dict[str, list[tuple[int, int]]] = defaultdict(list)
-    plain = ("-c", "core.quotePath=false", "-c", "diff.noprefix=false")
-    names = git_out(clone, *plain, "diff", "-z", "--name-only", "--no-renames", "--diff-filter=MD", f"{commit}^1",
-                    commit).split("\0")
+    names = git_out(clone, *DIFF, "-z", "--name-only", f"{commit}^1", commit).split("\0")
     for path in filter(None, names):
-        for ln in git_out(clone, *plain, "diff", "-U0", "--no-renames", "--no-ext-diff", f"{commit}^1", commit,
-                          "--", path).split("\n"):
+        for ln in git_out(clone, *DIFF, "-p", "-U0", f"{commit}^1", commit, "--", path).split("\n"):
             if ln.startswith("@@") and (m := re.match(r"@@ -(\d+)(?:,(\d+))? ", ln)):
                 start, count = int(m.group(1)), int(m.group(2) if m.group(2) is not None else 1)
                 if count:
@@ -322,42 +338,45 @@ def touched_lines(clone: str, commit: str) -> dict[str, list[tuple[int, int]]]:
     return out
 
 
-def escape_candidates(clone: str, pr_commits: set[str], merge: str, branch: str, days: int) -> list[dict]:
-    """Commits on `branch`'s first-parent line within `days` of `merge` that change lines one of `pr_commits` wrote."""
-    when = int(git_out(clone, "show", "-s", "--format=%ct", merge).strip())
-    later = git_out(clone, "rev-list", "--first-parent", "--reverse", f"{merge}..{branch}").split()
+def commit_time(clone: str, commit: str) -> int:
+    return int(git_out(clone, "rev-list", "--no-walk", "--timestamp", commit).split()[0])
+
+
+def escape_candidates(clone: str, pr_commits: set[str], merge: str, branch: str, days: int) -> tuple[list[dict], bool]:
+    """Commits on `branch`'s first-parent line within `days` of `merge` that change lines one of `pr_commits` wrote,
+    and whether the window is still open (the branch's tip is older than the window's end, so more may come).
+
+    Every commit after the merge is read by its own time: one whose clock is ahead does not end the walk."""
+    when = commit_time(clone, merge)
+    end = when + days * 86400
+    later = git_out(clone, "rev-list", "--first-parent", "--reverse", "--timestamp", f"{merge}..{branch}").split("\n")
     found = []
-    for c in later:
-        at = int(git_out(clone, "show", "-s", "--format=%ct", c).strip())
-        if at > when + days * 86400:
-            break
+    for at, c in (ln.split() for ln in later if ln):
+        if int(at) > end:
+            continue
         hits: dict[str, int] = {}
         for path, ranges in touched_lines(clone, c).items():
             for start, count in ranges:
-                blame = git_out(clone, "blame", "--porcelain", "-L", f"{start},+{count}", f"{c}^1", "--", path)
-                n = sum(1 for ln in blame.split("\n") if re.match(r"[0-9a-f]{40} \d+ \d+", ln)
-                        and ln.split()[0] in pr_commits)
+                blame = git_out(clone, *BLAME, "-L", f"{start},+{count}", f"{c}^1", "--", path)
+                n = sum(1 for ln in blame.split("\n") if (m := BLAME_HEADER.match(ln)) and m.group(1) in pr_commits)
                 if n:
-                    hits[path] = hits.get(path, 0) + n
+                    hits[shown(path)] = hits.get(shown(path), 0) + n
         if hits:
-            found.append({"fix": c, "days": round((at - when) / 86400, 1), "files": sorted(hits),
+            found.append({"fix": c, "days": round((int(at) - when) / 86400, 1), "files": sorted(hits),
                           "lines": sum(hits.values())})
-    return found
+    return found, commit_time(clone, branch) < end
 
 
-def merged_commits(clone: str, merge: str, subjects: list[str] | None) -> set[str]:
-    """The commits a PR's merge put on the branch: a merge commit's second-parent side, else the last first-parent
-    commits whose subjects are the PR's own commit subjects in order (a rebase merge), else the merge alone (squash)."""
+def merged_commits(clone: str, merge: str, count: int | None) -> tuple[set[str], str]:
+    """The commits a PR's merge put on the branch, and whether they are "all" of them or the "last only".
+
+    A merge commit's second-parent side is all of them. A single-parent merge is all of them only when the PR had one
+    commit: with more, a rebase put them on the branch and a squash did not, and git cannot tell which, so only the
+    merge commit counts and the row says so (as it does when the harvest did not count the PR's commits)."""
     parents = git_out(clone, "rev-list", "--parents", "-n", "1", merge).split()[1:]
     if len(parents) > 1:
-        return set(git_out(clone, "rev-list", f"{parents[0]}..{merge}").split())
-    if subjects and len(subjects) > 1:
-        line = git_out(clone, "log", "--first-parent", "--format=%H %s", "-n", str(len(subjects)),
-                       merge).strip().split("\n")
-        shas = [x.split(" ", 1)[0] for x in line]
-        if [x.split(" ", 1)[1] if " " in x else "" for x in reversed(line)] == subjects:
-            return set(shas)
-    return {merge}
+        return set(git_out(clone, "rev-list", f"{parents[0]}..{merge}").split()), "all"
+    return {merge}, "all" if count == 1 else "last only"
 
 
 def escapes(a: argparse.Namespace) -> int:
@@ -366,10 +385,14 @@ def escapes(a: argparse.Namespace) -> int:
         sys.exit(f"audit.py: {a.dir} holds no harvest; run `audit.py harvest --out {a.dir}` first")
     clones = {}
     for spec in a.clone:
-        repo, sep, path = spec.rpartition("=")
-        if not sep or not repo or not path:
+        repo, sep, path = spec.partition("=")  # a repo name never holds `=`, a path may
+        if not sep or "/" not in repo or not path:
             sys.exit(f"audit.py: --clone is <owner>/<name>=<path of a full-history clone>, not {spec!r}")
-        if git_out(path, "rev-parse", "--is-shallow-repository").strip() == "true":
+        try:
+            shallow = git_out(path, "rev-parse", "--is-shallow-repository").strip() == "true"
+        except (subprocess.CalledProcessError, OSError):
+            sys.exit(f"audit.py: {path} is not a git clone (--clone {spec!r})")
+        if shallow:
             sys.exit(f"audit.py: {path} is a shallow clone, so blame cannot see who wrote a line; fetch its history "
                      "(`git fetch --unshallow`) first")
         clones[repo] = path
@@ -385,10 +408,14 @@ def escapes(a: argparse.Namespace) -> int:
             rows.append(row)  # kept and counted as skipped, so the batch's denominator stays whole
             continue
         try:
-            pr_commits = merged_commits(clone, merge, p.get("commit_subjects"))
-            found = escape_candidates(clone, pr_commits, merge, a.branch, a.days)
+            if subprocess.run(["git", "-C", clone, "merge-base", "--is-ancestor", merge, a.branch],
+                              capture_output=True).returncode == 1:
+                raise subprocess.CalledProcessError(1, "merge-base", stderr=f"the merge commit is not on {a.branch}")
+            pr_commits, row["commits"] = merged_commits(clone, merge, p.get("commits"))
+            found, row["window_open"] = escape_candidates(clone, pr_commits, merge, a.branch, a.days)
         except subprocess.CalledProcessError as exc:
-            row["error"] = f"git failed: {(exc.stderr or '').strip()[:200]}"
+            row.pop("commits", None)
+            row["error"] = f"git failed: {shown(exc.stderr or '').strip()[:200]}"
             rows.append(row)  # kept, so the summary counts it as skipped instead of losing it
             print(f"{p['repo']}#{p['pr']}: skipped, {row['error']}", file=sys.stderr)
             continue
@@ -402,7 +429,8 @@ def escapes(a: argparse.Namespace) -> int:
             fh.write(json.dumps(r, ensure_ascii=False) + "\n")
     skipped = sum("error" in r for r in rows)
     print(f"escapes: {len(rows)} merged on a pass, {sum(bool(r['candidates']) for r in rows)} with a candidate, "
-          f"{skipped} skipped")
+          f"{skipped} skipped, {sum(r.get('commits') == 'last only' for r in rows)} counted from the last commit "
+          f"only, {sum(bool(r.get('window_open')) for r in rows)} with the window still open")
     return 0
 
 
@@ -563,12 +591,15 @@ def summarize(d: Path, session: str | None) -> dict:
                          and f["must_fix"] for f in finds)]
     checkable = [j for j in audits if j.get("correct") in ("yes", "no")]
     version_of = {(r["repo"], r["pr"]): r.get("v") or UNSTAMPED for r in rounds}  # the newest round's, as sorted
-    esc: dict[str, dict] = defaultdict(lambda: {"passed_merges": 0, "with_candidate": 0, "skipped": 0})
+    esc: dict[str, dict] = defaultdict(lambda: {"passed_merges": 0, "with_candidate": 0, "skipped": 0,
+                                                "last_only": 0, "window_open": 0})
     for e in load(d, "escapes") if (d / "escapes.jsonl").exists() else []:
         for k in (f"depth {e.get('depth') or UNSTAMPED}", f"v {version_of.get((e['repo'], e['pr']), UNSTAMPED)}"):
             esc[k]["passed_merges"] += 1
             esc[k]["with_candidate"] += bool(e["candidates"])
             esc[k]["skipped"] += "error" in e
+            esc[k]["last_only"] += e.get("commits") == "last only"
+            esc[k]["window_open"] += bool(e.get("window_open"))
     merged = [c for c in changes if c["merged"]]
     return {**_costs(rounds, by_pr),
         "rounds": len(rounds), "changes": len(changes),
@@ -681,10 +712,12 @@ def summary(a: argparse.Namespace) -> int:
     for k, v in s["depth"].items():
         print(f"| {k} | {v} |")
     if s["escape_candidates"]:
-        print("\n| Escape candidates by | Merged on a pass | With a later fix to their lines | Skipped (no clone, or git failed) |"
-              "\n|---|---|---|---|")
+        print("\n| Escape candidates by | Merged on a pass | With a later fix to their lines "
+              "| Skipped (no clone, or git failed) | Read from the last commit only | Window still open |"
+              "\n|---|---|---|---|---|---|")
         for k, v in s["escape_candidates"].items():
-            print(f"| {k} | {v['passed_merges']} | {v['with_candidate']} | {v['skipped']} |")
+            print(f"| {k} | {v['passed_merges']} | {v['with_candidate']} | {v['skipped']} | {v['last_only']} "
+                  f"| {v['window_open']} |")
     print("\n| Needs a look | Rounds | Must-fix per round | Why |\n|---|---|---|---|")
     for c in s["attention"]:
         why = [w for w, on in (("grew", c["grew"]), ("merged without a pass", c["merged_without_pass"]),
