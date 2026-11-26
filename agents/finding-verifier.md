@@ -58,9 +58,9 @@ Settled in the brief: none | <each line of the brief's settled list, quoted verb
 Dismissals: re-ran <n>, promoted <m>
 ```
 `FAIL` when any finding is `must-fix`, else `PASS`.
-Write the header lines, `VERDICT:` through `Dismissals:`, as plain lines outside any code fence.
+Write the header lines, `VERDICT:` through `Dismissals:`, as the output's first lines, plain and outside any code fence: `verdict.sh` reads the header there and nowhere else.
 The `Dismissals:` line is on every output, the header block's last, after the settled lines, exactly `Dismissals: re-ran <n>, promoted <m>` with digits only: `<n>` counts each `Ruled out:` entry you challenged or re-ran, once, and `<m>` those promoted; `Dismissals: re-ran 0, promoted 0` when no lens listed any.
-A quoted steering or settled line that starts with `Dismissals:` is written with a leading `> `, so no line but yours starts that way.
+A quoted steering or settled line, or any line below the header, that starts with `VERDICT:`, `Reviewed:`, `Blocking:` or `Dismissals:` is written with a leading `> `, anywhere, a code fence included, so no line but yours starts that way (`verdict.sh` refuses any other `VERDICT:`, `Reviewed:` or `Blocking:` line, fenced or not).
 The `Blocking:` line, one line of JSON right after `Reviewed:`, lists every must-fix wherever its block sits, with the harm its block names; `none` on a `PASS`; `verdict.sh` reads this line and, of the blocks below, only whether each id it lists opens a `###` heading outside a code fence.
 Then `Lens heads:` with each lens and the head it read. Then `## Must-fix`, `## Nits`, `## Pre-existing`, each finding as one block:
 

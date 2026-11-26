@@ -35,9 +35,12 @@
 #   --reviewed is the commit the reviewers read (required for standard and sensitive): the PR's head must be it,
 #   or differ from it only by clean merges of the default branch (each merge's tree is what
 #   `git merge-tree --write-tree` gives for its parents), so a commit nobody reviewed refuses the verdict.
-#   --file (standard and sensitive) is finding-verifier's output: its first `VERDICT: PASS|FAIL <sha>` line and
-#   its first `Reviewed: <sha>` line (agents/finding-verifier.md § Output; a sha may be abbreviated to 7 or more
-#   characters) must both name --reviewed, and the result is that VERDICT; a --result that differs is refused.
+#   --file (standard and sensitive) is finding-verifier's output, read as GitHub will store it (record.py § stored):
+#   its header is its first lines (agents/finding-verifier.md § Output), and its first non-blank line
+#   `VERDICT: PASS|FAIL <sha>` and the next, `Reviewed: <sha>` (a sha may be abbreviated to 7 or more characters),
+#   must both name --reviewed, and the result is that VERDICT; a --result that differs is refused, and so is an
+#   output with any other line, fenced or not and however indented, that starts with `VERDICT:`, `Reviewed:` or
+#   `Blocking:`.
 #   The line after `Reviewed:` must be the verifier's `Blocking:` line (blocking.py has the shape and its limits):
 #   `none` for a PASS; for a FAIL the must-fix findings it lists, each heading a `###` block below, with a harm of two
 #   words or more not made only of blocking.py's filler words. The lead acts on the line (the review skill).
@@ -99,9 +102,15 @@ if [ "$tier" != routine ]; then
   sha_re='`?([0-9a-f]{7,40})`?'
   verdict_re="^[[:space:]]*VERDICT: (PASS|FAIL) ${sha_re}[[:space:]]*\$"
   reviewed_re="^[[:space:]]*Reviewed: ${sha_re}[[:space:]]*\$"
-  # -a: a NUL byte in the output can make grep call the file binary and print no line.
-  verdict_line=$(grep -a -m 1 -E '^[[:space:]]*VERDICT:' "$file" || true)
-  reviewed_line=$(grep -a -m 1 -E '^[[:space:]]*Reviewed:' "$file" || true)
+  # blocking.py picks the header lines as it reads the rest: the first lines of the output as GitHub will store it,
+  # refusing any other header-shaped line, so a dropped character or a decoy cannot make two readers pick different lines.
+  why=$(mktemp)
+  header=$(python3 "$here/blocking.py" --header "$file" 2>"$why") || {
+    reason=$(cat "$why"); rm -f "$why"
+    die "the verifier's output is refused: ${reason:-blocking.py cannot read --file $file} (agents/finding-verifier.md § Output); rerun the verifier."
+  }
+  rm -f "$why"
+  verdict_line=$(sed -n 1p <<<"$header") reviewed_line=$(sed -n 2p <<<"$header")
   shape="--file is not finding-verifier's output: it needs a \`VERDICT: PASS|FAIL <sha>\` line and a \`Reviewed: <sha>\` line"
   [[ "$verdict_line" =~ $verdict_re ]] ||
     die "$shape (its verdict line: '${verdict_line:-none}')."

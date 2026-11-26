@@ -460,6 +460,45 @@ def test_a_record_at_or_before_the_merge_base_plans_a_first_review(w: World, tmp
     assert p["round"] == "first" and set(SENSITIVE) <= set(lenses_of(p))
 
 
+def header_reviewed(tmp: Path, output: str) -> tuple[int, str]:
+    """blocking.py --header on `output`, the read verdict.sh makes: its exit code and the `Reviewed:` line it prints."""
+    f = tmp / "header.txt"
+    f.write_text(output)
+    done = subprocess.run([sys.executable, str(SCRIPTS / "blocking.py"), "--header", str(f)], capture_output=True,
+                          text=True)
+    return done.returncode, (done.stdout.split("\n") + ["", ""])[1]
+
+
+def test_the_previous_round_reads_the_reviewed_line_verdict_sh_reads(w: World, tmp_path: Path) -> None:
+    reviewed = first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER])
+    later = w.commit({"src/app.py": "x = 2\n"})
+    head = w.commit({"src/app.py": "x = 3\n"})
+    # The header at the top names `later`; a line quoted after `> ` below names another commit: both readers take
+    # the top line.
+    out = fail_output(later) + f"\n> Reviewed: {reviewed}\n"
+    assert header_reviewed(tmp_path, out) == (0, f"Reviewed: {later}")
+    post(w, crafted(head, later, out, tier="sensitive", tmp=tmp_path))
+    code, p, err = plan(w)
+    assert code == 0 and (p["round"], p["since"]) == ("fix", later), (p, err)
+
+
+@pytest.mark.parametrize("decoy", ["```\nReviewed: {later}\n```\n", "```text\nReviewed: {later}\n```\n",
+                                   "````\n```\nReviewed: {later}\n````\n", "Reviewed: {later}\n"])
+def test_a_previous_round_whose_output_holds_a_second_reviewed_line_plans_a_first_review(w: World, tmp_path: Path,
+                                                                                       decoy: str) -> None:
+    reviewed = first_round(w, tmp_path, {"cloud/hooks/x.sh": "x\n"}, "sensitive", SENSITIVE + [VER])
+    later = w.commit({"src/app.py": "x = 2\n"})
+    head = w.commit({"src/app.py": "x = 3\n"})
+    # A decoy above the header names the record's `reviewed=`, while the header names an older commit: verdict.sh
+    # refuses the output, so plan.py never starts a fix round from it.
+    out = decoy.replace("{later}", later) + fail_output(reviewed)
+    code, _ = header_reviewed(tmp_path, out)
+    assert code == 2
+    post(w, crafted(head, later, out, tier="sensitive", tmp=tmp_path))
+    code, p, err = plan(w)
+    assert code == 0 and p["round"] == "first" and p["since"] is None, (p, err)
+
+
 def test_the_previous_round_is_read_from_the_pr_never_passed_in(w: World, tmp_path: Path) -> None:
     # verdict.sh takes the previous round from the PR itself: an output file of another round only reaches it as
     # --file, which must name the reviewed commit.
