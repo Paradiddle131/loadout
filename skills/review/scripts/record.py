@@ -16,6 +16,9 @@
     prints the review path's version (`metadata.version` in ../SKILL.md) or the collection commit (below).
   record.py same <comment json> <sent body file>
     exits 0 when the comment's body is the one sent (line endings and trailing newlines aside), else 1.
+  record.py stored <file>
+    prints the file as GitHub stores a comment holding it (stored() below); build applies the same to its raw output
+    and lines, so a record's read-back matches what was sent.
 
 The round line is a record's third line, for audits and people; the merge guard reads only the first two:
   <!-- loadout + :round v=<version> kit=<commit> [<key>=<value>]... -->   (one word, `loadout` and `:round` joined)
@@ -245,6 +248,18 @@ def review_round(a: argparse.Namespace) -> list[str]:
     return [" ".join(pairs), *table]
 
 
+# What GitHub drops from a comment body as it stores it: zero-width characters, bidirectional controls, and the `!`
+# of `<!` (taken as the start of an HTML comment), inside code fences too. A record holds such text only where it
+# quotes a reviewer, so it is sent already as GitHub would store it: nothing changes on the way, and the read-back
+# matches. `<!` becomes `< !`, which GitHub keeps.
+DROPPED = re.compile("[\u200b\u200c\u200d\u2060\ufeff\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069]")
+
+
+def stored(text: str) -> str:
+    """`text` as GitHub stores it in a comment body (DROPPED above); stored(stored(t)) == stored(t)."""
+    return DROPPED.sub("", text).replace("<!", "< !")
+
+
 def build(a: argparse.Namespace) -> str:
     if not SHA.fullmatch(a.sha) or (a.reviewed and not SHA.fullmatch(a.reviewed)):
         sys.exit("record.py: a sha must be 40 hex characters")
@@ -266,8 +281,8 @@ def build(a: argparse.Namespace) -> str:
         third = round_line(a.round)
     except (OSError, ValueError) as exc:
         sys.exit(f"record.py: {exc}")
-    head = "\n".join([a.title, marker, third, "", *a.line]) + "\n"
-    raw = open(a.file, encoding="utf-8", errors="replace").read() if a.file else ""
+    head = "\n".join([a.title, marker, third, "", *map(stored, a.line)]) + "\n"
+    raw = stored(open(a.file, encoding="utf-8", errors="replace").read()) if a.file else ""
     if not raw.strip():
         return head
     fence = "```"
@@ -325,6 +340,8 @@ def main() -> int:
     r.add_argument("--repost", action="store_true")
     sub.add_parser("version")
     sub.add_parser("kit")
+    st = sub.add_parser("stored")
+    st.add_argument("file")
     s = sub.add_parser("same")
     s.add_argument("comment")
     s.add_argument("sent")
@@ -348,6 +365,9 @@ def main() -> int:
         return 0
     if a.cmd == "kit":
         print(kit())
+        return 0
+    if a.cmd == "stored":
+        sys.stdout.write(stored(open(a.file, encoding="utf-8", errors="replace").read()))
         return 0
     return same(a.comment, a.sent)
 

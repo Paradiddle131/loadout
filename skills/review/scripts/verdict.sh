@@ -93,6 +93,12 @@ case "$result" in '' | pass | fail) ;; *) die "--result is pass or fail. $usage"
 if [ "$tier" != routine ]; then
   [ -n "$reviewers" ] || die "--reviewers names who reviewed (a $tier change needs a reviewer)."
   [ -n "$file" ] && [ -s "$file" ] || die "--file is the reviewers' raw output, and it must not be empty (a $tier change needs a reviewer)."
+  # Read the output as GitHub will store it (record.py stored), so the Blocking: line and the counts come from the
+  # text the record holds.
+  sent_file=$(mktemp)
+  trap 'rm -f "$sent_file"' EXIT
+  python3 "$here/record.py" stored "$file" >"$sent_file" || die "cannot read --file $file"
+  file=$sent_file
   [[ "$reviewed" =~ ^[0-9a-f]{40}$ ]] || die "--reviewed is the full sha of the commit the reviewers read (a $tier change needs it)."
   # The verifier's own lines decide the result and the commit (agents/finding-verifier.md § Output).
   # shellcheck disable=SC2016 # a literal backtick around the sha, not an expansion
@@ -212,7 +218,7 @@ fi
   die "--repost is for a head that differs from --reviewed only by clean merges of $default; the head is the reviewed commit, so record its round."
 
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+trap 'rm -rf "$tmp" ${sent_file:+"$sent_file"}' EXIT
 state=failure
 [ "$result" = pass ] && state=success
 lines=(--line "- Head commit: \`$head\`" --line "- Reviewed commit: \`$reviewed\`$merged_note"
