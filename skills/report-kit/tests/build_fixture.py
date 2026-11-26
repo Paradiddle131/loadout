@@ -153,7 +153,8 @@ def takeaways():
     pair = ("Own van", "Partner app")
     slopes = "".join(slope(n, {"ok": by[n][0][0], "bad": by[n][0][2]}, {"ok": by[n][1][0], "bad": by[n][1][2]}) for n in pair)
     key = "".join(
-        f"<li>{tipped(d, f'<i class="rk-mark" data-k="{k}" aria-hidden="true"></i>{esc(h)}', attrs=f' data-lit="{k}"')}</li>"
+        "<li>" + tipped(d, f'<i class="rk-mark" data-k="{k}" aria-hidden="true"></i>{esc(h)}', attrs=f' data-lit="{k}"')
+        + "</li>"
         for _, h, k, d in COLUMNS
         if k in ("ok", "bad")
     )
@@ -229,7 +230,8 @@ def grid():
     bands = [("hi", f"{hi} and over", f"{hi} or more of 100 on time."), ("mid", f"{lo} to {hi - 1}", f"From {lo} to {hi - 1} of 100 on time."),
              ("lo", f"under {lo}", f"Fewer than {lo} of 100 on time.")]
     key = "".join(
-        f'<li>{tipped(d, f"<i class=\"rk-swatch\" data-g=\"{g}\" aria-hidden=\"true\"></i>{esc(t)}", cls="")}</li>' for g, t, d in bands
+        "<li>" + tipped(d, f'<i class="rk-swatch" data-g="{g}" aria-hidden="true"></i>{esc(t)}', cls="") + "</li>"
+        for g, t, d in bands
     )
     return (
         f'<div class="rk-table-wrap" data-rk-grade="{lo} {hi}"><table class="rk-table rk-stack rk-grid" data-rk-sort="toggle" data-rk-stack-at="26rem">'
@@ -245,8 +247,9 @@ def one_at_a_time():
     a figure with its key and caption, two parts side by side), each fact said once. Static: the second option is
     the chosen one."""
     chosen, before = "Bike courier", "Own van"
+    current = ' aria-current="true"'
     picks = "".join(
-        f'<li><a href="#one-at-a-time" data-rk-fold-pick{" aria-current=\"true\"" if n == chosen else ""}>{esc(n)}</a></li>'
+        f'<li><a href="#one-at-a-time" data-rk-fold-pick{current if n == chosen else ""}>{esc(n)}</a></li>'
         for n, *_ in OPTIONS
     )
     wd = dict((n, w) for n, _, w, _ in OPTIONS)[chosen]

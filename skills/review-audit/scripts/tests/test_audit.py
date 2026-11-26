@@ -683,6 +683,22 @@ def stamped_review(cid: int, sha: str, state: str, output: str, when: str, pairs
 LENSES = ["lens=correctness-reviewer:opus:high:400000:300:2", "lens=finding-verifier:opus:high:100000:60:1"]
 
 
+@pytest.mark.parametrize("entry", ["lens=x:opus:high:10:1", "lens=x:opus:high:10:1:1:9", "lens=x:opus:high:ten:1:1",
+                                   "lens=x:opus:high:10:-1:1"])
+def test_round_fields_drops_a_lens_entry_out_of_shape(entry: str) -> None:
+    body = "a\nb\n" + ROUND + f"v=1.1.0 kit=none {LENSES[0]} {entry} -->"
+    assert [x["name"] for x in audit.round_fields(body)["lens"]] == ["correctness-reviewer"]
+
+
+@pytest.mark.parametrize("seconds", ["4x2", "-3", "4.5"])
+def test_harvest_keeps_no_gates_seconds_that_are_not_a_whole_number(github: dict, tmp_path: Path,
+                                                                    seconds: str) -> None:
+    cs = github["data"][f"repos/{REPO}/issues/7/comments"]
+    cs[0]["body"] = cs[0]["body"].rstrip("\n") + "\n" + ROUND + f"v=1.1.0 kit=none seconds={seconds} -->\n"
+    [g] = rows(harvest(tmp_path), "gates")
+    assert g["seconds"] is None
+
+
 def test_record_stamps_the_audit_with_the_version_and_kit(github: dict, tmp_path: Path,
                                                           capsys: pytest.CaptureFixture) -> None:
     ns = audit.argparse.Namespace(repo=REPO, pr=7, session="s1", file=judge_file(tmp_path, [judgment()]),
