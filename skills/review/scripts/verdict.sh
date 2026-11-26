@@ -60,7 +60,7 @@
 # writes the change posts the verdict; the script cannot tell a real reviewer's output from a typed one, only
 # keep the output beside the verdict where the owner can read it.
 set -euo pipefail
-export LC_ALL=C # grep's [[:space:]] and blocking.py's blanks agree only in the C locale
+export LC_ALL=C # bash's [[:space:]] in the header patterns and blocking.py's blanks agree only in the C locale
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 usage='usage: verdict.sh <pr> --tier routine|standard|sensitive [--result pass|fail] --reviewers "<names>" --reviewed <sha> --file <verifier output> --cycle <n> --dupes <n> --nits <n> --lens "<name> model=<m> effort=<e> tokens=<n> seconds=<n> findings=<n>"... [--depth <d>] [--owner "<words>"] [--repost] [--dry-run]'
 pr='' tier='' result='' reviewers='' reviewed='' file='' cycle='' dupes='' nits='' repost='' depth='' owner='' has_owner=''
