@@ -470,7 +470,7 @@ def test_summary_takes_the_newest_review_record_as_the_merge_guard_does(github: 
          "body": f"🤖 Gates: success\n<!-- loadout" f":gates sha={H2} state=success -->\n"}]
     d = harvest(tmp_path)
     [c] = audit.summarize(d, None)["series"]
-    assert not c["merged_without_pass"] and rows(d, "prs")[0]["guard_review"] == {"state": "success", "sha": H2}
+    assert not c["merged_without_pass"] and rows(d, "prs")[0]["guard_review"] == {"state": "success", "sha": H2, "depth": None}
 
 
 def test_harvest_labels_a_refused_newest_review_record(github: dict, tmp_path: Path) -> None:
