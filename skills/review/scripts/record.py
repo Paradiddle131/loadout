@@ -249,16 +249,17 @@ def review_round(a: argparse.Namespace) -> list[str]:
     return [" ".join(pairs), *table]
 
 
-# What GitHub drops from a comment body as it stores it: zero-width characters, bidirectional controls, and the `!`
-# of `<!` (taken as the start of an HTML comment), inside code fences too. A record holds such text only where it
-# quotes a reviewer, so it is sent already as GitHub would store it: nothing changes on the way, and the read-back
-# matches. `<!` becomes `< !`, which GitHub keeps.
+# What a comment body loses on its way to GitHub's storage, as probed by posting and reading back: zero-width
+# characters, bidirectional controls, and the `!` of every `![` (markdown image syntax), inside code fences too, while
+# `<!`, `<!--` and a `!` elsewhere are kept. A record holds such text only where it quotes a reviewer, so it is sent
+# already as it will be stored: nothing changes on the way, and the read-back matches. `![` becomes `! [`, which is
+# kept.
 DROPPED = re.compile("[\u200b\u200c\u200d\u2060\ufeff\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069]")
 
 
 def stored(text: str) -> str:
     """`text` as GitHub stores it in a comment body (DROPPED above); stored(stored(t)) == stored(t)."""
-    return DROPPED.sub("", text).replace("<!", "< !")
+    return DROPPED.sub("", text).replace("![", "! [")
 
 
 def build(a: argparse.Namespace) -> str:
