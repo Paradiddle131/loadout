@@ -249,17 +249,27 @@ def review_round(a: argparse.Namespace) -> list[str]:
     return [" ".join(pairs), *table]
 
 
-# What a comment body loses on its way to GitHub's storage, as probed by posting and reading back: zero-width
-# characters, bidirectional controls, and the `!` of every `![` (markdown image syntax), inside code fences too, while
-# `<!`, `<!--` and a `!` elsewhere are kept. A record holds such text only where it quotes a reviewer, so it is sent
-# already as it will be stored: nothing changes on the way, and the read-back matches. `![` becomes `! [`, which is
-# kept.
-DROPPED = re.compile("[\u200b\u200c\u200d\u2060\ufeff\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069]")
+# What a comment body becomes on its way to GitHub's storage, as probed by posting and reading back (one comment per
+# probe, deleted at once). Dropped: zero-width characters, bidirectional controls, the soft hyphen, the Mongolian
+# vowel separator, the invisible math operators and the interlinear annotation marks. Made a newline: CR, CRLF, VT,
+# FF, NEL, U+001C to U+001E and the line and paragraph separators. Made a space: U+001F and the Unicode spaces. Made
+# caret notation (`^A`, `^[`): the other C0 and C1 controls but tab and backspace. And a run of `!` right before a `[`
+# loses its `!`s wherever a `]` follows it later in the body (markdown image syntax), inside code fences too. A record
+# holds such text only where it quotes a reviewer, so it is sent already as it will be stored: nothing changes on the
+# way, and the read-back matches. Every `![` becomes `! [`, which is kept wherever it stands.
+DROPPED = "\u200b\u200c\u200d\u2060\ufeff\u200e\u200f\u061c\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069" \
+          "\u00ad\u180e\u2061\u2062\u2063\u2064\ufff9\ufffa\ufffb"
+NEWLINE = "\r\v\f\x85\x1c\x1d\x1e\u2028\u2029"
+SPACE = "\x1f\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u202f\u205f\u3000"
+CARET = {**{c: f"^{chr(c + 0x40)}" for c in [*range(0x01, 0x08), *range(0x0e, 0x1c)]},
+         **{c: f"^{chr(c - 0x40)}" for c in range(0x80, 0xa0) if c != 0x85}}
+STORED = str.maketrans({**dict.fromkeys(map(ord, DROPPED), None), **dict.fromkeys(map(ord, NEWLINE), "\n"),
+                        **dict.fromkeys(map(ord, SPACE), " "), **CARET})
 
 
 def stored(text: str) -> str:
-    """`text` as GitHub stores it in a comment body (DROPPED above); stored(stored(t)) == stored(t)."""
-    return DROPPED.sub("", text).replace("![", "! [")
+    """`text` as GitHub stores it in a comment body (the table above); stored(stored(t)) == stored(t)."""
+    return text.replace("\r\n", "\n").translate(STORED).replace("![", "! [")
 
 
 def build(a: argparse.Namespace) -> str:

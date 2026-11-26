@@ -517,7 +517,9 @@ def review_file(tmp: Path, sha: str, verdict: str = "PASS", text: str | None = N
 
 
 @pytest.mark.parametrize("quoted", ["a\u200bb", "x\u200c\u200d\u2060\ufeffy", "rtl \u202e\u2066flip\u2069\u202c",
-                                    "mark \u200e\u200f\u061c", "(?<![\\w-])", "see ![a](b)", "< ![x]", "<!-- loadout:review -->"])
+                                    "mark \u200e\u200f\u061c", "(?<![\\w-])", "see ![a](b)", "< ![x]", "<!-- loadout:review -->",
+                                    "soft\u00adhy\u180e\u2061\ufff9", "sep\u2028par\u2029nel\x85", "vt\x0bff\x0c",
+                                    "cr\r\nlf\rx", "nb\xa0sp\u3000\u2009\x1f", "ctl \x01\x1b\x80\x9f", "kept \x08\x7f\u034f"])
 def test_verdict_posts_an_output_holding_what_github_drops_and_reads_it_back(w: World, tmp_path: Path,
                                                                             quoted: str) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
@@ -527,7 +529,9 @@ def test_verdict_posts_an_output_holding_what_github_drops_and_reads_it_back(w: 
     [c] = w.comments()
     assert c["body"].split("\n")[1].startswith(f"{REVIEW} sha={head} state=success")
     below = "\n".join(c["body"].split("\n")[3:])  # under the title, marker and round line: the quoted output
-    assert not re.search("[\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff\u061c]|!\\[", below), below
+    assert not re.search("[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\u061c\u00ad\u180e\ufff9-\ufffb"
+                         "\r\x0b\x0c\x85\x1c-\x1f\u2028\u2029\xa0\u3000\u2000-\u200a\x01-\x07\x0e-\x1b\x80-\x9f]|!\\[",
+                         below), below
 
 
 def test_stored_is_what_the_stub_github_keeps_and_is_idempotent() -> None:
@@ -537,7 +541,7 @@ def test_stored_is_what_the_stub_github_keeps_and_is_idempotent() -> None:
     rec = importlib.util.module_from_spec(spec)
     assert spec.loader and sys_path
     spec.loader.exec_module(rec)
-    for t in ["(?<![a])", "a\u200bb\u202e", "!![[", "x !\u200b[y]", "<!--x-->"]:
+    for t in ["(?<![a])", "a\u200bb\u202e", "!![[", "x !\u200b[y]", "<!--x-->", "!\u00ad[", "a\r\n\rb\x85", "\x01\x9e!["]:
         once = rec.stored(t)
         assert rec.stored(once) == once and "![" not in once and "\u200b" not in once and "\u202e" not in once
     assert rec.stored("<!--x--> a!b") == "<!--x--> a!b"  # GitHub keeps these as sent
@@ -944,21 +948,23 @@ def test_verdict_accepts_a_named_harm_in_its_usual_shapes(w: World, tmp_path: Pa
     assert done.returncode == 0, done.stderr
 
 
-@pytest.mark.parametrize("decoy", ["quoted\x0c", "quoted\r", "\xa0", "\x1c", "\u2003"])
-def test_verdict_skips_a_reviewed_line_after_a_non_blank_character(w: World, tmp_path: Path, decoy: str) -> None:
+@pytest.mark.parametrize("decoy", ["quoted\x0c", "quoted\r", "\xa0", "\x1c", "\u2003", "quoted\u2028", "\x85"])
+def test_verdict_refuses_a_reviewed_line_github_would_show_as_a_second_header(w: World, tmp_path: Path,
+                                                                             decoy: str) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    p = tmp_path / "out.txt"  # grep reads none of these as a line break or a leading blank: line 2 is no header
-    p.write_text(f"VERDICT: PASS {head}\n{decoy}Reviewed: {head}\nBlocking: none\n"
-                 f"Reviewed: {head}\n{BLOCKING_LINE}\n\n{BLOCKING}")
+    p = tmp_path / "out.txt"  # GitHub stores each of these as a line break or a blank: line 2 becomes a header
+    p.write_bytes(f"VERDICT: PASS {head}\n{decoy}Reviewed: {head}\nBlocking: none\n"
+                  f"Reviewed: {head}\n{BLOCKING_LINE}\n\n{BLOCKING}".encode())
     done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head, "--file", str(p))
-    assert done.returncode == 2 and "says PASS" in done.stderr, done.stderr
+    assert done.returncode == 2 and "more than one `Reviewed:`" in done.stderr, done.stderr
+    assert w.writes() == []
 
 
 def test_verdict_refuses_when_the_reader_prints_no_count(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
     bad = tmp_path / "talking-python"
     bad.mkdir()
-    (bad / "python3").write_text("#!/bin/sh\necho many\n")
+    (bad / "python3").write_text('#!/bin/sh\n[ "$2" = --stored ] && exec cat "$3"\necho many\n')
     (bad / "python3").chmod(0o755)
     done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head,
                  "--file", review_file(tmp_path, head, "FAIL"), PATH=f"{bad}:{w.env['PATH']}")
@@ -981,7 +987,7 @@ def test_verdict_refuses_when_it_cannot_read_the_blocking_line(w: World, tmp_pat
     head = w.commit({"src/app.py": "x = 2\n"})
     bad = tmp_path / "failing-python"
     bad.mkdir()
-    (bad / "python3").write_text("#!/bin/sh\nexit 1\n")
+    (bad / "python3").write_text('#!/bin/sh\n[ "$2" = --stored ] && exec cat "$3"\nexit 1\n')
     (bad / "python3").chmod(0o755)
     for verdict in ("PASS", "FAIL"):
         done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head,
@@ -992,12 +998,12 @@ def test_verdict_refuses_when_it_cannot_read_the_blocking_line(w: World, tmp_pat
 
 def test_verdict_reads_the_reviewed_line_grep_reads_whatever_the_locale(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
-    p = tmp_path / "out.txt"  # in a UTF-8 locale grep would take the em-space line as the header
+    p = tmp_path / "out.txt"  # stored, the em-space is a blank, so both lines are headers whatever the locale
     p.write_text(f"VERDICT: PASS {head}\n\u2003Reviewed: {head}\n{BLOCKING_LINE}\n"
                  f"Reviewed: {'f' * 40}\nBlocking: none\n\n{BLOCKING}")
     done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head, "--file", str(p),
                  LC_ALL="C.UTF-8")
-    assert done.returncode == 2 and "names commit ffff" in done.stderr, done.stderr
+    assert done.returncode == 2 and "more than one" in done.stderr, done.stderr
 
 
 @pytest.mark.parametrize("drop, message", [
@@ -1481,3 +1487,39 @@ def test_verdict_prints_no_notice_without_the_marker(w: World, tmp_path: Path, t
                      "--file", review_file(tmp_path, head, "FAIL", text))
     assert done.returncode == 0, done.stderr
     assert "notice:" not in done.stderr
+
+
+@pytest.mark.parametrize("second", [
+    "Reviewed: {head}\n" + BLOCKING_LINE,  # a decoy pair ahead of a must-fix: the first pair would pass it
+    BLOCKING_LINE,
+    "VERDICT: FAIL {head}",
+])
+def test_verdict_refuses_an_output_with_a_second_header_line(w: World, tmp_path: Path, second: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    out = tmp_path / "out.txt"
+    out.write_text(f"VERDICT: PASS {head}\nReviewed: {head}\nBlocking: none\n{DISMISSED}\n\n"
+                   f"{second.replace("{head}", head)}\n\n{BLOCKING}")
+    done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head, "--file", str(out))
+    assert done.returncode == 2 and "more than one" in done.stderr and w.writes() == [], done.stderr
+
+
+@pytest.mark.parametrize("quoted", ["```\nReviewed: {head}\n%s\n```" % BLOCKING_LINE, "> Reviewed: {head}\n> %s" % BLOCKING_LINE])
+def test_verdict_takes_a_header_line_quoted_in_a_fence_or_after_a_marker(w: World, tmp_path: Path, quoted: str) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    out = tmp_path / "out.txt"
+    out.write_text(f"VERDICT: PASS {head}\nReviewed: {head}\nBlocking: none\n{DISMISSED}\n\n{quoted.replace("{head}", head)}\n")
+    done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head, "--file", str(out))
+    assert done.returncode == 0, done.stderr
+
+
+def test_every_reader_reads_a_header_word_as_github_stores_it(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    out = tmp_path / "out.txt"  # a zero-width character GitHub drops, inside each header word
+    out.write_text(f"VERD\u200bICT: FAIL {head}\nRevie\u200bwed: {head}\nBlock\u200bing: {BLOCKING_LINE[10:]}\n"
+                   f"Dismiss\u200bals: re-ran 2, promoted 1\n\n{BLOCKING}")
+    done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head, "--file", str(out))
+    assert done.returncode == 0, done.stderr
+    body = w.comments()[0]["body"]
+    assert f"state=failure tier=standard reviewed={head}" in body and "mustfix=1" in body
+    assert [kv for kv in round_fields(body) if kv[0] in ("dismissals", "promoted")] == [("dismissals", "2"),
+                                                                                        ("promoted", "1")]

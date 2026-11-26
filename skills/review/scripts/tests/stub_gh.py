@@ -10,8 +10,9 @@ State lives in $STUB_DIR:
 - branches.json ({name: sha}), else the bare repo $STUB_REMOTE: what `repos/<o>/<r>/branches/<name>` answers, as
   `{"name", "commit": {"sha"}}`; with neither, that call fails as an HTTP 404 does.
 STUB_FAIL=<text>: a call whose endpoint contains it fails the way gh does on an HTTP error.
-A posted body is stored as GitHub stores it (probed by posting and reading back): zero-width and bidirectional control
-characters dropped, and the `!` of every `![`.
+A posted body is stored as GitHub stores it (probed by posting and reading back, record.py § stored has the list):
+format characters dropped; CR, CRLF and the other line breaks made a newline; Unicode spaces made a space; the
+other C0 and C1 controls made caret notation; and a `!` run before a `[` dropped where a `]` follows later.
 STUB_MANGLE=1: a comment read back by id differs from the one posted.
 STUB_SLEEP=<seconds>: every call waits that long first (a slow GitHub).
 """
@@ -73,9 +74,13 @@ def load(name: str, default: object) -> object:
 comments = load("comments.json", [])
 if method == "POST" and re.search(r"/issues/\d+/comments$", ep):
     n = ep.split("/")[-2]
-    stored = re.sub("[\u200b\u200c\u200d\u2060\ufeff\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069]", "",
-                    fields["body"])
-    stored = stored.replace("![", "[")
+    stored = re.sub("[\u200b\u200c\u200d\u2060\ufeff\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069\u00ad\u180e"
+                    "\u2061-\u2064\ufff9-\ufffb]", "", fields["body"])
+    stored = re.sub("\r\n|[\r\v\f\x85\x1c-\x1e\u2028\u2029]", "\n", stored)
+    stored = re.sub("[\x1f\xa0\u1680\u2000-\u200a\u202f\u205f\u3000]", " ", stored)
+    stored = re.sub("[\x01-\x07\x0e-\x1b\x80-\x84\x86-\x9f]",
+                    lambda m: "^" + chr(ord(m.group()) + (0x40 if ord(m.group()) < 0x80 else -0x40)), stored)
+    stored = re.sub(r"!+(?=\[[\s\S]*\])", "", stored)  # a `!` run before a `[`, where a `]` follows later
     new = {"id": 1000 + len(comments), "body": stored, "author_association": "OWNER",
            "created_at": f"2000-01-01T00:{len(comments):02d}:00Z",
            "html_url": f"https://github.com/example-owner/example-repo/pull/{n}#issuecomment-{1000 + len(comments)}"}
