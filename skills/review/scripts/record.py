@@ -370,6 +370,8 @@ def main() -> int:
     r.add_argument("--lens", action="append", default=[])
     r.add_argument("--dismissals")
     r.add_argument("--repost", action="store_true")
+    dm = sub.add_parser("dismissals")
+    dm.add_argument("file")
     sub.add_parser("version")
     sub.add_parser("kit")
     st = sub.add_parser("stored")
@@ -387,6 +389,18 @@ def main() -> int:
         except (OSError, ValueError) as exc:
             print(f"record.py: {exc}", file=sys.stderr)
             return 2
+        return 0
+    if a.cmd == "dismissals":  # the header's Dismissals line, checked as review-round checks it
+        try:
+            d = dismissals(a.file)
+            if d is None:
+                raise ValueError("the verifier's output has no `Dismissals: re-ran <n>, promoted <m>` line in its "
+                                 "header, which every verifier output carries (agents/finding-verifier.md § Output): "
+                                 "rerun the verifier")
+        except (OSError, ValueError) as exc:
+            print(f"record.py: {exc}", file=sys.stderr)
+            return 2
+        print(f"{d[0]} {d[1]}")
         return 0
     if a.cmd == "version":
         try:

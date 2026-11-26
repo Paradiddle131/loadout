@@ -718,6 +718,8 @@ def test_verdict_routine_refuses_what_contradicts_a_given_verifier_output(w: Wor
     ("looked fine to me\n", "not finding-verifier's output"),
     ("VERDICT: PASS {h}\nReviewed: {e}\nBlocking: none\n{d}\n\nNo findings.\n", "names commit"),  # its Reviewed: line
     ("VERDICT: PASS {h}\nReviewed: {h}\n{b}\n{d}\n\n## Must-fix\n### COR-1\n", "lists 1 must-fix"),  # a PASS over a must-fix
+    ("VERDICT: PASS {h}\nReviewed: {h}\nBlocking: none\n\nNo findings.\n", "no `Dismissals:"),  # its Dismissals line lost
+    ("VERDICT: PASS {h}\nReviewed: {h}\nBlocking: none\nDismissals: re-ran 0, promoted 3\n\nNo findings.\n", "promotes 3 of 0"),
 ])
 def test_verdict_routine_applies_every_tier_s_output_checks_to_a_given_file(w: World, tmp_path: Path, text: str,
                                                                            why: str) -> None:
