@@ -2,7 +2,7 @@
 name: review
 description: "Use before any change lands on a default branch, in any repo, attended or unattended: tier the change, stamp its gates, run fresh reviewers, verify their findings, fix, record the verdict, merge."
 metadata:
-  version: 5.0.0
+  version: 6.0.0
 ---
 
 # Review
@@ -37,7 +37,7 @@ The author of a change fixes it and never reviews it; with no fresh-context suba
 
 ## 3. Find
 
-Start the lenses `plan.py` prints as subagents in the foreground, on Opus at the effort it prints for each (medium, or high for `correctness-reviewer` and `control-prober` at `full`), set in the call (the collection's default reviewer model, set explicitly because a subagent does not inherit the session's effort; a repo's instructions may name another); an effort may be raised, never lowered.
+Start the lenses `plan.py` prints as subagents in the foreground, on Opus at the effort it prints for each (medium, or high for `correctness-reviewer` and `control-prober` at `full` on sensitive code; a `REVIEW.md` `; effort:` line can change it), set in the call (the collection's default reviewer model, set explicitly because a subagent does not inherit the session's effort; a repo's instructions may name another); an effort may be raised, never lowered.
 In `focused`, the `first` lens runs alone, then the `then` lenses in parallel, each brief carrying the first lens's findings as raised this round (templates.md); otherwise every lens starts at once.
 Give each the brief in [`templates.md`](templates.md): the repo, the range `$(git merge-base <default> <head>)..<head>`, the issue body and its done-when quoted; each agent makes and removes its own detached worktree.
 Give no summary of the work; the PR body goes only to `claims-auditor`, or to a repo's own lens its `REVIEW.md` names that asks for it, as material under audit.
@@ -77,12 +77,12 @@ Done when every planned lens has returned its raw findings; remove the worktrees
 - A finding the verifier marks `patched, not fixed` (another case of a settled must-fix's class) sends its item to its rethink below, not to another patch; `verdict.sh` prints a notice when a block holds that line exactly.
 - Then steps 2 to 4 on the new commits only (`<reviewed>..<new head>`), each brief carrying the settled list, built from the earlier `🤖 Review` records: each finding's ids, its rank as that record posted it (on a record with a `Blocking:` line, a must-fix is one that line lists; on an older one, one its `## Must-fix` section holds), and the record's link (templates.md).
   The lenses are what `plan.py` prints, from the PR's newest trusted `🤖 Review` record, when that record's tier and depth are at least this round's (else the whole change is reviewed again):
-  - in `focused`, each lens a must-fix on its `Blocking:` line came from (`correctness-reviewer` for an id that names no lens), the lenses `REVIEW.md` names for the fix's paths, and the sensitive set when a fix path is sensitive;
+  - in `focused`, each lens a must-fix on its `Blocking:` line came from (`correctness-reviewer` for an id that names no lens), the lenses `REVIEW.md` names for the fix's paths, `correctness-reviewer` when a fix path is not routine, and the sensitive set when a fix path is sensitive;
   - in `full`, the whole set; in `light`, its one lens;
   - the verifier on every round.
 - A cycle is a fix round, a red stamp, or an integrate round (step 6); with a `must-fix` or red stamp still open:
   - **rethink** once per item, when a second review round still lists a must-fix, or at once when a finding is marked `patched, not fixed`: a fresh worker, a fresh brief carrying the findings as the invariant the change must hold (not the patch a finding proposes), a smaller approach where one meets the done-when, the count at zero;
-  - **park** when the rethink is spent, after the third cycle: label the issue `needs-owner`, comment the open findings, take the next item.
+  - **park** when the rethink is spent, after the third cycle or at a `patched, not fixed` mark: label the issue `needs-owner`, comment the open findings, take the next item.
 - Done when no `must-fix` is open, or the item is parked.
 
 ## 6. Integrate and re-gate
