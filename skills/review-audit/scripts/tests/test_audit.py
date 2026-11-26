@@ -649,6 +649,13 @@ def test_findings_a_shorter_or_other_fence_does_not_close_a_fence() -> None:
     assert verifier_output.parse(text)["findings"] == []
 
 
+def test_findings_a_run_four_spaces_in_opens_no_fence() -> None:
+    text = "## Must-fix\n    ```\n### COR-1\n- rank: must-fix\n- harm: rows drop\n"  # GitHub renders the heading
+    assert [b["ids"] for b in verifier_output.parse(text)["findings"]] == [["COR-1"]]
+    text = "## Must-fix\n   ```\n### COR-1\n```\n"  # three spaces in: a fence
+    assert verifier_output.parse(text)["findings"] == []
+
+
 def test_findings_a_placeholder_harm_is_no_harm() -> None:
     [b] = verifier_output.parse("## Must-fix\n### COR-1\n- rank: must-fix\n- harm: none\n")["findings"]
     assert b["must_fix"] and b["harm"] is None

@@ -45,7 +45,8 @@
 #   `none` for a PASS; for a FAIL the must-fix findings it lists, each heading a `###` block below, with a harm of two
 #   words or more not made only of blocking.py's filler words. The lead acts on the line (the review skill).
 #   A finding block's `- class: patched, not fixed (<settled id>)` line prints a notice on stderr, never a refusal.
-#   --tier routine needs no reviewer: --reviewers, --reviewed and --file are optional, --result defaults to pass,
+#   --tier routine needs no reviewer: --reviewers, --reviewed and --file are optional, --result defaults to pass
+#   (with --file, to the VERDICT line of that verifier output, which --result and --reviewed must not contradict),
 #   the comment says the tier needs gates only, and the session that wrote the change may run it, since the
 #   paths decide the tier. It is accepted whenever the paths' depth floor is none (a routine change, or a standard
 #   one a REVIEW.md line or `Depth: none` lets merge on gates alone), and records depth=none; such a change needs
@@ -90,18 +91,19 @@ done
 rank() { case "$1" in routine) echo 0 ;; standard) echo 1 ;; sensitive) echo 2 ;; *) echo 9 ;; esac; }
 [[ "$pr" =~ ^[0-9]+$ ]] || die "the first argument is the PR number. $usage"
 case "$tier" in routine | standard | sensitive) ;; *) die "--tier is routine, standard or sensitive. $usage" ;; esac
+given_result=$result
 [ "$tier" != routine ] || result=${result:-pass}
 case "$depth" in '' | none | light | focused | full) ;; *) die "--depth is none, light, focused or full. $usage" ;; esac
 case "$result" in '' | pass | fail) ;; *) die "--result is pass or fail. $usage" ;; esac
+# The verifier's own lines decide the result and the commit (agents/finding-verifier.md § Output).
+# shellcheck disable=SC2016 # a literal backtick around the sha, not an expansion
+sha_re='`?([0-9a-f]{7,40})`?'
+verdict_re="^[[:space:]]*VERDICT: (PASS|FAIL) ${sha_re}[[:space:]]*\$"
+reviewed_re="^[[:space:]]*Reviewed: ${sha_re}[[:space:]]*\$"
 if [ "$tier" != routine ]; then
   [ -n "$reviewers" ] || die "--reviewers names who reviewed (a $tier change needs a reviewer)."
   [ -n "$file" ] && [ -s "$file" ] || die "--file is the reviewers' raw output, and it must not be empty (a $tier change needs a reviewer)."
   [[ "$reviewed" =~ ^[0-9a-f]{40}$ ]] || die "--reviewed is the full sha of the commit the reviewers read (a $tier change needs it)."
-  # The verifier's own lines decide the result and the commit (agents/finding-verifier.md § Output).
-  # shellcheck disable=SC2016 # a literal backtick around the sha, not an expansion
-  sha_re='`?([0-9a-f]{7,40})`?'
-  verdict_re="^[[:space:]]*VERDICT: (PASS|FAIL) ${sha_re}[[:space:]]*\$"
-  reviewed_re="^[[:space:]]*Reviewed: ${sha_re}[[:space:]]*\$"
   # blocking.py picks the header lines as it reads the rest: the first lines of the output as GitHub will store it,
   # refusing any other header-shaped line, so a dropped character or a decoy cannot make two readers pick different lines.
   why=$(mktemp)
@@ -153,6 +155,24 @@ if [ "$tier" != routine ]; then
   rm -f "$why"
 else
   [ -z "$file" ] || [ -r "$file" ] || die "cannot read --file $file"
+  if [ -s "$file" ]; then
+    # A routine record given a verifier's output carries that output's verdict, never a pass over a FAIL.
+    why=$(mktemp)
+    header=$(python3 "$here/blocking.py" --header "$file" 2>"$why") || {
+      reason=$(cat "$why"); rm -f "$why"
+      die "the verifier's output is refused: ${reason:-blocking.py cannot read --file $file} (agents/finding-verifier.md § Output); rerun the verifier, or record a routine change without --file."
+    }
+    rm -f "$why"
+    verdict_line=$(sed -n 1p <<<"$header")
+    [[ "$verdict_line" =~ $verdict_re ]] ||
+      die "--file is not finding-verifier's output: it needs a \`VERDICT: PASS|FAIL <sha>\` line (its verdict line: '${verdict_line:-none}'); record a routine change without --file."
+    said=$(tr '[:upper:]' '[:lower:]' <<<"${BASH_REMATCH[1]}")
+    [ -z "$reviewed" ] || [[ "$reviewed" == "${BASH_REMATCH[2]}"* ]] ||
+      die "the verifier's output names commit ${BASH_REMATCH[2]}, but --reviewed is $reviewed: record the verdict of the commit the verifier read."
+    [ -z "$given_result" ] || [ "$given_result" = "$said" ] ||
+      die "--result $given_result contradicts the verifier's VERDICT line, which says $said: the record carries the verifier's verdict."
+    result=$said
+  fi
   [ -z "$reviewed" ] || [[ "$reviewed" =~ ^[0-9a-f]{40}$ ]] || die "--reviewed is a full sha"
   [ -z "$cycle$dupes$nits$repost" ] && [ ${#lens[@]} = 0 ] ||
     die "the routine tier runs no reviewer, so it takes no --cycle, --dupes, --nits, --lens or --repost."

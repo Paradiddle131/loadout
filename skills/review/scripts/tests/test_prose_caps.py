@@ -23,4 +23,7 @@ def test_each_prose_cap_still_stands(path: str, cap: str) -> None:
 
 
 def test_every_named_cap_is_pinned() -> None:
-    assert len(CAPS) == 4  # dropping a row would drop its pin with nothing red
+    # Dropping, emptying or duplicating a row would drop its pin with nothing red: four rows, four distinct caps.
+    assert len(CAPS) == 4
+    assert all(cap.strip() for _, cap in CAPS)
+    assert len({cap for _, cap in CAPS}) == len(CAPS)

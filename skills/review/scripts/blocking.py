@@ -2,8 +2,8 @@
 """Reads the verifier's `Blocking:` line: the must-fix findings of its output and the harm each names.
 
   blocking.py <file>   prints how many must-fix findings the line lists; exits 2 with the reason when the header is
-                       refused (below), the line is missing or malformed, names an id no `###` heading outside a code
-                       fence opens with, or a listed finding names no harm
+                       refused (below), the line is missing or malformed, names an id no `###` line below it opens
+                       with (fenced or not), or a listed finding names no harm
   blocking.py --header <file>
                        prints the header's `VERDICT:` and `Reviewed:` lines (an empty line for one the output's first
                        lines lack), read as GitHub stores the output (record.py § stored); exits 2 with the reason when
@@ -23,9 +23,10 @@ Lines are split on newlines only, and blanks are the C locale's [[:space:]] with
 A harm has at least two words, is not the template's unfilled `<...>` slot, and is not made only of the words
 in FILLER below (`none`, `no harm`, `TBD` and the like); a short dismissal off that list, such as `wording only`,
 passes, so the check catches a forgotten harm, not a weak or false one.
-Each listed id must be one of the ids a `###` line outside a code fence below the header opens with; the line is
-not otherwise compared with the finding blocks; a top-level fence is read by CommonMark's rules (record.py § fenced;
-containers are not modelled), and an unclosed fence hides the headings after it (a refusal).
+Each listed id must be one of the ids a line below the header that starts with `###` opens with, fenced or not: no
+fence model decides it, so no list item or HTML block can hide a heading from it or show one to it, and a heading
+quoted inside a code block counts as well (the check only ever runs on a FAIL, which a missing block cannot turn into
+a pass); the line is not otherwise compared with the finding blocks.
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ import sys
 
 from record import fenced, stored  # the text as GitHub stores it: a record's counts come from what it holds
 
-WS = r"[ \t\v\f\r]"  # what grep's [[:space:]] matches inside a line in the C locale, which verdict.sh sets
+WS = r"[ \t\v\f\r]"  # the blanks of bash's [[:space:]] inside a line in the C locale, which verdict.sh's regexes use
 LINE = re.compile(rf"^{WS}*Blocking:{WS}*(.*?){WS}*$")
 FILLER = {"none", "n/a", "na", "tbd", "todo", "unknown", "nothing", "no", "harm", "at", "all", "yet", "identified",
           "stated", "concrete", "named", "-", "—", "see", "above", "below"}
@@ -103,8 +104,8 @@ def read(text: str) -> list[dict]:
     if not isinstance(items, list) or not items:
         raise ValueError("the `Blocking:` line is neither `none` nor a non-empty JSON list")
     heads = set()
-    for n, (ln, in_fence) in enumerate(zip(lines, fenced(lines))):  # the ids of each `###` line outside a code fence
-        if n > at + 1 and not in_fence and ln.startswith("###"):
+    for n, ln in enumerate(lines):  # the ids of each `###` line below the header, fenced or not
+        if n > at + 1 and ln.startswith("###"):
             heads.update(p.strip(" `*_").split(" ")[0].strip("`*_") for p in ln.lstrip("#").split(","))
     for i, b in enumerate(items):
         ids = b.get("ids") if isinstance(b, dict) else None

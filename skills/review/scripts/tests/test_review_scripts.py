@@ -687,6 +687,32 @@ def test_verdict_routine_on_routine_paths_needs_no_reviewer(w: World) -> None:
     assert "needs gates only" in body and "<details>" not in body
 
 
+def test_verdict_routine_carries_the_verdict_of_a_given_verifier_output(w: World, tmp_path: Path) -> None:
+    head = w.commit({"docs/a.md": "x\n"})
+    done = w.verdict("12", "--tier", "routine", "--file", review_file(tmp_path, head, "FAIL"))
+    assert done.returncode == 0, done.stderr
+    assert w.comments()[0]["body"].startswith(f"🤖 Review: fail (routine tier)\n{REVIEW} sha={head} state=failure ")
+
+
+@pytest.mark.parametrize("args, why", [
+    (["--result", "pass"], "contradicts the verifier's VERDICT line"),
+    (["--reviewed", "c" * 40], "but --reviewed is"),
+])
+def test_verdict_routine_refuses_what_contradicts_a_given_verifier_output(w: World, tmp_path: Path, args: list[str],
+                                                                         why: str) -> None:
+    head = w.commit({"docs/a.md": "x\n"})
+    done = w.verdict("12", "--tier", "routine", *args, "--file", review_file(tmp_path, head, "FAIL"))
+    assert done.returncode == 2 and why in done.stderr and w.comments() == [], done.stderr
+
+
+def test_verdict_routine_refuses_a_file_that_is_no_verifier_output(w: World, tmp_path: Path) -> None:
+    w.commit({"docs/a.md": "x\n"})
+    p = tmp_path / "notes.txt"
+    p.write_text("looked fine to me\n")
+    done = w.verdict("12", "--tier", "routine", "--file", str(p))
+    assert done.returncode == 2 and "not finding-verifier's output" in done.stderr and w.comments() == [], done.stderr
+
+
 def test_verdict_allows_a_higher_tier(w: World, tmp_path: Path) -> None:
     head = w.commit({"docs/a.md": "x\n"})
     done = w.verdict("12", "--tier", "sensitive", "--result", "pass", "--reviewers", PLANNED,
@@ -929,14 +955,31 @@ def test_verdict_refuses_a_blocking_line_that_contradicts_the_verdict(w: World, 
     assert w.writes() == []
 
 
-def test_verdict_takes_a_listed_id_only_from_a_heading_outside_a_fence(w: World, tmp_path: Path) -> None:
+def test_verdict_takes_a_listed_id_only_from_a_heading_that_opens_with_it(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
     for text in ("Settled in the brief: - COR-1: must-fix, fixed\n## Must-fix\n### COR-10\n- rank: must-fix\n",
-                 "## Must-fix\n### CLM-2 (re-raises COR-1)\n- evidence: ->\n```\n### COR-1\n```\n",
+                 "## Must-fix\n### CLM-2 (re-raises COR-1)\n- evidence: -> COR-1\n",
                  "## Must-fix\n### ###\n### PRE-COR-1, COR-1-2\n"):
         done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head,
                      "--file", review_file(tmp_path, head, "FAIL", text, blocking=BLOCKING_LINE))
         assert done.returncode == 2 and "names COR-1, which no" in done.stderr, done.stderr
+
+
+@pytest.mark.parametrize("text", [
+    "## Must-fix\n```\n### COR-1\n```\n",  # in a top-level fence
+    "## Must-fix\n- a\n  ```\n```\n### COR-1\n```\n",  # after a fence opened in a list item
+    "## Must-fix\n<details>\n```\n### COR-1\n```\n</details>\n",  # in a fence inside an HTML block
+    "## Must-fix\n````\n### COR-1\n",  # in a fence never closed
+    "## Must-fix\n````text\n```\n### COR-1\n````\n",  # in a fence a shorter run does not close
+    "## Must-fix\n~~~\n### COR-1\n~~~\n",  # in a tilde fence
+])
+def test_verdict_takes_a_listed_id_from_a_heading_fenced_or_not(w: World, tmp_path: Path, text: str) -> None:
+    # No fence model decides the heading check, so no container can show or hide a heading to it differently from
+    # GitHub: a heading quoted in a code block counts too, on a FAIL only.
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head, "--dry-run",
+                     "--file", review_file(tmp_path, head, "FAIL", text, blocking=BLOCKING_LINE))
+    assert done.returncode == 0, done.stderr
 
 
 @pytest.mark.parametrize("blocking", [
@@ -1601,17 +1644,6 @@ def test_fenced_reads_a_fence_as_github_does(lines: list[str], inside: list[bool
     assert spec.loader
     spec.loader.exec_module(rec)
     assert rec.fenced(lines) == inside
-
-
-@pytest.mark.parametrize("body", ["````text\n```\n### COR-1\n````\n", "```\n```python\n### COR-1\n```\n",
-                                  "~~~\n### COR-1\n~~~\n"])
-def test_verdict_refuses_a_must_fix_whose_heading_github_shows_in_a_code_block(w: World, tmp_path: Path,
-                                                                             body: str) -> None:
-    head = w.commit({"src/app.py": "x = 2\n"})
-    out = tmp_path / "out.txt"
-    out.write_text(f"VERDICT: FAIL {head}\nReviewed: {head}\n{BLOCKING_LINE}\n{DISMISSED}\n\n## Must-fix\n{body}")
-    done = w.verdict("12", "--tier", "standard", "--reviewers", PLANNED, "--reviewed", head, "--file", str(out))
-    assert done.returncode == 2 and "no `###` heading" in done.stderr and w.writes() == [], done.stderr
 
 
 @pytest.mark.parametrize("body, kept", [

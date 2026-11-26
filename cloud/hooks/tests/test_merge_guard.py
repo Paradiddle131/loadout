@@ -1114,3 +1114,46 @@ def test_a_merge_naming_the_repo_in_another_case_reads_the_same_clone(fx: Fx, tm
     r, head, _ = change(tmp_path, fx, {"src/app.py": "x = 2\n"})
     fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head)))
     assert mcp(fx, r, owner="Example-Owner", repo="Example-Repo", expectedHeadSha=head) is None
+
+
+def test_a_clone_of_another_repo_is_never_read(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"src/app.py": "x = 2\n"})
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head)))
+    git_in(r, "remote", "set-url", "origin", "https://github.com/other-owner/example-repo.git")
+    reason = mcp(fx, r, expectedHeadSha=head)  # it holds the head, but it is not this repo's clone
+    assert reason and "cannot be checked" in reason, reason
+
+
+def test_an_origin_in_another_case_reads_the_same_clone(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"src/app.py": "x = 2\n"})
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head)))
+    git_in(r, "remote", "set-url", "origin", "https://github.com/Example-Owner/Example-Repo.git")
+    assert mcp(fx, r, expectedHeadSha=head) is None
+
+
+@pytest.mark.parametrize("folder, named", [("Example-Repo", "example-repo"), ("example-repo", "Example-Repo")])
+def test_a_session_above_its_clones_finds_the_clone_by_name_in_any_case(fx: Fx, tmp_path: Path, folder: str,
+                                                                       named: str) -> None:
+    r, head, _ = change(tmp_path, fx, {"src/app.py": "x = 2\n"})
+    clones = tmp_path / "clones"
+    clones.mkdir()
+    r.rename(clones / folder)
+    copy = tmp_path / "copy"
+    shutil.copytree(GUARD.parents[2] / "skills" / "review" / "scripts", copy / "skills" / "review" / "scripts")
+    guard = copy / "cloud" / "hooks" / "merge-guard.py"
+    guard.parent.mkdir(parents=True)
+    guard.write_text(GUARD.read_text().replace('CLONES = Path("/home/user")', f"CLONES = Path({str(clones)!r})", 1))
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head)))
+    event = {"tool_name": "mcp__github__merge_pull_request", "cwd": str(tmp_path),  # above the clones
+             "tool_input": {"owner": "example-owner", "repo": named, "pullNumber": 12, "expectedHeadSha": head}}
+    done = run_copy(fx, guard, event)
+    assert done.returncode == 0 and done.stdout.strip() == "", done.stdout + done.stderr
+
+
+def test_owner_words_in_a_record_s_first_three_lines_do_not_count(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"hooks/x.sh": "x\n"})
+    lines = overridden(head, "").split("\n")
+    lines[2] = QUOTED.strip()  # on the round line, which only the record's builder writes
+    fx.comments(comment(record("gates", sha=head)), comment("\n".join(lines)))
+    reason = mcp(fx, r, expectedHeadSha=head)
+    assert reason and "quoting the owner's words" in reason, reason
