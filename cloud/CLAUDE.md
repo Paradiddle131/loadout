@@ -53,7 +53,7 @@ Work with them: they are not incidents to report or file issues about.
 
 **GCP projects** (`$GCP_PROJECT` set; the kit and its layers: `cloud/gcp/README.md`)
 - An attached GCP project is a $0.00 lab unless the repo says otherwise: use only Always Free services, in the regions their free tier names; the session-start lines report the month-to-date cost, and any cost above zero stops GCP work for the session and goes first in the handoff.
-- The credential comes from the proxy (`CLOUDSDK_AUTH_ACCESS_TOKEN=proxy-injected`; no key file); the `PreToolUse` guard refuses what moves a spend fence or creates a paid resource; for a review agent it refuses any live cloud call and any change to the project variables; treat a refusal as the answer and ask the owner, never route around it (client libraries, another tool, another API path).
+- The credential comes from the proxy (`CLOUDSDK_AUTH_ACCESS_TOKEN=proxy-injected`; no key file); the `PreToolUse` guard refuses what moves a spend fence or creates a paid resource; for a review agent it also refuses the cloud CLIs, dry runs and permission tests included, requests to Google Cloud hosts and changes to the project variables, as `cloud/gcp/README.md` lists them; treat a refusal as the answer and ask the owner, never route around it (client libraries, another tool, another API path).
 - Check a permission with `testIamPermissions`, never by attempting the action: IAM changes take minutes to apply, and an attempt that succeeds has done the forbidden thing.
 - Dry-run a query (`bq query --dry_run`, free) before running it, and keep `maximum_bytes_billed` on every job (`~/.bigqueryrc` carries the default); no streaming inserts (no free tier), load jobs or DML instead.
 

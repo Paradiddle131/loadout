@@ -14,11 +14,14 @@ inserts (`bq insert`, no free tier); a `bq query` above the byte cap or with no 
 same writes sent with curl or wget to *.googleapis.com.
 
 Review agents (the collection's `agents/`, named bare or plugin-scoped in the hook's `agent_type`) get a
-stricter rule: no live cloud call at all, read or write. A reviewer reads code; its brief already forbids
-the cloud, and this enforces it: `gcloud`, `bq` and `gsutil`, curl or wget to *.googleapis.com or *.run.app,
-inline Python or Node that imports Google's client libraries, and any change to the project variables
-(`GCP_PROJECT`, `LEDGER_LAB_GCP_PROJECT`, `CLOUDSDK_*`, `GOOGLE_*`: set, unset, `env -u`, `export -n`).
-It sees the command's own text (`bash -c`, `eval` and heredocs included), not a script that calls GCP itself.
+stricter rule against live cloud calls, read or write, which their brief forbids: refused are `gcloud`, `bq` and
+`gsutil` (dry runs and permission tests included, also behind wrappers, `find -exec` or a pipe into a shell),
+curl or wget to a Google Cloud host, inline code that imports Google's client libraries or names a Google Cloud
+URL, and setting or clearing a project variable (`GCP_PROJECT`, `LEDGER_LAB_GCP_PROJECT`, `CLOUDSDK_*`,
+`GOOGLE_*`) by assignment, `env -i`/`-u`, `unset`, `export -n`, `local`, `read`, `printf -v` or `for`. Each
+refusal is logged (`~/.claude/guard-refusals.log`) for `verdict.sh` to put on the round's record. It reads the
+command's text (`bash -c`, `eval` and heredocs fed to a shell included): a seatbelt for slips, not a wall against
+a script that calls GCP itself or code read from a file.
 
 Reads the hook's JSON on stdin; prints a deny decision on stdout or nothing. It sees shell
 commands only, not code calling Google's client libraries: IAM covers those.
@@ -27,12 +30,14 @@ Cap: $GCP_MAX_BYTES_BILLED (default 1 GiB), the value cloud/gcp/status.sh writes
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import re
 import runpy
 import shlex
 import sys
+import time
 from pathlib import Path
 
 DEFAULT_CAP = 1 << 30
@@ -367,14 +372,25 @@ def verdict(command: str, depth: int = 0) -> str | None:
 AGENTS_DIR = Path(__file__).resolve().parents[2] / "agents"
 CLOUD_TOOLS = {"gcloud", "bq", "gsutil"}
 HTTP_TOOLS = {"curl", "wget", "http", "https", "xh"}
-CLOUD_HOST = re.compile(r"(googleapis\.com|\.run\.app)\b", re.IGNORECASE)
-CLIENT_LIBS = re.compile(r"google\.cloud|googleapiclient|google\.auth|@google-cloud/|google-auth-library")
+CLOUD_HOST = re.compile(r"(?:https?://|\b)[\w.-]*(?:googleapis\.com|\.run\.app)\b", re.IGNORECASE)
+CLOUD_URL = re.compile(r"https?://[\w.-]*(?:googleapis\.com|\.run\.app)\b", re.IGNORECASE)
+# Real import syntax, not a mention: `grep google.auth src` is a read, `from google.cloud import x` loads it.
+IMPORT = re.compile(
+    r"(?:^|[\s;'\"(])(?:from\s+google(?:\.\w+)*\s+import|import\s+google(?:\.\w+)*(?=[\s;,'\")]|$)|"
+    r"(?:from|import)\s+googleapiclient|require\(\s*['\"](?:@google-cloud/|googleapis|google-auth-library))",
+    re.MULTILINE,
+)
 PROJECT_VAR = re.compile(r"GCP_PROJECT|LEDGER_LAB_GCP_PROJECT|CLOUDSDK_[A-Z0-9_]+|GOOGLE_[A-Z0-9_]+")
-RUNTIME = re.compile(r"(?:^|[\s;&|(/])(?:python[0-9.]*|node|deno|bun)(?=[\s;&|)]|$)", re.MULTILINE)
+ASSIGN = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)(?:\[[^]]*\])?\+?=.*", re.DOTALL)
+RUNTIME = re.compile(r"(?:^|[\s;&|(/])(?:python[0-9.]*|node|deno|bun|ruby|perl|php|uv|uvx)(?=[\s;&|)]|$)", re.MULTILINE)
+DECLARE = {"export", "declare", "typeset", "readonly", "local"}
+# Builtins whose words name a variable they assign: `read V`, `printf -v V`, `mapfile V`, `getopts o V`.
+TARGETS = {"read", "mapfile", "readarray", "getopts"}
+FIND_EXEC = {"-exec", "-execdir", "-ok", "-okdir"}
 REVIEWER_ADVICE = (
     " Review agents make no live cloud call, read or write, and leave the project variables as the session set"
-    " them. Report the check as `unverified`, naming this refusal (`refused by the GCP guard`), so the verifier"
-    " carries it onto the round's record."
+    " them. Report the check as `unverified`, naming this refusal (`refused by the GCP guard`); the refusal is"
+    " also logged for the round's record."
 )
 
 
@@ -387,10 +403,85 @@ def review_agent(event: dict) -> str | None:
     return name if (AGENTS_DIR / f"{name}.md").is_file() else None
 
 
+def project_var(word: str) -> str | None:
+    return word if PROJECT_VAR.fullmatch(word) else None
+
+
+def reviewer_segment(seg: list[str], depth: int) -> str | None:
+    """One simple command of a review agent's: its leading assignments, `env`'s options, then the program."""
+    i = 0
+    while i < len(seg) and seg[i] in KEYWORDS:
+        i += 1
+    if i < len(seg) and seg[i] == "for" and i + 1 < len(seg) and project_var(seg[i + 1]):
+        return f"a `for` loop over `{seg[i + 1]}`"
+    while i < len(seg) and (m := ASSIGN.fullmatch(seg[i])):
+        if project_var(m.group(1)):
+            return f"a change to `{m.group(1)}`"
+        i += 1
+    if i < len(seg) and os.path.basename(seg[i]) == "env":
+        i += 1
+        while i < len(seg):
+            t = seg[i]
+            if t in ("-i", "--ignore-environment", "-"):
+                return "`env -i`, which clears the project variables"
+            if t in ("-u", "--unset") or t.startswith(("-u", "--unset=")):
+                name = seg[i + 1] if t in ("-u", "--unset") and i + 1 < len(seg) else t.split("=", 1)[-1] if "=" in t else t[2:]
+                if project_var(name):
+                    return f"unsetting `{name}`"
+                i += 2 if t in ("-u", "--unset") else 1
+                continue
+            if (m := ASSIGN.fullmatch(t)) and project_var(m.group(1)):
+                return f"a change to `{m.group(1)}`"
+            if t in ("-C", "--chdir", "-S", "--split-string"):
+                i += 2
+                continue
+            if t.startswith("-") or ASSIGN.fullmatch(t):
+                i += 1
+                continue
+            break
+    prog = program(seg[i:])
+    if not prog:
+        return None
+    name, args = prog
+    if name == "unset" and any(project_var(a) for a in args):
+        return "`unset` on a project variable"
+    if name in DECLARE:
+        for a in args:
+            m = ASSIGN.fullmatch(a)
+            if project_var(m.group(1) if m else a) and (m or name == "local" or any(x.startswith(("-n", "+x")) for x in args)):
+                return f"`{name}` on a project variable"
+    if name in TARGETS and any(project_var(a) for a in args):
+        return f"`{name}` into a project variable"
+    if name == "printf" and "-v" in args and args.index("-v") + 1 < len(args) and project_var(args[args.index("-v") + 1]):
+        return "`printf -v` into a project variable"
+    if name in CLOUD_TOOLS:
+        return f"a live `{name}` call"
+    if name in HTTP_TOOLS and any(CLOUD_HOST.search(a) for a in args):
+        return f"a `{name}` request to a Google Cloud host"
+    if name == "find":
+        for k, a in enumerate(args):
+            if a in FIND_EXEC:
+                sub = list(itertools.takewhile(lambda x: x not in (";", "+"), args[k + 1 :]))
+                if reason := reviewer_segment(sub, depth):
+                    return reason
+    if depth < 3 and (name in SHELLS and "-c" in args or name == "eval"):
+        inner = (
+            args[args.index("-c") + 1]
+            if name in SHELLS and args.index("-c") + 1 < len(args)
+            else " ".join(args)
+        )
+        return reviewer_verdict(inner, depth + 1)
+    return None
+
+
 def reviewer_verdict(command: str, depth: int = 0) -> str | None:
-    """What a review agent may not run: a live cloud call or a change to the project variables."""
-    if CLIENT_LIBS.search(command) and RUNTIME.search(command):  # `-c` code or a heredoc fed to it
-        return "inline code that loads Google's client libraries"
+    """What a review agent may not run: a live cloud call or a change to the project variables.
+
+    A seatbelt for the slips reviewers have made (a cloud CLI, a dry run or permission check, a project variable
+    cleared before a test), read from the command's text: it does not stop a determined evasion (a script that
+    calls GCP itself, code read from a file); the brief and IAM stay the rule there."""
+    if RUNTIME.search(command) and (IMPORT.search(command) or CLOUD_URL.search(command)):
+        return "inline code that loads Google's client libraries or names a Google Cloud host"
     command, bodies = split_heredocs(command)
     for body in bodies if depth < 3 else []:
         if reason := reviewer_verdict(body, depth + 1):
@@ -401,34 +492,30 @@ def reviewer_verdict(command: str, depth: int = 0) -> str | None:
             return "a command this guard cannot parse (unbalanced quotes) that names GCP"
         return None
     for seg in segments(tokens):
-        for i, t in enumerate(seg):
-            if re.fullmatch(rf"(?:{PROJECT_VAR.pattern})=.*", t):
-                return f"a change to `{t.split('=', 1)[0]}`"
-            if t in ("-u", "--unset") and i + 1 < len(seg) and PROJECT_VAR.fullmatch(seg[i + 1]):
-                return f"unsetting `{seg[i + 1]}`"
-            if t.startswith("--unset=") and PROJECT_VAR.fullmatch(t.split("=", 1)[1]):
-                return f"unsetting `{t.split('=', 1)[1]}`"
+        if reason := reviewer_segment(seg, depth):
+            return reason
         prog = program(seg)
-        if not prog:
-            continue
-        name, args = prog
-        if name in ("unset", "export", "declare", "typeset", "readonly") and any(
-            PROJECT_VAR.fullmatch(a) for a in args
-        ) and (name == "unset" or any(a.startswith(("-n", "+x")) for a in args)):
-            return f"`{name}` on a project variable"
-        if name in CLOUD_TOOLS:
-            return f"a live `{name}` call"
-        if name in HTTP_TOOLS and any(CLOUD_HOST.search(a) for a in args):
-            return f"a `{name}` request to a Google Cloud host"
-        if depth < 3 and (name in SHELLS and "-c" in args or name == "eval"):
-            inner = (
-                args[args.index("-c") + 1]
-                if name in SHELLS and args.index("-c") + 1 < len(args)
-                else " ".join(args)
-            )
-            if reason := reviewer_verdict(inner, depth + 1):
-                return reason
+        if (prog and prog[0] in SHELLS and not [a for a in prog[1] if not a.startswith("-")]
+                and re.search(r"\b(gcloud|bq|gsutil)\b|googleapis\.com|\.run\.app", command)):
+            return "a command piped into a shell that names a cloud tool"
     return None
+
+
+REFUSALS = "guard-refusals.log"
+
+
+def log_reviewer_refusal(event: dict, reason: str) -> None:
+    """One line per refusal of a review agent's command, for `verdict.sh` to put on the round's record: the time, the
+    agent and the reason, never the command (it may hold a value the record must not)."""
+    try:
+        path = Path(os.environ.get("LOADOUT_GUARD_REFUSALS") or Path.home() / ".claude" / REFUSALS)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        when = time.strftime("%Y-%m-%dT%H:%MZ", time.gmtime())
+        agent = re.sub(r"[^\w:.-]", "", str(event.get("agent_type")))[:64]
+        with path.open("a", encoding="utf-8") as f:
+            f.write(f"{when} {agent}: {reason.replace(chr(10), ' ')}\n")
+    except Exception:  # noqa: BLE001 -- the log never changes or slows the decision
+        pass
 
 
 def note_refusal(rule: str) -> None:
@@ -460,11 +547,13 @@ def main() -> int:
             reason = reviewer_verdict(command)
             if reason:
                 rule, advice = "reviewer-cloud", REVIEWER_ADVICE
+                log_reviewer_refusal(event, reason)
     except Exception as exc:  # noqa: BLE001 -- a guard bug must not wave a GCP command through
         rule = "guard-error"
         reason = (
             f"a GCP command the guard failed on ({exc})"
             if re.search(r"gcloud|\bbq\b|googleapis", command)
+            or (review_agent(event) and PROJECT_VAR.search(command))
             else None
         )
     if reason:

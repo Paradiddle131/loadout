@@ -232,7 +232,7 @@ def test_input_nested_too_deep_takes_the_failure_rule(home: Path, command: str, 
     assert ('"permissionDecision": "deny"' in done.stdout) is refused
 
 
-def run_as(command: str, home: Path, agent: str | None) -> dict | None:
+def run_as(command: str, home: Path, agent: str | None, log: Path | None = None) -> dict | None:
     event = {"tool_name": "Bash", "tool_input": {"command": command}}
     if agent is not None:
         event["agent_type"], event["agent_id"] = agent, "a1"
@@ -241,7 +241,7 @@ def run_as(command: str, home: Path, agent: str | None) -> dict | None:
         input=json.dumps(event),
         capture_output=True,
         text=True,
-        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        env={"HOME": str(home), "PATH": "/usr/bin:/bin", "LOADOUT_GUARD_REFUSALS": str(log or home / "refusals.log")},
         check=True,
     )
     return json.loads(out.stdout) if out.stdout.strip() else None
@@ -270,6 +270,27 @@ REVIEWER_DENIED = [
     "cd wt && GOOGLE_CLOUD_PROJECT=x pytest -q",
     "bash -c 'unset GCP_PROJECT && make check'",
     "LEDGER_LAB_GCP_PROJECT='unbalanced make test",
+    "env -i PATH=/usr/bin make check",
+    "env -uGCP_PROJECT make check",
+    "env --unset GCP_PROJECT make check",
+    "GCP_PROJECT+=x make check",
+    "unset -v GCP_PROJECT",
+    "find . -name x -exec gcloud info \\;",
+    "read GCP_PROJECT </dev/null; make check",
+    "printf -v GCP_PROJECT %s ''; make check",
+    "for GCP_PROJECT in ''; do make check; done",
+    "f(){ local GCP_PROJECT; make check; }; f",
+    "declare -x LEDGER_LAB_GCP_PROJECT=other",
+    "python3 -c \"import urllib.request as u; u.urlopen('https://bigquery.googleapis.com/bigquery/v2/projects')\"",
+    "bq query --dry_run 'SELECT 1'",
+    "gcloud projects test-iam-permissions p --permissions=x",
+    "echo gcloud info | sh",
+    "declare +x GCP_PROJECT; make check",
+    "typeset +x LEDGER_LAB_GCP_PROJECT",
+    "readonly GCP_PROJECT=x",
+    "export -n CLOUDSDK_CORE_PROJECT",
+    "bash <<'EOF'\ngcloud projects list\nEOF",
+    "python3 -c 'from google import auth; auth.default()'",
 ]
 
 REVIEWER_ALLOWED = [
@@ -280,12 +301,22 @@ REVIEWER_ALLOWED = [
     "cat > /tmp/x.py <<'EOF'\nfrom google.cloud import bigquery\nEOF",
     "curl -s https://api.github.com/rate_limit",
     "printenv GCP_PROJECT",
+    "grep -rn 'GCP_PROJECT=' cloud/",
+    "git log -S 'LEDGER_LAB_GCP_PROJECT=' --oneline",
+    "printf 'GCP_PROJECT=%s\\n' x",
+    "grep -rn google.auth src && python3 -m pytest -q",
+    "grep -rn googleapis.com cloud/ && python3 -m pytest -q",
+    "cat > /tmp/p.py <<'EOF'\nprint('google.cloud')\nEOF\npython3 /tmp/p.py",
+    "env PATH=/usr/bin make check",
+    "export GCP_PROJECT",
+    "declare -p GCP_PROJECT",
+    "find . -name '*.py' -exec grep -l gcloud {} +",
 ]
 
 
 @pytest.mark.parametrize("agent", ["some-plugin:correctness-reviewer", "finding-verifier", "some-plugin:control-prober"])
 @pytest.mark.parametrize("command", REVIEWER_DENIED)
-def test_a_review_agent_makes_no_live_cloud_call(command: str, agent: str, home: Path) -> None:
+def test_a_review_agent_is_refused_the_listed_cloud_calls(command: str, agent: str, home: Path) -> None:
     out = run_as(command, home, agent)
     assert out, command
     reason = out["hookSpecificOutput"]["permissionDecisionReason"]
@@ -302,7 +333,7 @@ def test_a_review_agent_still_reads_code_and_runs_tests(command: str, home: Path
 @pytest.mark.parametrize(
     "command", ["gcloud projects describe p", "unset GCP_PROJECT", "bq query --dry_run 'SELECT 1'"]
 )
-def test_the_main_thread_and_other_agents_keep_the_spend_rule_only(
+def test_the_reviewer_rule_skips_the_main_thread_and_other_agents(
     command: str, agent: str | None, home: Path
 ) -> None:
     assert run_as(command, home, agent) is None
@@ -311,3 +342,12 @@ def test_the_main_thread_and_other_agents_keep_the_spend_rule_only(
 def test_the_spend_rule_still_wins_for_a_review_agent(home: Path) -> None:
     out = run_as("gcloud services enable compute.googleapis.com", home, "some-plugin:guardrail-reviewer")
     assert out and "GCP $0 guard: refused" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_a_reviewer_refusal_is_logged_for_the_record_without_the_command(home: Path) -> None:
+    log = home / "r.log"
+    assert run_as("GCP_PROJECT=secret-value make check", home, "some-plugin:correctness-reviewer", log)
+    assert run_as("gcloud services enable compute.googleapis.com", home, "some-plugin:correctness-reviewer", log)
+    [line] = log.read_text().splitlines()  # the spend rule's refusal is no reviewer refusal
+    assert "some-plugin:correctness-reviewer: a change to `GCP_PROJECT`" in line and "secret-value" not in line
+    assert run_as("gcloud info", home, None, log) is None and len(log.read_text().splitlines()) == 1

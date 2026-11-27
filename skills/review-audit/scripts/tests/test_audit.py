@@ -1266,11 +1266,49 @@ def test_summary_flags_a_merge_without_passing_gates_on_its_head(github: dict, t
     assert not s["series"][0]["merged_without_gates"]
 
 
-def test_a_record_edited_after_the_merge_reads_as_the_guard_saw_it(github: dict, tmp_path: Path) -> None:
-    cs = github["data"][f"repos/{REPO}/issues/7/comments"]
+def test_a_record_edited_after_the_merge_is_read_as_refused(github: dict, tmp_path: Path) -> None:
+    cs = github["data"][f"repos/{REPO}/issues/7/comments"]  # its body now may not be the one the guard read
     cs[:] = [dict(c, updated_at="2030-01-09T00:00:00Z") if c["id"] == 3 else c for c in cs]
-    [c] = audit.summarize(harvest(tmp_path / "a"), None)["series"]
-    assert not c["merged_without_pass"]
-    cs[:] = [dict(c, updated_at="2030-01-02T12:00:00Z") if c["id"] == 3 else c for c in cs]  # edited before it
-    [c] = audit.summarize(harvest(tmp_path / "b"), None)["series"]
-    assert c["merged_without_pass"]
+    d = harvest(tmp_path)
+    assert rows(d, "prs")[0]["guard_review"] == "refused" and audit.summarize(d, None)["series"][0]["merged_without_pass"]
+
+
+def test_a_merge_reviewed_before_the_window_is_no_unreviewed_merge(github: dict, tmp_path: Path) -> None:
+    d = harvest(tmp_path, since="2030-01-02T12:00:00Z")  # PR 7's passing record is older than the window
+    assert rows(d, "prs")[0]["guard_review"]["state"] == "success"
+    assert audit.summarize(d, None)["unreviewed_merges"] == []
+
+
+def test_a_failing_gates_record_on_the_head_is_flagged_and_listed(github: dict, tmp_path: Path, capsys) -> None:
+    github["data"][f"repos/{REPO}/issues/7/comments"].append(
+        {"id": 61, "body": f"🤖 Gates: failure\n<!-- loadout" f":gates sha={H2} state=failure -->\n",
+         "author_association": "OWNER", "created_at": "2030-01-02T05:00:00Z", "updated_at": "2030-01-02T05:00:00Z"})
+    d = harvest(tmp_path)
+    assert rows(d, "prs")[0]["guard_gates"]["state"] == "failure"
+    assert audit.summarize(d, None)["series"][0]["merged_without_gates"]
+    audit.summary(audit.argparse.Namespace(dir=str(d), session=None, json=False))
+    assert "merged without passing gates" in capsys.readouterr().out
+
+
+def unreviewed_pr(github: dict, n: int, merged: str | None, comments: list) -> None:
+    github["data"][f"repos/{REPO}/pulls?state=all&sort=updated&direction=desc"].insert(0, {
+        "number": n, "title": "Docs", "state": "closed" if merged else "open", "created_at": "2030-01-01T00:00:00Z",
+        "updated_at": "2030-01-04T00:00:00Z", "merged_at": merged, "head": {"sha": H1, "ref": f"d{n}"}})
+    github["data"][f"repos/{REPO}/issues/{n}/comments"] = comments
+    github["data"][f"repos/{REPO}/pulls/{n}/commits"] = []
+
+
+def test_an_open_pr_with_no_round_is_no_unreviewed_merge(github: dict, tmp_path: Path) -> None:
+    unreviewed_pr(github, 9, None, [])
+    assert audit.summarize(harvest(tmp_path), None)["unreviewed_merges"] == []
+
+
+def test_a_merge_on_a_refused_review_record_is_listed_so(github: dict, tmp_path: Path, capsys) -> None:
+    rec = dict(review_comment(70, H1, "success", PASS_OUT.replace(H2, H1), "2029-12-31T00:00:00Z"),
+               updated_at="2030-01-01T00:00:00Z")  # edited before the merge and older than the window: refused
+    unreviewed_pr(github, 9, "2030-01-04T00:00:00Z", [rec])
+    d = harvest(tmp_path)
+    [u] = audit.summarize(d, None)["unreviewed_merges"]
+    assert u["review_record"] == "refused"
+    audit.summary(audit.argparse.Namespace(dir=str(d), session=None, json=False))
+    assert "merged on a refused review record" in capsys.readouterr().out
