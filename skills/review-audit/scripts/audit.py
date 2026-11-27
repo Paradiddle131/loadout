@@ -29,7 +29,11 @@ back on the PRs, and sums both up. GitHub holds every record; the JSONL files ar
       checkable finding was wrong or mattered and a must-fix was ranked too high, each with its 95% interval,
       and how many findings were ranked too low, the findings by the effort their lens ran at and the rounds by depth
       (`unstamped` for a round line without them); "merged without a pass" reads the review record the merge
-      guard saw at merge time, not the gates record or the tier. Then the rounds by the review path's version
+      guard saw at merge time (the newest unedited trusted one posted by the merge time: one edited later is
+      refused, since GitHub keeps no copy of the body the guard read),
+      "merged without passing gates" the gates record read the same way, and a merged PR with no review round
+      in the window whose review or gates record the guard saw is not a pass on its head is listed under "Needs a
+      look", with which one (a gates-only merge is listed too: the harvest cannot tell a floor of none). Then the rounds by the review path's version
       (`v` on each record's round line, `unstamped` without one) and the reviewers' tokens and seconds per PR,
       repo, day and month, with an estimated cost at list price (BLENDED_USD_PER_MTOK has the rate).
 
@@ -71,7 +75,8 @@ FIELDS = {"gates": {"sha", "state"}, "review": {"sha", "state", "tier", "reviewe
           "audit": {"session", "backfill"}}
 DEPTHS = ("none", "light", "focused", "full")  # the review skill's plan.py ranks them
 SHA = re.compile(r"[0-9a-f]{40}")
-GUARD_REVIEW = re.compile(r"\s*<!-- loadout" r":review\b")  # how the merge guard spots a review record's marker
+# how the merge guard spots each record's marker line
+GUARD_MARKER = {k: re.compile(r"\s*<!-- loadout" rf":{k}\b") for k in ("gates", "review")}
 WHEN = re.compile(r"\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}Z)?")
 SKIPPED = re.compile(r"(dropped|unverified|not checked)\b", re.I)  # verifier sections that hold no ranked finding
 FINDING_ID = re.compile(r"[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d+")
@@ -222,14 +227,15 @@ def harvest(a: argparse.Namespace) -> int:
                 row["pr_commits"] = [c["sha"] for c in pages(f"repos/{repo}/pulls/{n}/commits")]
                 row["commits"] = len(row["pr_commits"])
             rows["prs"].append(row)
-            newest = None  # the newest trusted comment with a review marker line, picked as the merge guard picks it
+            newest: dict = {}  # per kind, the newest trusted comment with that marker line, as the merge guard picks it
             for c in pages(f"repos/{repo}/issues/{n}/comments"):
                 lines2 = (c.get("body") or "").split("\n")
-                if (c.get("author_association") in TRUSTED and len(lines2) > 1
-                        and GUARD_REVIEW.match(lines2[1])
+                kind2 = next((k for k, rx in GUARD_MARKER.items() if len(lines2) > 1 and rx.match(lines2[1])), None)
+                if (kind2 and c.get("author_association") in TRUSTED
                         and not (row["merged_at"] and c["created_at"] > row["merged_at"])  # what the guard saw at merge
-                        and (newest is None or (c["created_at"], c["id"]) > (newest["created_at"], newest["id"]))):
-                    newest = c
+                        and (kind2 not in newest
+                             or (c["created_at"], c["id"]) > (newest[kind2]["created_at"], newest[kind2]["id"]))):
+                    newest[kind2] = c
                 if not (rec := trusted_record(c)):
                     continue
                 kind, f = rec
@@ -292,11 +298,13 @@ def harvest(a: argparse.Namespace) -> int:
                             **{k: b["fields"].get(k) for k in ("lens", "location", "claim")}})
             # what the merge guard reads: the newest trusted comment whose marker line opens `<!-- loadout:review`
             # (as the guard matches it), or "refused" when that record would not count
-            nrec = trusted_record(newest) if newest else None
-            row["guard_review"] = (None if newest is None else
-                                   {"state": nrec[1]["state"], "sha": nrec[1]["sha"], "depth": nrec[1].get("depth")}
-                                   if nrec and nrec[0] == "review"
-                                   else "refused")
+            for kind2 in GUARD_MARKER:
+                c = newest.get(kind2)
+                nrec = trusted_record(c) if c else None
+                row[f"guard_{kind2}"] = (None if c is None else
+                                         {"state": nrec[1]["state"], "sha": nrec[1]["sha"], "depth": nrec[1].get("depth")}
+                                         if nrec and nrec[0] == kind2
+                                         else "refused")
     for name in ("prs", "gates", "rounds", "findings", "audits"):
         with open(out / f"{name}.jsonl", "w", encoding="utf-8") as fh:
             for r in rows[name]:
@@ -573,6 +581,16 @@ def wilson(k: int, n: int) -> list:
     return [round(p, 3), round(max(0, mid - half), 3), round(min(1, mid + half), 3)]
 
 
+def unguarded(p: dict, kind: str) -> bool:
+    """A merged PR whose newest trusted `kind` record at merge time is missing, refused, or no success on its head.
+
+    A harvest made before it read gates records holds no `guard_gates`: nothing is flagged from it."""
+    if not p.get("merged_at") or f"guard_{kind}" not in p:
+        return False
+    g = p[f"guard_{kind}"]
+    return not (isinstance(g, dict) and g.get("state") == "success" and g.get("sha") == p.get("head"))
+
+
 def summarize(d: Path, session: str | None) -> dict:
     prs = {(p["repo"], p["pr"]): p for p in load(d, "prs")}
     rounds = sorted(load(d, "rounds"), key=lambda r: r["created_at"])
@@ -595,7 +613,17 @@ def summarize(d: Path, session: str | None) -> dict:
                         "first_pass": rs[0]["state"] == "success", "merged": bool(p.get("merged_at")),
                         "grew": any(b > a for a, b in zip(series, series[1:])),
                         "merged_without_pass": bool(p.get("merged_at")) and not passed_head,
-                        "steered_rounds": sum(r["steered"] for r in rs)})
+                        "steered_rounds": sum(r["steered"] for r in rs),
+                        "merged_without_gates": unguarded(p, "gates")})
+    # A merged PR with no review round in the window whose review or gates record the guard saw is not a pass on its
+    # head, with which one, and whether a gates record passed on its head (a change whose floor is
+    # none merges on that alone, which the harvest cannot tell from a skipped review: both are listed).
+    unreviewed = [{"repo": k[0], "pr": k[1], "title": p.get("title"),
+                   "merged_without_gates": unguarded(p, "gates"),
+                   "review_record": None if p.get("guard_review") is None else "refused"
+                   if p.get("guard_review") == "refused" else "passed" if not unguarded(p, "review") else "no pass"}
+                  for k, p in sorted(prs.items())
+                  if p.get("merged_at") and k not in by_pr and (unguarded(p, "review") or unguarded(p, "gates"))]
     lens: dict[str, Counter] = defaultdict(Counter)
     # Findings by the effort their lens ran at (the round line's lens= entries); a finding several lenses raised counts
     # once under each distinct effort among them, and `unstamped` holds those whose round line gave no effort.
@@ -645,7 +673,9 @@ def summarize(d: Path, session: str | None) -> dict:
         "must_fix_wording": wilson(sum(j.get("kind") == "wording" for j in judged_mf), len(judged_mf)),
         "too_low": sum(j.get("rank") == "too-low" for j in audits),
         "escape_candidates": dict(sorted(esc.items())),
-        "attention": [c for c in changes if c["grew"] or c["merged_without_pass"] or c["steered_rounds"]],
+        "attention": [c for c in changes if c["grew"] or c["merged_without_pass"] or c["steered_rounds"]
+                      or c["merged_without_gates"]],
+        "unreviewed_merges": unreviewed,
         "series": changes,
     }
 
@@ -747,8 +777,15 @@ def summary(a: argparse.Namespace) -> int:
     print("\n| Needs a look | Rounds | Must-fix per round | Why |\n|---|---|---|---|")
     for c in s["attention"]:
         why = [w for w, on in (("grew", c["grew"]), ("merged without a pass", c["merged_without_pass"]),
+                               ("merged without passing gates", c["merged_without_gates"]),
                                ("steered", c["steered_rounds"])) if on]
         print(f"| {c['repo']}#{c['pr']} | {c['rounds']} | {', '.join(map(str, c['series']))} | {', '.join(why)} |")
+    for u in s["unreviewed_merges"]:
+        why = [{None: "merged with no review record", "refused": "merged on a refused review record",
+                "no pass": "merged without a passing review record", "passed": "review passed before the window"}[
+                    u["review_record"]]]
+        why += ["no passing gates on its head"] if u["merged_without_gates"] else ["gates passed (a floor of none?)"]
+        print(f"| {u['repo']}#{u['pr']} | 0 | | {', '.join(why)} |")
     est = f"Est. USD at list price (${s['usd_per_mtok']}/M tokens)"
     print(f"\n| Review path version | Rounds | Passed | Cycles to pass | Must-fix | Nits | Duplicates merged | Tokens | "
           f"{est} | Agent seconds |\n|---|---|---|---|---|---|---|---|---|---|")
