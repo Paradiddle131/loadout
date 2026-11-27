@@ -15,14 +15,14 @@ same writes sent with curl or wget to *.googleapis.com.
 
 Review agents (the collection's `agents/`, named bare or plugin-scoped in the hook's `agent_type`) get a
 stricter rule, since their brief forbids any live cloud call: a Bash command whose text, read whole (quotes,
-heredocs and `-c` strings included), names `gcloud`, `bq` or `gsutil`, a `*.googleapis.com` or `*.run.app` host,
-or a project variable (`GCP_PROJECT`, `LEDGER_LAB_GCP_PROJECT`, `CLOUDSDK_*`, `GOOGLE_*`) other than as a `$`
-read, or runs `env -i`, is refused; a reviewer searches code with the Grep tool, which this hook does not see.
+heredocs and `-c` strings included), names `gcloud`, `bq` or `gsutil`, a Google Cloud host, Google's client
+libraries, or a project variable (`GCP_PROJECT`, `LEDGER_LAB_GCP_PROJECT`, `CLOUDSDK_*`, `GOOGLE_*`) other than as
+a `$` read, or runs a command without the session's environment (`env -i`, `exec -c`, `sudo`), is refused; a reviewer searches code with the Grep tool, which this hook does not see.
 Every refusal of a review agent's command, this rule's or the spend rule's, is logged
 (`~/.claude/guard-refusals.log`) for `verdict.sh` to put on the round's record. A script that calls GCP without
 naming it in the command is not seen: a seatbelt for slips, not a wall.
 
-Reads the hook's JSON on stdin; prints a deny decision on stdout or nothing. It sees shell
+Reads the hook's JSON on stdin; prints a deny decision on stdout or nothing. The spend rule sees shell
 commands only, not code calling Google's client libraries: IAM covers those.
 Cap: $GCP_MAX_BYTES_BILLED (default 1 GiB), the value cloud/gcp/status.sh writes to ~/.bigqueryrc.
 """
@@ -373,13 +373,16 @@ AGENTS_DIR = Path(__file__).resolve().parents[2] / "agents"
 # `${NAME...}` read passes), Google's client libraries, or `env -i`.
 REVIEWER_TEXT = (
     (re.compile(r"(?<![\w.-])(gcloud|bq|gsutil)(?![\w.-])"), "a command naming `{0}`"),
-    (re.compile(r"[\w.-]*(?:googleapis\.com|\.run\.app)\b", re.IGNORECASE), "a command naming the Google Cloud host `{0}`"),
-    (re.compile(r"(?:(?<=-u)|(?<![${\w]))(GCP_PROJECT|LEDGER_LAB_GCP_PROJECT|CLOUDSDK_[A-Z0-9_]+|GOOGLE_[A-Z0-9_]+)(?![\w])"),
+    (re.compile(r"[\w.-]*(?:googleapis\.com|\.run\.app|cloud\.google\.com|cloudfunctions\.net|appspot\.com|"
+                r"gcr\.io|pkg\.dev)\b", re.IGNORECASE), "a command naming a Google Cloud host"),
+    (re.compile(r"(?:(?<=-u)|(?<=[^$]\{)|(?<![${\w]))(GCP_PROJECT|LEDGER_LAB_GCP_PROJECT|CLOUDSDK_[A-Z0-9_]+|GOOGLE_[A-Z0-9_]+)(?![\w])"),
      "a command naming `{0}` other than as a `$` read"),
     (re.compile(r"google\.cloud|google\.auth|googleapiclient|@google-cloud/|google-auth-library|from\s+google\s+import"),
      "a command naming Google's client library `{0}`"),
     (re.compile(r"(?<![\w-])env(?:\s+-[\w-]*)*\s+(?:-[a-zA-Z]*i[a-zA-Z]*|--ignore-environment|-)(?=\s|$)"),
      "`env -i`, which clears the project variables"),
+    (re.compile(r"(?<![\w-])(exec\s+(?:-\w*\s+)*-\w*c\w*|sudo)(?=\s|$)"),
+     "`{0}`, which runs a command without the session's environment"),
 )
 REVIEWER_ADVICE = (
     " Review agents make no live cloud call, read or write, and leave the project variables as the session set"
@@ -412,7 +415,8 @@ REFUSALS = "guard-refusals.log"
 
 def log_reviewer_refusal(event: dict, reason: str) -> None:
     """One line per refusal of a review agent's command, for `verdict.sh` to put on the round's record: the time, the
-    agent and the reason, never the command (it may hold a value the record must not)."""
+    agent and the reason, which names at most a fixed word (a CLI, a variable or library name), never a host or
+    anything else of the command (it may hold a value the record must not)."""
     try:
         path = Path(os.environ.get("LOADOUT_GUARD_REFUSALS") or Path.home() / ".claude" / REFUSALS)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -459,7 +463,7 @@ def main() -> int:
         rule = "guard-error"
         reason = (
             f"a GCP command the guard failed on ({exc})"
-            if re.search(r"gcloud|\bbq\b|googleapis", command) or (agent and REVIEWER_TEXT[2][0].search(command))
+            if re.search(r"gcloud|\bbq\b|googleapis", command)
             else None
         )
     if reason and agent:

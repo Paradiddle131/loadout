@@ -297,6 +297,14 @@ REVIEWER_DENIED = [
     "env -iv pytest",
     "env -vu GCP_PROJECT pytest",
     "env --ignore-environment make check",
+    "exec -c make check",
+    "env - make check",
+    "env -v -i make check",
+    "env -0 -i make check",
+    "sudo make check",
+    "unset {GCP_PROJECT,X}",
+    "curl https://storage.cloud.google.com/b/o",
+    "curl https://x.cloudfunctions.net/f",
     "x=gc; python3 -c \"import urllib.request as u; u.urlopen('https://storage.googleapis.com/b')\"",
     "python3 -c 'from google import auth; auth.default()'",
 ]
@@ -308,6 +316,8 @@ REVIEWER_ALLOWED = [
     "cat > /tmp/x.py <<'EOF'\nprint('hello')\nEOF\npython3 /tmp/x.py",
     "curl -s https://api.github.com/rate_limit",
     "env PATH=/usr/bin make check",
+    "exec make check",
+    "echo \"${GCP_PROJECT:-none}\" $GOOGLE_CLOUD_PROJECT",
     "pytest -q tests/test_bq_load.py src/my-gcloud-notes.md",
     "find . -name '*.py' -exec grep -l TODO {} +",
 ]
@@ -355,9 +365,10 @@ def test_the_reviewer_rule_skips_the_main_thread_and_other_agents(
 
 def test_a_review_agent_s_spend_refusal_is_refused_and_logged_too(home: Path) -> None:
     log = home / "s.log"
-    out = run_as("gcloud services enable compute.googleapis.com", home, "some-plugin:guardrail-reviewer", log)
-    assert out and out["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert len(log.read_text().splitlines()) == 1
+    out = run_as("g''cloud services enable compute", home, "some-plugin:guardrail-reviewer", log)  # the spend rule's
+    assert out and "enabling an API" in out["hookSpecificOutput"]["permissionDecisionReason"]
+    [line] = log.read_text().splitlines()
+    assert "some-plugin:guardrail-reviewer: enabling an API" in line
 
 
 def test_a_reviewer_refusal_is_logged_for_the_record_without_the_command(home: Path) -> None:
@@ -369,3 +380,15 @@ def test_a_reviewer_refusal_is_logged_for_the_record_without_the_command(home: P
     assert "`gcloud`" in second
     assert run_as("gcloud info", home, None, log) is None and len(log.read_text().splitlines()) == 2
     assert run_as("bq insert d.t f.json", home, None, log) and len(log.read_text().splitlines()) == 2  # main thread
+
+
+def test_a_reviewer_refusal_log_names_no_host(home: Path) -> None:
+    log = home / "h.log"
+    assert run_as("curl -s https://my-lab-bucket-4471.storage.googleapis.com/o", home, "x:leak-hunter", log)
+    assert "my-lab-bucket" not in log.read_text() and "a Google Cloud host" in log.read_text()
+
+
+def test_a_reviewer_refusal_log_line_stays_one_line(home: Path) -> None:
+    log = home / "n.log"
+    assert run_as("gcloud info", home, "evil\n2030-01-01T00:00Z forged:correctness-reviewer", log)
+    assert len(log.read_text().splitlines()) == 1
