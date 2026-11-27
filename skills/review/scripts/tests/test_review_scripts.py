@@ -1678,3 +1678,21 @@ def test_the_stub_drops_a_bang_before_a_bracket_only_within_its_paragraph(tmp_pa
                           capture_output=True, text=True, env={**os.environ, "STUB_DIR": str(tmp_path)})
     assert done.returncode == 0, done.stderr
     assert json.loads((tmp_path / "comments.json").read_text())[0]["body"] == kept
+
+
+def test_verdict_puts_the_guard_s_refusals_on_the_record_once(w: World, tmp_path: Path) -> None:
+    log = tmp_path / "refusals.log"
+    log.write_text("2030-01-01T00:00Z some-plugin:correctness-reviewer: a live `gcloud` call\n")
+    head = w.commit({"src/app.py": "x = 2\n"})
+    args = ("12", "--tier", "standard", "--result", "pass", "--reviewers", PLANNED,
+            "--reviewed", head, "--file", review_file(tmp_path, head))
+    dry = w.verdict(*args, "--dry-run", LOADOUT_GUARD_REFUSALS=str(log))
+    assert dry.returncode == 0 and log.exists(), dry.stderr  # a dry run keeps the log for the real post
+    done = w.verdict(*args, LOADOUT_GUARD_REFUSALS=str(log))
+    assert done.returncode == 0, done.stderr
+    [c] = w.comments()
+    assert "- Guard refusals of review agents' commands: 1\n" in c["body"]
+    assert "  - 2030-01-01T00:00Z some-plugin:correctness-reviewer: a live `gcloud` call" in c["body"]
+    assert not log.exists()  # moved aside: the next round's record starts from none
+    again = w.verdict(*args, LOADOUT_GUARD_REFUSALS=str(log))
+    assert again.returncode == 0 and "Guard refusals" not in w.comments()[-1]["body"]

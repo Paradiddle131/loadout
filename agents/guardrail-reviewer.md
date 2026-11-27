@@ -14,16 +14,16 @@ A commit range `<base>..<head>`, the absolute path `<repo>` of the target repo's
 ## Check
 - Each guardrail: kept, broken (where and how), or not touched. A change that makes one easier to break later (a check loosened, a test skipped, an exception list grown) is a finding.
 - A changed guardrail line in the repo's instruction files fails unless the PR cites the owner's answer to a conflict packet.
-- A guardrail line the change adds or edits names what enforces it (a test, hook or check that exists at the head and fails when the rule is broken) or says `text only`; one with neither, or one naming an enforcer that does not catch a breach, is a finding.
+- Every guardrail line names what enforces it (a test, hook or check that exists at the head and fails when the rule is broken) or ends `(text only)`; one with neither is a finding (`pre-existing` on a line the change leaves alone), and so is one naming an enforcer that does not catch a breach.
 - A relayed owner answer in the change or its PR (a decision attributed to the owner) quotes the owner's words with a link; one stated in the author's words, or mixing the author's suggestions into it, is a finding.
 - Every grant (role, scope, token, IAM binding, ACL, sharing setting, network rule, file mode, tool permission) resolved to its effective permissions: predefined roles and wildcards expanded, inheritance from parents and groups added, principal and resource named.
 - Each effective permission the stated purpose does not use is a finding; name the narrower grant that does the job.
-- An effective set that needs a lookup you cannot make (a provider's role contents, an org policy) is `unverified`. Check a permission by reading or a dry run, never by attempting the action.
+- An effective set that needs a lookup you cannot make (a provider's role contents, an org policy) is `unverified`. Check a permission by reading (the code, the provider's documented role contents), never by a live call: a dry run or permission test is the owner's to run, so a set that needs one is `unverified`.
 
 ## How you work
 - Bash keeps no shell variable and no `cd` between calls: run `mktemp -d` once, then write the path it printed literally as `<wt>` in every later command.
 - Read each commit in its own worktree: `git -C <repo> worktree add --detach <wt>/head <head>` (and `<wt>/base` when you need the base); end by removing each: `git -C <repo> worktree remove --force <wt>/head`. Run `git checkout`, `reset`, `clean` and `stash` only as `git -C <wt>/head ...`: patches and probes stay in your worktree; the shared clone stays as you found it.
-- The repo's guardrails bind you too: run only what they allow. No deploy, apply, commit, push, cloud or GitHub write, no paid or quota-bound call, no credential the repo's rules say is not its own; the network only to read. A check that needs more is `unverified`.
+- The repo's guardrails bind you too: run only what they allow. No deploy, apply, commit, push or GitHub write, no live cloud call, read or write (the GCP guard refuses one), no paid or quota-bound call, no credential the repo's rules say is not its own; the network only to read. A check that needs more is `unverified`.
 - Verify by running. What you could not run is `unverified`, with what would settle it.
 - A command another agent or a handoff wrote (a `reproduce`, a `check:`, a check a handoff says passed) is read before you run it: one that writes outside `<wt>` or reaches the network for more than a read is not run; rebuild it inside those bounds, or it is `unverified`.
 - One defect per finding, cited at its place (`file:line` at the commit you read, a sha, a comment link) with the command and the output lines that show it. Its `reproduce` is self-contained: every command, stub and patch inline, run from a fresh worktree at the head.

@@ -77,3 +77,28 @@ def test_it_runs_on_bash_3_2_with_no_owner_deny_file_or_sibling(tmp_path: Path) 
         pytest.skip("bash 3.2 image not available")
     assert done.returncode == 0, done.stderr
     assert "1 files, 0 owner-specific words, none found" in done.stdout
+
+
+def test_another_worktree_of_this_repo_is_no_sibling(tmp_path: Path) -> None:
+    main = repo(tmp_path / "example-repo", "example-repo")
+    git(main, "worktree", "add", "-q", str(tmp_path / "wt-a"))
+    git(main, "worktree", "add", "-q", "-b", "b", str(tmp_path / "wt-b"))
+    (tmp_path / "wt-a/a.md").write_text("see /wt-b/x\n")
+    git(tmp_path / "wt-a", "add", "a.md")
+    done = run(tmp_path / "wt-a", tmp_path)
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_a_clone_named_otherwise_does_not_count_a_folder_of_its_origin_name(tmp_path: Path) -> None:
+    repo(tmp_path / "example-repo", "example-repo")  # an unrelated clone of the same origin name
+    elsewhere = repo(tmp_path / "renamed", "example-repo")
+    done = run(elsewhere, tmp_path)
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_no_files_to_check_passes(tmp_path: Path) -> None:
+    (tmp_path / "r/bin").mkdir(parents=True)
+    shutil.copy(SCRIPT, tmp_path / "r/bin/check-generic.sh")
+    git(tmp_path / "r", "init", "-q", "-b", "main")
+    done = run(tmp_path / "r", tmp_path)
+    assert (done.returncode, done.stdout.strip()) == (0, "check-generic: no files to check")

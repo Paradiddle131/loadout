@@ -29,7 +29,8 @@ back on the PRs, and sums both up. GitHub holds every record; the JSONL files ar
       checkable finding was wrong or mattered and a must-fix was ranked too high, each with its 95% interval,
       and how many findings were ranked too low, the findings by the effort their lens ran at and the rounds by depth
       (`unstamped` for a round line without them); "merged without a pass" reads the review record the merge
-      guard saw at merge time (the newest trusted one posted by then, counted unedited when edited only after it),
+      guard saw at merge time (the newest unedited trusted one posted by the merge time: one edited later is
+      refused, since GitHub keeps no copy of the body the guard read),
       "merged without passing gates" the gates record read the same way, and a merged PR with no review round
       is listed under "Needs a look" with its gates state, since the harvest cannot tell a floor of none. Then the rounds by the review path's version
       (`v` on each record's round line, `unstamped` without one) and the reviewers' tokens and seconds per PR,
@@ -298,8 +299,6 @@ def harvest(a: argparse.Namespace) -> int:
             # (as the guard matches it), or "refused" when that record would not count
             for kind2 in GUARD_MARKER:
                 c = newest.get(kind2)
-                if c and row["merged_at"] and (c.get("updated_at") or "") > row["merged_at"]:
-                    c = {**c, "updated_at": c["created_at"]}  # edited after the merge: the guard saw it unedited
                 nrec = trusted_record(c) if c else None
                 row[f"guard_{kind2}"] = (None if c is None else
                                          {"state": nrec[1]["state"], "sha": nrec[1]["sha"], "depth": nrec[1].get("depth")}
@@ -615,12 +614,13 @@ def summarize(d: Path, session: str | None) -> dict:
                         "merged_without_pass": bool(p.get("merged_at")) and not passed_head,
                         "steered_rounds": sum(r["steered"] for r in rs),
                         "merged_without_gates": unguarded(p, "gates")})
-    # A merged PR with no review round at all, and whether a gates record passed on its head (a change whose floor is
+    # A merged PR with no review round at all (none in the window, and none the guard saw before it), and whether a gates record passed on its head (a change whose floor is
     # none merges on that alone, which the harvest cannot tell from a skipped review: both are listed).
     unreviewed = [{"repo": k[0], "pr": k[1], "title": p.get("title"),
                    "merged_without_gates": unguarded(p, "gates"),
                    "review_record": "refused" if p.get("guard_review") == "refused" else None}
-                  for k, p in sorted(prs.items()) if p.get("merged_at") and k not in by_pr]
+                  for k, p in sorted(prs.items())
+                  if p.get("merged_at") and k not in by_pr and not isinstance(p.get("guard_review"), dict)]
     lens: dict[str, Counter] = defaultdict(Counter)
     # Findings by the effort their lens ran at (the round line's lens= entries); a finding several lenses raised counts
     # once under each distinct effort among them, and `unstamped` holds those whose round line gave no effort.

@@ -277,10 +277,17 @@ if [ -n "$round_out" ]; then
   fi
 fi
 for p in ${plan_pair_list[@]+"${plan_pair_list[@]}"}; do round+=(--round "$p"); done
+# The GCP guard's refusals of review agents' commands since the last record this machine posted (cloud/gcp/guard.py).
+refusals=${LOADOUT_GUARD_REFUSALS:-$HOME/.claude/guard-refusals.log}
+if [ -z "$repost" ] && [ -s "$refusals" ]; then
+  lines+=(--line "- Guard refusals of review agents' commands: $(wc -l <"$refusals" | tr -d ' ')")
+  while IFS= read -r l; do lines+=(--line "  - $l"); done < <(head -n 20 "$refusals")
+fi
 build_record --kind review --sha "$head" --state "$state" --tier "$tier" --reviewed "$reviewed" --depth "$plan_depth" \
   ${plan_override:+--override "$plan_override"} \
   ${round[@]+"${round[@]}"} \
   --title "🤖 Review: $result ($tier tier)" ${lines[@]+"${lines[@]}"} ${file:+--file "$file"} \
   --details "Reviewer output (raw)" >"$tmp/body.md"
 url=$(post_record "$pr" "$tmp/body.md") || exit 1
+[ "$DRY_RUN" = 1 ] || [ ! -s "$refusals" ] || [ -n "$repost" ] || mv "$refusals" "$refusals.$(date -u +%Y%m%dT%H%M%SZ)"
 echo "verdict: PR $pr, head $head: review $result ($tier tier)${url:+, $url}"
