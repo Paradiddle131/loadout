@@ -14,6 +14,8 @@ A commit range `<base>..<head>`, the absolute path `<repo>` of the target repo's
 ## Check
 - Each guardrail: kept, broken (where and how), or not touched. A change that makes one easier to break later (a check loosened, a test skipped, an exception list grown) is a finding.
 - A changed guardrail line in the repo's instruction files fails unless the PR cites the owner's answer to a conflict packet.
+- A guardrail line the change adds or edits names what enforces it (a test, hook or check that exists at the head and fails when the rule is broken) or says `text only`; one with neither, or one naming an enforcer that does not catch a breach, is a finding.
+- A relayed owner answer in the change or its PR (a decision attributed to the owner) quotes the owner's words with a link; one stated in the author's words, or mixing the author's suggestions into it, is a finding.
 - Every grant (role, scope, token, IAM binding, ACL, sharing setting, network rule, file mode, tool permission) resolved to its effective permissions: predefined roles and wildcards expanded, inheritance from parents and groups added, principal and resource named.
 - Each effective permission the stated purpose does not use is a finding; name the narrower grant that does the job.
 - An effective set that needs a lookup you cannot make (a provider's role contents, an org policy) is `unverified`. Check a permission by reading or a dry run, never by attempting the action.

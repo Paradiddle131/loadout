@@ -230,3 +230,84 @@ def test_input_nested_too_deep_takes_the_failure_rule(home: Path, command: str, 
                           env={"HOME": str(home), "PATH": "/usr/bin:/bin"}, timeout=60)
     assert done.returncode == 0 and done.stderr == "", done.stderr[-300:]
     assert ('"permissionDecision": "deny"' in done.stdout) is refused
+
+
+def run_as(command: str, home: Path, agent: str | None) -> dict | None:
+    event = {"tool_name": "Bash", "tool_input": {"command": command}}
+    if agent is not None:
+        event["agent_type"], event["agent_id"] = agent, "a1"
+    out = subprocess.run(
+        [sys.executable, str(GUARD)],
+        input=json.dumps(event),
+        capture_output=True,
+        text=True,
+        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        check=True,
+    )
+    return json.loads(out.stdout) if out.stdout.strip() else None
+
+
+REVIEWER_DENIED = [
+    "gcloud projects describe p",
+    "bq query --dry_run 'SELECT 1'",
+    "gsutil ls gs://b",
+    "timeout 30 gcloud auth list",
+    "curl -s https://cloudresourcemanager.googleapis.com/v3/projects/p -H 'Authorization: Bearer x'",
+    "curl -X POST https://cloudresourcemanager.googleapis.com/v1/projects/p:testIamPermissions -d '{}'",
+    "wget -qO- https://svc-abc.a.run.app/health",
+    "python3 -c 'from google.cloud import bigquery; bigquery.Client()'",
+    "python3 - <<'PY'\nimport google.auth\ngoogle.auth.default()\nPY",
+    "node -e \"require('@google-cloud/storage')\"",
+    "bash -c 'gcloud config list'",
+    "eval gcloud config list",
+    "GCP_PROJECT= make check",
+    "LEDGER_LAB_GCP_PROJECT=other make test",
+    "unset GCP_PROJECT; make check",
+    "env -u LEDGER_LAB_GCP_PROJECT make test",
+    "env --unset=GCP_PROJECT make test",
+    "export -n GCP_PROJECT",
+    "export CLOUDSDK_CORE_PROJECT=other",
+    "cd wt && GOOGLE_CLOUD_PROJECT=x pytest -q",
+    "bash -c 'unset GCP_PROJECT && make check'",
+    "LEDGER_LAB_GCP_PROJECT='unbalanced make test",
+]
+
+REVIEWER_ALLOWED = [
+    "grep -rn gcloud cloud/gcp",
+    "uvx --from pytest==8.4.2 pytest -q cloud/gcp/tests",
+    "echo \"$GCP_PROJECT\"",
+    "git log --oneline -5",
+    "cat > /tmp/x.py <<'EOF'\nfrom google.cloud import bigquery\nEOF",
+    "curl -s https://api.github.com/rate_limit",
+    "printenv GCP_PROJECT",
+]
+
+
+@pytest.mark.parametrize("agent", ["some-plugin:correctness-reviewer", "finding-verifier", "some-plugin:control-prober"])
+@pytest.mark.parametrize("command", REVIEWER_DENIED)
+def test_a_review_agent_makes_no_live_cloud_call(command: str, agent: str, home: Path) -> None:
+    out = run_as(command, home, agent)
+    assert out, command
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "unverified" in reason and "refused by the GCP guard" in reason
+
+
+@pytest.mark.parametrize("command", REVIEWER_ALLOWED)
+def test_a_review_agent_still_reads_code_and_runs_tests(command: str, home: Path) -> None:
+    assert run_as(command, home, "some-plugin:correctness-reviewer") is None
+
+
+@pytest.mark.parametrize("agent", [None, "", "Explore", "general-purpose", "some-plugin:not-an-agent"])
+@pytest.mark.parametrize(
+    "command", ["gcloud projects describe p", "unset GCP_PROJECT", "bq query --dry_run 'SELECT 1'"]
+)
+def test_the_main_thread_and_other_agents_keep_the_spend_rule_only(
+    command: str, agent: str | None, home: Path
+) -> None:
+    assert run_as(command, home, agent) is None
+
+
+def test_the_spend_rule_still_wins_for_a_review_agent(home: Path) -> None:
+    out = run_as("gcloud services enable compute.googleapis.com", home, "some-plugin:guardrail-reviewer")
+    assert out and "GCP $0 guard: refused" in out["hookSpecificOutput"]["permissionDecisionReason"]

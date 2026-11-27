@@ -1238,3 +1238,39 @@ def test_escapes_skips_a_pr_with_no_commit_list_or_merge_time(tmp_path: Path, ex
     r, merge = one_file_history(tmp_path, "app.py", "base = 1\n", "base = 1\nadded = 20\n")
     [row], s = escapes_of(tmp_path, r, [passed(7, merge, **extra)])
     assert says in row["error"] and s["escape_candidates"]["depth light"]["skipped"] == 1
+
+
+# Merges the merge guard should have refused, whatever records they had.
+
+
+def test_summary_flags_a_merge_with_no_review_record(github: dict, tmp_path: Path) -> None:
+    pulls = github["data"][f"repos/{REPO}/pulls?state=all&sort=updated&direction=desc"]
+    pulls.insert(0, {"number": 9, "title": "Docs", "state": "closed", "created_at": "2030-01-01T00:00:00Z",
+                     "updated_at": "2030-01-04T00:00:00Z", "merged_at": "2030-01-04T00:00:00Z",
+                     "head": {"sha": H1, "ref": "d"}})
+    github["data"][f"repos/{REPO}/issues/9/comments"] = []
+    github["data"][f"repos/{REPO}/pulls/9/commits"] = []
+    [u] = audit.summarize(harvest(tmp_path), None)["unreviewed_merges"]
+    assert (u["pr"], u["review_record"], u["merged_without_gates"]) == (9, None, True)
+
+
+def test_summary_flags_a_merge_without_passing_gates_on_its_head(github: dict, tmp_path: Path) -> None:
+    s = audit.summarize(harvest(tmp_path / "a"), None)
+    [c] = s["series"]
+    assert c["merged_without_gates"] and not c["merged_without_pass"]  # the fixture's gates name H1, the head is H2
+    assert c in s["attention"]
+    github["data"][f"repos/{REPO}/issues/7/comments"].append(
+        {"id": 60, "body": f"🤖 Gates: success\n<!-- loadout" f":gates sha={H2} state=success -->\n",
+         "author_association": "OWNER", "created_at": "2030-01-02T05:00:00Z", "updated_at": "2030-01-02T05:00:00Z"})
+    s = audit.summarize(harvest(tmp_path / "b"), None)
+    assert not s["series"][0]["merged_without_gates"]
+
+
+def test_a_record_edited_after_the_merge_reads_as_the_guard_saw_it(github: dict, tmp_path: Path) -> None:
+    cs = github["data"][f"repos/{REPO}/issues/7/comments"]
+    cs[:] = [dict(c, updated_at="2030-01-09T00:00:00Z") if c["id"] == 3 else c for c in cs]
+    [c] = audit.summarize(harvest(tmp_path / "a"), None)["series"]
+    assert not c["merged_without_pass"]
+    cs[:] = [dict(c, updated_at="2030-01-02T12:00:00Z") if c["id"] == 3 else c for c in cs]  # edited before it
+    [c] = audit.summarize(harvest(tmp_path / "b"), None)["series"]
+    assert c["merged_without_pass"]

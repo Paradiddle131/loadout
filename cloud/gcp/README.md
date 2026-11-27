@@ -37,6 +37,7 @@ BigQuery's reservation API (capacity is billed by the slot-hour) is the one to t
 `guard.py` reads each Bash command before it runs and refuses enabling an API, IAM policy changes, quota, billing and budget changes, service account keys, writes on paid-only products, buckets outside Cloud Storage's free regions, BigQuery reservations and commitments, streaming inserts (`bq insert`, no free tier), `bq query` above the cap, and the same writes sent with `curl` to `*.googleapis.com`.
 It parses shell words, so text that only mentions a command (an `echo`, an issue body, a heredoc written to a file) passes; a heredoc fed to a shell is checked as commands; a command it cannot parse that names GCP is refused.
 It cannot see code calling Google's client libraries: IAM is the fence there.
+A review agent (one of `agents/`, by the hook's `agent_type`) may make no live cloud call at all, read or write: `gcloud`, `bq`, `gsutil`, `curl` or `wget` to `*.googleapis.com` or `*.run.app`, inline Python or Node that loads Google's client libraries, or a change to `GCP_PROJECT`, `LEDGER_LAB_GCP_PROJECT`, `CLOUDSDK_*` or `GOOGLE_*`; its refusal tells the reviewer to report the check as `unverified`, naming the refusal, so the round's record carries it. A script that calls GCP itself is not seen.
 The cap is `$GCP_MAX_BYTES_BILLED` (default 1 GiB per query).
 Tests: `uvx --from pytest==8.4.2 pytest -q cloud/gcp/tests`.
 

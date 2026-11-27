@@ -13,6 +13,13 @@ Cloud Storage's Always Free regions; BigQuery reservations and capacity commitme
 inserts (`bq insert`, no free tier); a `bq query` above the byte cap or with no cap at all; and the
 same writes sent with curl or wget to *.googleapis.com.
 
+Review agents (the collection's `agents/`, named bare or plugin-scoped in the hook's `agent_type`) get a
+stricter rule: no live cloud call at all, read or write. A reviewer reads code; its brief already forbids
+the cloud, and this enforces it: `gcloud`, `bq` and `gsutil`, curl or wget to *.googleapis.com or *.run.app,
+inline Python or Node that imports Google's client libraries, and any change to the project variables
+(`GCP_PROJECT`, `LEDGER_LAB_GCP_PROJECT`, `CLOUDSDK_*`, `GOOGLE_*`: set, unset, `env -u`, `export -n`).
+It sees the command's own text (`bash -c`, `eval` and heredocs included), not a script that calls GCP itself.
+
 Reads the hook's JSON on stdin; prints a deny decision on stdout or nothing. It sees shell
 commands only, not code calling Google's client libraries: IAM covers those.
 Cap: $GCP_MAX_BYTES_BILLED (default 1 GiB), the value cloud/gcp/status.sh writes to ~/.bigqueryrc.
@@ -357,6 +364,73 @@ def verdict(command: str, depth: int = 0) -> str | None:
     return None
 
 
+AGENTS_DIR = Path(__file__).resolve().parents[2] / "agents"
+CLOUD_TOOLS = {"gcloud", "bq", "gsutil"}
+HTTP_TOOLS = {"curl", "wget", "http", "https", "xh"}
+CLOUD_HOST = re.compile(r"(googleapis\.com|\.run\.app)\b", re.IGNORECASE)
+CLIENT_LIBS = re.compile(r"google\.cloud|googleapiclient|google\.auth|@google-cloud/|google-auth-library")
+PROJECT_VAR = re.compile(r"GCP_PROJECT|LEDGER_LAB_GCP_PROJECT|CLOUDSDK_[A-Z0-9_]+|GOOGLE_[A-Z0-9_]+")
+RUNTIME = re.compile(r"(?:^|[\s;&|(/])(?:python[0-9.]*|node|deno|bun)(?=[\s;&|)]|$)", re.MULTILINE)
+REVIEWER_ADVICE = (
+    " Review agents make no live cloud call, read or write, and leave the project variables as the session set"
+    " them. Report the check as `unverified`, naming this refusal (`refused by the GCP guard`), so the verifier"
+    " carries it onto the round's record."
+)
+
+
+def review_agent(event: dict) -> str | None:
+    """The review agent the hook fired in, or None: `agent_type` names one of `agents/*.md`, bare or plugin-scoped."""
+    kind = event.get("agent_type")
+    if not isinstance(kind, str) or not kind:
+        return None
+    name = kind.rsplit(":", 1)[-1]
+    return name if (AGENTS_DIR / f"{name}.md").is_file() else None
+
+
+def reviewer_verdict(command: str, depth: int = 0) -> str | None:
+    """What a review agent may not run: a live cloud call or a change to the project variables."""
+    if CLIENT_LIBS.search(command) and RUNTIME.search(command):  # `-c` code or a heredoc fed to it
+        return "inline code that loads Google's client libraries"
+    command, bodies = split_heredocs(command)
+    for body in bodies if depth < 3 else []:
+        if reason := reviewer_verdict(body, depth + 1):
+            return reason
+    tokens = tokenize(command)
+    if tokens is None:
+        if re.search(r"\b(gcloud|bq|gsutil)\b|googleapis\.com|\.run\.app", command) or PROJECT_VAR.search(command):
+            return "a command this guard cannot parse (unbalanced quotes) that names GCP"
+        return None
+    for seg in segments(tokens):
+        for i, t in enumerate(seg):
+            if re.fullmatch(rf"(?:{PROJECT_VAR.pattern})=.*", t):
+                return f"a change to `{t.split('=', 1)[0]}`"
+            if t in ("-u", "--unset") and i + 1 < len(seg) and PROJECT_VAR.fullmatch(seg[i + 1]):
+                return f"unsetting `{seg[i + 1]}`"
+            if t.startswith("--unset=") and PROJECT_VAR.fullmatch(t.split("=", 1)[1]):
+                return f"unsetting `{t.split('=', 1)[1]}`"
+        prog = program(seg)
+        if not prog:
+            continue
+        name, args = prog
+        if name in ("unset", "export", "declare", "typeset", "readonly") and any(
+            PROJECT_VAR.fullmatch(a) for a in args
+        ) and (name == "unset" or any(a.startswith(("-n", "+x")) for a in args)):
+            return f"`{name}` on a project variable"
+        if name in CLOUD_TOOLS:
+            return f"a live `{name}` call"
+        if name in HTTP_TOOLS and any(CLOUD_HOST.search(a) for a in args):
+            return f"a `{name}` request to a Google Cloud host"
+        if depth < 3 and (name in SHELLS and "-c" in args or name == "eval"):
+            inner = (
+                args[args.index("-c") + 1]
+                if name in SHELLS and args.index("-c") + 1 < len(args)
+                else " ".join(args)
+            )
+            if reason := reviewer_verdict(inner, depth + 1):
+                return reason
+    return None
+
+
 def note_refusal(rule: str) -> None:
     """Note a refusal in the collection's friction log (bin/friction): the guard and the rule, never the command."""
     try:
@@ -377,11 +451,15 @@ def main() -> int:
     if event.get("tool_name") != "Bash":
         return 0
     command = (event.get("tool_input") or {}).get("command") or ""
-    rule = "spend"
+    rule, advice = "spend", ADVICE
     try:
         if deep:
             raise ValueError("its input is nested too deep to read")
         reason = verdict(command)
+        if not reason and review_agent(event):
+            reason = reviewer_verdict(command)
+            if reason:
+                rule, advice = "reviewer-cloud", REVIEWER_ADVICE
     except Exception as exc:  # noqa: BLE001 -- a guard bug must not wave a GCP command through
         rule = "guard-error"
         reason = (
@@ -398,7 +476,7 @@ def main() -> int:
                         "hookEventName": "PreToolUse",
                         "permissionDecision": "deny",
                         "permissionDecisionReason": f"GCP $0 guard: refused {reason}."
-                        + ADVICE,
+                        + advice,
                     }
                 }
             )

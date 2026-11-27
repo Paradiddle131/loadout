@@ -9,6 +9,7 @@ Two tiers; no third.
 - **Default:** a current pick (a tool, a version, a pattern). The agent changes it in the PR that needs the change, with its reason in the architecture document ([`finished.md`](finished.md#decisions)).
 - Guardrails live in `CLAUDE.md § Guardrails`, one line each, under a short bold name. Defaults are the architecture document's choices; `CLAUDE.md` holds no list of them.
 - A guardrail states something checkable and its reason in one clause; a wish ("keep it simple") is a default or nothing.
+- It names what enforces it (a test, a hook or a check, by path) or ends `(text only)`, so a reviewer can tell a guarded line from one held only by care.
 - A merged PR is the acceptance (the owner's merge, or an agent's after review for a choice it may take; a choice only the owner makes waits as a packet); no `[owner]` or `[proposed]` tags, no status field.
 
 ## Changing a guardrail
@@ -25,6 +26,7 @@ A **conflict** is evidence that a guardrail blocks the better option, rests on a
 2. Post a conflict packet as a comment on the issue being worked (a new issue if none fits), and label it `needs-owner`.
 3. Keep working on everything the conflict doesn't touch; it lands as usual. The PR body's `Open` names the packet.
 4. When the owner answers, follow the answer, and amend the guardrail if the answer says so.
+   Relaying the answer anywhere (an issue, a brief, a handoff), quote the owner's words verbatim; your own suggestions go under a separate heading, never as the owner's choice.
 
 Both failure modes are wrong: complying silently when the evidence says the guardrail hurts, and working around it (meeting its letter, defeating its purpose).
 A guardrail is followed **and** questioned; a conflict is reported, never resolved by the agent alone.

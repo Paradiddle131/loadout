@@ -15,23 +15,33 @@ cd "$(dirname "$0")/.."
 words=() siblings=()
 owner=$( (git remote get-url origin 2>/dev/null || true) | sed -nE 's#.*github\.com[:/]([^/]+)/.*#\1#p')
 [ -n "$owner" ] && words+=("$owner")
+# This repo's own name comes from origin (a worktree's folder may be named otherwise); a folder whose git
+# data is this repo's own (its main clone, or another worktree of it) is no sibling.
+self=$( (git remote get-url origin 2>/dev/null || true) | sed -nE 's#.*/([^/]+)$#\1#p' | sed 's/\.git$//')
+common=$(cd "$(git rev-parse --git-common-dir)" && pwd -P)
 for d in ../*/; do
   name=$(basename "$d")
-  [ -d "$d/.git" ] && [ "$name" != "$(basename "$PWD")" ] && siblings+=("$name")
+  [ -e "$d/.git" ] || continue
+  [ "$name" = "$(basename "$PWD")" ] || [ "$name" = "$self" ] && continue
+  theirs=$(cd "$d" && cd "$(git rev-parse --git-common-dir 2>/dev/null || echo .)" && pwd -P)
+  [ "$theirs" = "$common" ] && continue
+  siblings+=("$name")
 done
 deny=${GENERIC_DENY_FILE:-$HOME/.config/$(basename "$PWD")/deny}
 [ -f "$deny" ] && while IFS= read -r w; do [ -n "$w" ] && words+=("$w"); done <"$deny"
 
+files=()
 if [ $# -gt 0 ]; then files=("$@"); else
-  mapfile -t files < <(git ls-files | grep -vE '(^|/)tests/' | grep -vx 'bin/check-generic.sh')
+  while IFS= read -r f; do files+=("$f"); done < <(git ls-files | grep -vE '(^|/)tests/' | grep -vx 'bin/check-generic.sh')
 fi
+[ ${#files[@]} -gt 0 ] || { echo "check-generic: no files to check"; exit 0; }
 
 patterns=('\b20[0-9]{2}-[01][0-9]-[0-3][0-9]\b' '(^|[^&[:alnum:]/])[[:alnum:]_.-]*#[0-9]+\b')
 # shellcheck disable=SC2016 # sed escapes regex metacharacters; nothing to expand
 esc() { printf '%s' "$1" | sed 's/[.[\*^$()+?{|]/\\&/g'; }
-for w in "${words[@]}"; do patterns+=("\\b$(esc "$w")\\b"); done
+for w in ${words[@]+"${words[@]}"}; do patterns+=("\\b$(esc "$w")\\b"); done
 path_patterns=()
-for w in "${siblings[@]}"; do
+for w in ${siblings[@]+"${siblings[@]}"}; do
   e=$(esc "$w")
   path_patterns+=("(^|[^[:alnum:]_.-])$e/|/$e([^[:alnum:]_.-]|\$)")
 done
