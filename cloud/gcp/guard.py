@@ -14,14 +14,13 @@ inserts (`bq insert`, no free tier); a `bq query` above the byte cap or with no 
 same writes sent with curl or wget to *.googleapis.com.
 
 Review agents (the collection's `agents/`, named bare or plugin-scoped in the hook's `agent_type`) get a
-stricter rule against live cloud calls, read or write, which their brief forbids: refused are `gcloud`, `bq` and
-`gsutil` (dry runs and permission tests included, also behind wrappers, `find -exec` or a pipe into a shell),
-curl or wget to a Google Cloud host, inline code that imports Google's client libraries or names a Google Cloud
-URL, and setting or clearing a project variable (`GCP_PROJECT`, `LEDGER_LAB_GCP_PROJECT`, `CLOUDSDK_*`,
-`GOOGLE_*`) by assignment, `env -i`/`-u`, `unset`, `export -n`, `local`, `read`, `printf -v` or `for`. Each
-refusal is logged (`~/.claude/guard-refusals.log`) for `verdict.sh` to put on the round's record. It reads the
-command's text (`bash -c`, `eval` and heredocs fed to a shell included): a seatbelt for slips, not a wall against
-a script that calls GCP itself or code read from a file.
+stricter rule, since their brief forbids any live cloud call: a Bash command whose text, read whole (quotes,
+heredocs and `-c` strings included), names `gcloud`, `bq` or `gsutil`, a `*.googleapis.com` or `*.run.app` host,
+or a project variable (`GCP_PROJECT`, `LEDGER_LAB_GCP_PROJECT`, `CLOUDSDK_*`, `GOOGLE_*`) other than as a `$`
+read, or runs `env -i`, is refused; a reviewer searches code with the Grep tool, which this hook does not see.
+Every refusal of a review agent's command, this rule's or the spend rule's, is logged
+(`~/.claude/guard-refusals.log`) for `verdict.sh` to put on the round's record. A script that calls GCP without
+naming it in the command is not seen: a seatbelt for slips, not a wall.
 
 Reads the hook's JSON on stdin; prints a deny decision on stdout or nothing. It sees shell
 commands only, not code calling Google's client libraries: IAM covers those.
@@ -30,7 +29,6 @@ Cap: $GCP_MAX_BYTES_BILLED (default 1 GiB), the value cloud/gcp/status.sh writes
 
 from __future__ import annotations
 
-import itertools
 import json
 import os
 import re
@@ -370,27 +368,24 @@ def verdict(command: str, depth: int = 0) -> str | None:
 
 
 AGENTS_DIR = Path(__file__).resolve().parents[2] / "agents"
-CLOUD_TOOLS = {"gcloud", "bq", "gsutil"}
-HTTP_TOOLS = {"curl", "wget", "http", "https", "xh"}
-CLOUD_HOST = re.compile(r"(?:https?://|\b)[\w.-]*(?:googleapis\.com|\.run\.app)\b", re.IGNORECASE)
-CLOUD_URL = re.compile(r"https?://[\w.-]*(?:googleapis\.com|\.run\.app)\b", re.IGNORECASE)
-# Real import syntax, not a mention: `grep google.auth src` is a read, `from google.cloud import x` loads it.
-IMPORT = re.compile(
-    r"(?:^|[\s;'\"(])(?:from\s+google(?:\.\w+)*\s+import|import\s+google(?:\.\w+)*(?=[\s;,'\")]|$)|"
-    r"(?:from|import)\s+googleapiclient|require\(\s*['\"](?:@google-cloud/|googleapis|google-auth-library))",
-    re.MULTILINE,
+# The reviewer rule reads the command's whole text, every quote, heredoc and `-c` string included, so no shell syntax
+# routes around it: a cloud CLI named as a word, a Google Cloud host, a project variable named bare (a `$NAME` or
+# `${NAME...}` read passes), Google's client libraries, or `env -i`.
+REVIEWER_TEXT = (
+    (re.compile(r"(?<![\w.-])(gcloud|bq|gsutil)(?![\w.-])"), "a command naming `{0}`"),
+    (re.compile(r"[\w.-]*(?:googleapis\.com|\.run\.app)\b", re.IGNORECASE), "a command naming the Google Cloud host `{0}`"),
+    (re.compile(r"(?:(?<=-u)|(?<![${\w]))(GCP_PROJECT|LEDGER_LAB_GCP_PROJECT|CLOUDSDK_[A-Z0-9_]+|GOOGLE_[A-Z0-9_]+)(?![\w])"),
+     "a command naming `{0}` other than as a `$` read"),
+    (re.compile(r"google\.cloud|google\.auth|googleapiclient|@google-cloud/|google-auth-library|from\s+google\s+import"),
+     "a command naming Google's client library `{0}`"),
+    (re.compile(r"(?<![\w-])env(?:\s+-[\w-]*)*\s+(?:-[a-zA-Z]*i[a-zA-Z]*|--ignore-environment|-)(?=\s|$)"),
+     "`env -i`, which clears the project variables"),
 )
-PROJECT_VAR = re.compile(r"GCP_PROJECT|LEDGER_LAB_GCP_PROJECT|CLOUDSDK_[A-Z0-9_]+|GOOGLE_[A-Z0-9_]+")
-ASSIGN = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)(?:\[[^]]*\])?\+?=.*", re.DOTALL)
-RUNTIME = re.compile(r"(?:^|[\s;&|(/])(?:python[0-9.]*|node|deno|bun|ruby|perl|php|uv|uvx)(?=[\s;&|)]|$)", re.MULTILINE)
-DECLARE = {"export", "declare", "typeset", "readonly", "local"}
-# Builtins whose words name a variable they assign: `read V`, `printf -v V`, `mapfile V`, `getopts o V`.
-TARGETS = {"read", "mapfile", "readarray", "getopts"}
-FIND_EXEC = {"-exec", "-execdir", "-ok", "-okdir"}
 REVIEWER_ADVICE = (
     " Review agents make no live cloud call, read or write, and leave the project variables as the session set"
-    " them. Report the check as `unverified`, naming this refusal (`refused by the GCP guard`); the refusal is"
-    " also logged for the round's record."
+    " them, so a review agent's Bash command may not name them: search code with the Grep tool, and report a check"
+    " that needs them as `unverified`, naming this refusal (`refused by the GCP guard`). The refusal is logged for"
+    " the round's record."
 )
 
 
@@ -403,101 +398,12 @@ def review_agent(event: dict) -> str | None:
     return name if (AGENTS_DIR / f"{name}.md").is_file() else None
 
 
-def project_var(word: str) -> str | None:
-    return word if PROJECT_VAR.fullmatch(word) else None
-
-
-def reviewer_segment(seg: list[str], depth: int) -> str | None:
-    """One simple command of a review agent's: its leading assignments, `env`'s options, then the program."""
-    i = 0
-    while i < len(seg) and seg[i] in KEYWORDS:
-        i += 1
-    if i < len(seg) and seg[i] == "for" and i + 1 < len(seg) and project_var(seg[i + 1]):
-        return f"a `for` loop over `{seg[i + 1]}`"
-    while i < len(seg) and (m := ASSIGN.fullmatch(seg[i])):
-        if project_var(m.group(1)):
-            return f"a change to `{m.group(1)}`"
-        i += 1
-    if i < len(seg) and os.path.basename(seg[i]) == "env":
-        i += 1
-        while i < len(seg):
-            t = seg[i]
-            if t in ("-i", "--ignore-environment", "-"):
-                return "`env -i`, which clears the project variables"
-            if t in ("-u", "--unset") or t.startswith(("-u", "--unset=")):
-                name = seg[i + 1] if t in ("-u", "--unset") and i + 1 < len(seg) else t.split("=", 1)[-1] if "=" in t else t[2:]
-                if project_var(name):
-                    return f"unsetting `{name}`"
-                i += 2 if t in ("-u", "--unset") else 1
-                continue
-            if (m := ASSIGN.fullmatch(t)) and project_var(m.group(1)):
-                return f"a change to `{m.group(1)}`"
-            if t in ("-C", "--chdir", "-S", "--split-string"):
-                i += 2
-                continue
-            if t.startswith("-") or ASSIGN.fullmatch(t):
-                i += 1
-                continue
-            break
-    prog = program(seg[i:])
-    if not prog:
-        return None
-    name, args = prog
-    if name == "unset" and any(project_var(a) for a in args):
-        return "`unset` on a project variable"
-    if name in DECLARE:
-        for a in args:
-            m = ASSIGN.fullmatch(a)
-            if project_var(m.group(1) if m else a) and (m or name == "local" or any(x.startswith(("-n", "+x")) for x in args)):
-                return f"`{name}` on a project variable"
-    if name in TARGETS and any(project_var(a) for a in args):
-        return f"`{name}` into a project variable"
-    if name == "printf" and "-v" in args and args.index("-v") + 1 < len(args) and project_var(args[args.index("-v") + 1]):
-        return "`printf -v` into a project variable"
-    if name in CLOUD_TOOLS:
-        return f"a live `{name}` call"
-    if name in HTTP_TOOLS and any(CLOUD_HOST.search(a) for a in args):
-        return f"a `{name}` request to a Google Cloud host"
-    if name == "find":
-        for k, a in enumerate(args):
-            if a in FIND_EXEC:
-                sub = list(itertools.takewhile(lambda x: x not in (";", "+"), args[k + 1 :]))
-                if reason := reviewer_segment(sub, depth):
-                    return reason
-    if depth < 3 and (name in SHELLS and "-c" in args or name == "eval"):
-        inner = (
-            args[args.index("-c") + 1]
-            if name in SHELLS and args.index("-c") + 1 < len(args)
-            else " ".join(args)
-        )
-        return reviewer_verdict(inner, depth + 1)
-    return None
-
-
-def reviewer_verdict(command: str, depth: int = 0) -> str | None:
-    """What a review agent may not run: a live cloud call or a change to the project variables.
-
-    A seatbelt for the slips reviewers have made (a cloud CLI, a dry run or permission check, a project variable
-    cleared before a test), read from the command's text: it does not stop a determined evasion (a script that
-    calls GCP itself, code read from a file); the brief and IAM stay the rule there."""
-    if RUNTIME.search(command) and (IMPORT.search(command) or CLOUD_URL.search(command)):
-        return "inline code that loads Google's client libraries or names a Google Cloud host"
-    command, bodies = split_heredocs(command)
-    for body in bodies if depth < 3 else []:
-        if reason := reviewer_verdict(body, depth + 1):
-            return reason
-    tokens = tokenize(command)
-    if tokens is None:
-        if re.search(r"\b(gcloud|bq|gsutil)\b|googleapis\.com|\.run\.app", command) or PROJECT_VAR.search(command):
-            return "a command this guard cannot parse (unbalanced quotes) that names GCP"
-        return None
-    for seg in segments(tokens):
-        if reason := reviewer_segment(seg, depth):
-            return reason
-        prog = program(seg)
-        if (prog and prog[0] in SHELLS and not [a for a in prog[1] if not a.startswith("-")]
-                and re.search(r"\b(gcloud|bq|gsutil)\b|googleapis\.com|\.run\.app", command)):
-            return "a command piped into a shell that names a cloud tool"
+def reviewer_verdict(command: str) -> str | None:
+    """What a review agent may not run: a command whose text names a cloud CLI, a Google Cloud host or a project
+    variable, or clears the environment. A seatbelt read from text: a script that calls GCP itself is not seen."""
+    for rx, what in REVIEWER_TEXT:
+        if m := rx.search(command):
+            return what.format(m.group(m.lastindex or 0))
     return None
 
 
@@ -539,23 +445,25 @@ def main() -> int:
         return 0
     command = (event.get("tool_input") or {}).get("command") or ""
     rule, advice = "spend", ADVICE
+    agent = None
     try:
-        if deep:
+        agent = review_agent(event)
+        reason = reviewer_verdict(command) if agent else None
+        if reason:
+            rule, advice = "reviewer-cloud", REVIEWER_ADVICE
+        elif deep:
             raise ValueError("its input is nested too deep to read")
-        reason = verdict(command)
-        if not reason and review_agent(event):
-            reason = reviewer_verdict(command)
-            if reason:
-                rule, advice = "reviewer-cloud", REVIEWER_ADVICE
-                log_reviewer_refusal(event, reason)
+        else:
+            reason = verdict(command)
     except Exception as exc:  # noqa: BLE001 -- a guard bug must not wave a GCP command through
         rule = "guard-error"
         reason = (
             f"a GCP command the guard failed on ({exc})"
-            if re.search(r"gcloud|\bbq\b|googleapis", command)
-            or (review_agent(event) and PROJECT_VAR.search(command))
+            if re.search(r"gcloud|\bbq\b|googleapis", command) or (agent and REVIEWER_TEXT[2][0].search(command))
             else None
         )
+    if reason and agent:
+        log_reviewer_refusal(event, reason)
     if reason:
         note_refusal(rule)
         print(

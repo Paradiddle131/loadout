@@ -618,9 +618,10 @@ def summarize(d: Path, session: str | None) -> dict:
     # none merges on that alone, which the harvest cannot tell from a skipped review: both are listed).
     unreviewed = [{"repo": k[0], "pr": k[1], "title": p.get("title"),
                    "merged_without_gates": unguarded(p, "gates"),
-                   "review_record": "refused" if p.get("guard_review") == "refused" else None}
+                   "review_record": None if p.get("guard_review") is None else "refused"
+                   if p.get("guard_review") == "refused" else "passed" if not unguarded(p, "review") else "no pass"}
                   for k, p in sorted(prs.items())
-                  if p.get("merged_at") and k not in by_pr and not isinstance(p.get("guard_review"), dict)]
+                  if p.get("merged_at") and k not in by_pr and (unguarded(p, "review") or unguarded(p, "gates"))]
     lens: dict[str, Counter] = defaultdict(Counter)
     # Findings by the effort their lens ran at (the round line's lens= entries); a finding several lenses raised counts
     # once under each distinct effort among them, and `unstamped` holds those whose round line gave no effort.
@@ -778,7 +779,9 @@ def summary(a: argparse.Namespace) -> int:
                                ("steered", c["steered_rounds"])) if on]
         print(f"| {c['repo']}#{c['pr']} | {c['rounds']} | {', '.join(map(str, c['series']))} | {', '.join(why)} |")
     for u in s["unreviewed_merges"]:
-        why = ["merged with no review record" if u["review_record"] is None else "merged on a refused review record"]
+        why = [{None: "merged with no review record", "refused": "merged on a refused review record",
+                "no pass": "merged without a passing review record", "passed": "review passed before the window"}[
+                    u["review_record"]]]
         why += ["no passing gates on its head"] if u["merged_without_gates"] else ["gates passed (a floor of none?)"]
         print(f"| {u['repo']}#{u['pr']} | 0 | | {', '.join(why)} |")
     est = f"Est. USD at list price (${s['usd_per_mtok']}/M tokens)"

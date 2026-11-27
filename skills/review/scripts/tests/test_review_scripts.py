@@ -1691,8 +1691,18 @@ def test_verdict_puts_the_guard_s_refusals_on_the_record_once(w: World, tmp_path
     done = w.verdict(*args, LOADOUT_GUARD_REFUSALS=str(log))
     assert done.returncode == 0, done.stderr
     [c] = w.comments()
-    assert "- Guard refusals of review agents' commands: 1\n" in c["body"]
+    assert "- Guard refusals of review agents' commands on this machine since its last record: 1\n" in c["body"]
     assert "  - 2030-01-01T00:00Z some-plugin:correctness-reviewer: a live `gcloud` call" in c["body"]
-    assert not log.exists()  # moved aside: the next round's record starts from none
+    assert not log.exists()  # taken: the next round's record starts from none
     again = w.verdict(*args, LOADOUT_GUARD_REFUSALS=str(log))
     assert again.returncode == 0 and "Guard refusals" not in w.comments()[-1]["body"]
+
+
+def test_verdict_puts_the_refusals_back_when_its_post_fails(w: World, tmp_path: Path) -> None:
+    log = tmp_path / "refusals.log"
+    log.write_text("2030-01-01T00:00Z some-plugin:correctness-reviewer: a command naming `bq`\n")
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.verdict("12", "--tier", "standard", "--result", "pass", "--reviewers", PLANNED, "--reviewed", head,
+                     "--file", review_file(tmp_path, head), LOADOUT_GUARD_REFUSALS=str(log), STUB_FAIL="1")
+    assert done.returncode != 0
+    assert "a command naming `bq`" in log.read_text() and len(list(tmp_path.glob("refusals.log.*"))) == 0

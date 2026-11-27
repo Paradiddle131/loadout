@@ -1274,7 +1274,10 @@ def test_a_record_edited_after_the_merge_is_read_as_refused(github: dict, tmp_pa
 
 
 def test_a_merge_reviewed_before_the_window_is_no_unreviewed_merge(github: dict, tmp_path: Path) -> None:
-    d = harvest(tmp_path, since="2030-01-02T12:00:00Z")  # PR 7's passing record is older than the window
+    cs = github["data"][f"repos/{REPO}/issues/7/comments"]
+    cs.append({"id": 62, "body": f"🤖 Gates: success\n<!-- loadout" f":gates sha={H2} state=success -->\n",
+               "author_association": "OWNER", "created_at": "2030-01-02T05:00:00Z", "updated_at": "2030-01-02T05:00:00Z"})
+    d = harvest(tmp_path, since="2030-01-02T12:00:00Z")  # PR 7's passing records are older than the window
     assert rows(d, "prs")[0]["guard_review"]["state"] == "success"
     assert audit.summarize(d, None)["unreviewed_merges"] == []
 
@@ -1312,3 +1315,14 @@ def test_a_merge_on_a_refused_review_record_is_listed_so(github: dict, tmp_path:
     assert u["review_record"] == "refused"
     audit.summary(audit.argparse.Namespace(dir=str(d), session=None, json=False))
     assert "merged on a refused review record" in capsys.readouterr().out
+
+
+def test_a_merge_outside_the_window_with_no_passing_gates_or_review_is_still_listed(github: dict,
+                                                                                      tmp_path: Path) -> None:
+    d = harvest(tmp_path, since="2030-01-02T12:00:00Z")  # PR 7: a pass before the window, gates on another sha
+    [u] = audit.summarize(d, None)["unreviewed_merges"]
+    assert (u["pr"], u["review_record"], u["merged_without_gates"]) == (7, "passed", True)
+    rows_ = [dict(p, guard_review={"state": "failure", "sha": "9" * 40, "depth": None}) for p in rows(d, "prs")]
+    (d / "prs.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows_))
+    [u] = audit.summarize(d, None)["unreviewed_merges"]
+    assert u["review_record"] == "no pass"

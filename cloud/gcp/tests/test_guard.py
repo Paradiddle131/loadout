@@ -290,27 +290,35 @@ REVIEWER_DENIED = [
     "readonly GCP_PROJECT=x",
     "export -n CLOUDSDK_CORE_PROJECT",
     "bash <<'EOF'\ngcloud projects list\nEOF",
+    "timeout 600 env -u GCP_PROJECT uv run pytest",
+    "nohup env -u GCP_PROJECT pytest",
+    "sudo env GCP_PROJECT= pytest",
+    "command env -u LEDGER_LAB_GCP_PROJECT pytest",
+    "env -iv pytest",
+    "env -vu GCP_PROJECT pytest",
+    "env --ignore-environment make check",
+    "x=gc; python3 -c \"import urllib.request as u; u.urlopen('https://storage.googleapis.com/b')\"",
     "python3 -c 'from google import auth; auth.default()'",
 ]
 
 REVIEWER_ALLOWED = [
-    "grep -rn gcloud cloud/gcp",
     "uvx --from pytest==8.4.2 pytest -q cloud/gcp/tests",
-    "echo \"$GCP_PROJECT\"",
+    "echo \"$GCP_PROJECT\" \"${LEDGER_LAB_GCP_PROJECT:-none}\"",
     "git log --oneline -5",
-    "cat > /tmp/x.py <<'EOF'\nfrom google.cloud import bigquery\nEOF",
+    "cat > /tmp/x.py <<'EOF'\nprint('hello')\nEOF\npython3 /tmp/x.py",
     "curl -s https://api.github.com/rate_limit",
-    "printenv GCP_PROJECT",
-    "grep -rn 'GCP_PROJECT=' cloud/",
-    "git log -S 'LEDGER_LAB_GCP_PROJECT=' --oneline",
-    "printf 'GCP_PROJECT=%s\\n' x",
-    "grep -rn google.auth src && python3 -m pytest -q",
-    "grep -rn googleapis.com cloud/ && python3 -m pytest -q",
-    "cat > /tmp/p.py <<'EOF'\nprint('google.cloud')\nEOF\npython3 /tmp/p.py",
     "env PATH=/usr/bin make check",
-    "export GCP_PROJECT",
-    "declare -p GCP_PROJECT",
-    "find . -name '*.py' -exec grep -l gcloud {} +",
+    "pytest -q tests/test_bq_load.py src/my-gcloud-notes.md",
+    "find . -name '*.py' -exec grep -l TODO {} +",
+]
+
+# Text that names them is refused even in a read: reviewers search with the Grep tool, which the hook does not see.
+REVIEWER_READS_REFUSED = [
+    "grep -rn gcloud cloud/gcp",
+    "grep -rn 'GCP_PROJECT=' cloud/",
+    "printenv GCP_PROJECT",
+    "git log -S 'LEDGER_LAB_GCP_PROJECT=' --oneline",
+    "grep -rn googleapis.com src && uv run pytest",
 ]
 
 
@@ -325,8 +333,14 @@ def test_a_review_agent_is_refused_the_listed_cloud_calls(command: str, agent: s
 
 
 @pytest.mark.parametrize("command", REVIEWER_ALLOWED)
-def test_a_review_agent_still_reads_code_and_runs_tests(command: str, home: Path) -> None:
+def test_a_review_agent_still_runs_tests_and_reads_values(command: str, home: Path) -> None:
     assert run_as(command, home, "some-plugin:correctness-reviewer") is None
+
+
+@pytest.mark.parametrize("command", REVIEWER_READS_REFUSED)
+def test_a_review_agent_s_bash_read_that_names_them_is_refused_too(command: str, home: Path) -> None:
+    out = run_as(command, home, "some-plugin:correctness-reviewer")
+    assert out and "Grep tool" in out["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 @pytest.mark.parametrize("agent", [None, "", "Explore", "general-purpose", "some-plugin:not-an-agent"])
@@ -339,15 +353,19 @@ def test_the_reviewer_rule_skips_the_main_thread_and_other_agents(
     assert run_as(command, home, agent) is None
 
 
-def test_the_spend_rule_still_wins_for_a_review_agent(home: Path) -> None:
-    out = run_as("gcloud services enable compute.googleapis.com", home, "some-plugin:guardrail-reviewer")
-    assert out and "GCP $0 guard: refused" in out["hookSpecificOutput"]["permissionDecisionReason"]
+def test_a_review_agent_s_spend_refusal_is_refused_and_logged_too(home: Path) -> None:
+    log = home / "s.log"
+    out = run_as("gcloud services enable compute.googleapis.com", home, "some-plugin:guardrail-reviewer", log)
+    assert out and out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert len(log.read_text().splitlines()) == 1
 
 
 def test_a_reviewer_refusal_is_logged_for_the_record_without_the_command(home: Path) -> None:
     log = home / "r.log"
     assert run_as("GCP_PROJECT=secret-value make check", home, "some-plugin:correctness-reviewer", log)
     assert run_as("gcloud services enable compute.googleapis.com", home, "some-plugin:correctness-reviewer", log)
-    [line] = log.read_text().splitlines()  # the spend rule's refusal is no reviewer refusal
-    assert "some-plugin:correctness-reviewer: a change to `GCP_PROJECT`" in line and "secret-value" not in line
-    assert run_as("gcloud info", home, None, log) is None and len(log.read_text().splitlines()) == 1
+    first, second = log.read_text().splitlines()
+    assert "some-plugin:correctness-reviewer: a command naming `GCP_PROJECT`" in first and "secret-value" not in first
+    assert "`gcloud`" in second
+    assert run_as("gcloud info", home, None, log) is None and len(log.read_text().splitlines()) == 2
+    assert run_as("bq insert d.t f.json", home, None, log) and len(log.read_text().splitlines()) == 2  # main thread
