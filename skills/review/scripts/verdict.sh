@@ -277,21 +277,29 @@ if [ -n "$round_out" ]; then
   fi
 fi
 for p in ${plan_pair_list[@]+"${plan_pair_list[@]}"}; do round+=(--round "$p"); done
-# The GCP guard's refusals of review agents' commands since the last record this machine posted (cloud/gcp/guard.py).
-# The log is renamed before it is read, so a refusal logged meanwhile starts the next one; a failed post puts it back.
+# The GCP guard's refusals of review agents' commands (cloud/gcp/guard.py) on this machine since its last record,
+# from the reviewed commit's time on (a line older than that belongs to no round of this commit and is counted apart).
+# The log is renamed before it is read, so a refusal logged meanwhile starts the next one; if no record is posted,
+# the exit trap puts it back.
 refusals=${LOADOUT_GUARD_REFUSALS:-$HOME/.claude/guard-refusals.log} taken=""
+restore_refusals() {
+  [ -n "$taken" ] && [ "$taken" != "$refusals" ] && [ -f "$taken" ] && cat "$taken" >>"$refusals" && rm -f "$taken"
+  return 0
+}
 if [ -z "$repost" ] && [ -s "$refusals" ]; then
   if [ "$DRY_RUN" = 1 ]; then taken=$refusals; else taken="$refusals.$(date -u +%Y%m%dT%H%M%SZ).$$"; mv "$refusals" "$taken"; fi
-  lines+=(--line "- Guard refusals of review agents' commands on this machine since its last record: $(wc -l <"$taken" | tr -d ' ')")
-  while IFS= read -r l; do lines+=(--line "  - $l"); done < <(head -n 20 "$taken")
+  trap 'restore_refusals; rm -rf "$tmp"' EXIT
+  since=$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%MZ "$reviewed")
+  ours=$(awk -v s="$since" '$1 >= s' "$taken") older=$(awk -v s="$since" '$1 < s' "$taken" | grep -c . || true)
+  [ "${older:-0}" -gt 0 ] && older_note="; older, from no round of it: $older" || older_note=""
+  lines+=(--line "- Guard refusals of review agents' commands on this machine since the reviewed commit: $(grep -c . <<<"$ours" || true)$older_note")
+  while IFS= read -r l; do [ -n "$l" ] && lines+=(--line "  - $l"); done < <(head -n 20 <<<"$ours")
 fi
 build_record --kind review --sha "$head" --state "$state" --tier "$tier" --reviewed "$reviewed" --depth "$plan_depth" \
   ${plan_override:+--override "$plan_override"} \
   ${round[@]+"${round[@]}"} \
   --title "🤖 Review: $result ($tier tier)" ${lines[@]+"${lines[@]}"} ${file:+--file "$file"} \
   --details "Reviewer output (raw)" >"$tmp/body.md"
-if ! url=$(post_record "$pr" "$tmp/body.md"); then
-  [ -z "$taken" ] || [ "$taken" = "$refusals" ] || { cat "$taken" >>"$refusals" && rm -f "$taken"; }
-  exit 1
-fi
+url=$(post_record "$pr" "$tmp/body.md") || exit 1
+[ "$taken" = "$refusals" ] || rm -f "$taken"; taken=""  # posted: the record holds it (a dry run leaves the log)
 echo "verdict: PR $pr, head $head: review $result ($tier tier)${url:+, $url}"

@@ -1326,3 +1326,11 @@ def test_a_merge_outside_the_window_with_no_passing_gates_or_review_is_still_lis
     (d / "prs.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows_))
     [u] = audit.summarize(d, None)["unreviewed_merges"]
     assert u["review_record"] == "no pass"
+
+
+def test_a_merge_on_passing_gates_with_no_review_record_is_listed(github: dict, tmp_path: Path) -> None:
+    gates = {"id": 63, "body": f"🤖 Gates: success\n<!-- loadout" f":gates sha={H1} state=success -->\n",
+             "author_association": "OWNER", "created_at": "2030-01-03T00:00:00Z", "updated_at": "2030-01-03T00:00:00Z"}
+    unreviewed_pr(github, 9, "2030-01-04T00:00:00Z", [gates])
+    [u] = audit.summarize(harvest(tmp_path), None)["unreviewed_merges"]
+    assert (u["pr"], u["review_record"], u["merged_without_gates"]) == (9, None, False)

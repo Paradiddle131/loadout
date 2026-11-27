@@ -1682,7 +1682,8 @@ def test_the_stub_drops_a_bang_before_a_bracket_only_within_its_paragraph(tmp_pa
 
 def test_verdict_puts_the_guard_s_refusals_on_the_record_once(w: World, tmp_path: Path) -> None:
     log = tmp_path / "refusals.log"
-    log.write_text("2030-01-01T00:00Z some-plugin:correctness-reviewer: a live `gcloud` call\n")
+    log.write_text("2000-01-01T00:00Z some-plugin:correctness-reviewer: from a stopped round\n"
+                   "2030-01-01T00:00Z some-plugin:correctness-reviewer: a live `gcloud` call\n")
     head = w.commit({"src/app.py": "x = 2\n"})
     args = ("12", "--tier", "standard", "--result", "pass", "--reviewers", PLANNED,
             "--reviewed", head, "--file", review_file(tmp_path, head))
@@ -1691,9 +1692,10 @@ def test_verdict_puts_the_guard_s_refusals_on_the_record_once(w: World, tmp_path
     done = w.verdict(*args, LOADOUT_GUARD_REFUSALS=str(log))
     assert done.returncode == 0, done.stderr
     [c] = w.comments()
-    assert "- Guard refusals of review agents' commands on this machine since its last record: 1\n" in c["body"]
+    assert ("- Guard refusals of review agents' commands on this machine since the reviewed commit: 1; older, from no"
+            " round of it: 1\n") in c["body"] and "from a stopped round" not in c["body"]
     assert "  - 2030-01-01T00:00Z some-plugin:correctness-reviewer: a live `gcloud` call" in c["body"]
-    assert not log.exists()  # taken: the next round's record starts from none
+    assert not log.exists() and not list(tmp_path.glob("refusals.log.*"))  # taken and gone: the record holds it
     again = w.verdict(*args, LOADOUT_GUARD_REFUSALS=str(log))
     assert again.returncode == 0 and "Guard refusals" not in w.comments()[-1]["body"]
 
@@ -1703,6 +1705,17 @@ def test_verdict_puts_the_refusals_back_when_its_post_fails(w: World, tmp_path: 
     log.write_text("2030-01-01T00:00Z some-plugin:correctness-reviewer: a command naming `bq`\n")
     head = w.commit({"src/app.py": "x = 2\n"})
     done = w.verdict("12", "--tier", "standard", "--result", "pass", "--reviewers", PLANNED, "--reviewed", head,
-                     "--file", review_file(tmp_path, head), LOADOUT_GUARD_REFUSALS=str(log), STUB_FAIL="1")
-    assert done.returncode != 0
+                     "--file", review_file(tmp_path, head), LOADOUT_GUARD_REFUSALS=str(log), STUB_MANGLE="1")
+    assert done.returncode != 0 and "does not hold the body" in done.stderr  # the post itself failed
     assert "a command naming `bq`" in log.read_text() and len(list(tmp_path.glob("refusals.log.*"))) == 0
+
+
+def test_verdict_counts_every_refusal_and_lists_twenty(w: World, tmp_path: Path) -> None:
+    log = tmp_path / "refusals.log"
+    log.write_text("".join(f"2030-01-01T00:{i:02d}Z some-plugin:correctness-reviewer: refusal {i}\n" for i in range(25)))
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = w.verdict("12", "--tier", "standard", "--result", "pass", "--reviewers", PLANNED, "--reviewed", head,
+                     "--file", review_file(tmp_path, head), LOADOUT_GUARD_REFUSALS=str(log))
+    assert done.returncode == 0, done.stderr
+    body = w.comments()[-1]["body"]
+    assert "since the reviewed commit: 25\n" in body and "refusal 19" in body and "refusal 20" not in body

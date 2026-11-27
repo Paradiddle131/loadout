@@ -32,7 +32,8 @@ back on the PRs, and sums both up. GitHub holds every record; the JSONL files ar
       guard saw at merge time (the newest unedited trusted one posted by the merge time: one edited later is
       refused, since GitHub keeps no copy of the body the guard read),
       "merged without passing gates" the gates record read the same way, and a merged PR with no review round
-      is listed under "Needs a look" with its gates state, since the harvest cannot tell a floor of none. Then the rounds by the review path's version
+      in the window whose review or gates record the guard saw is not a pass on its head is listed under "Needs a
+      look", with which one (a gates-only merge is listed too: the harvest cannot tell a floor of none). Then the rounds by the review path's version
       (`v` on each record's round line, `unstamped` without one) and the reviewers' tokens and seconds per PR,
       repo, day and month, with an estimated cost at list price (BLENDED_USD_PER_MTOK has the rate).
 
@@ -614,7 +615,8 @@ def summarize(d: Path, session: str | None) -> dict:
                         "merged_without_pass": bool(p.get("merged_at")) and not passed_head,
                         "steered_rounds": sum(r["steered"] for r in rs),
                         "merged_without_gates": unguarded(p, "gates")})
-    # A merged PR with no review round at all (none in the window, and none the guard saw before it), and whether a gates record passed on its head (a change whose floor is
+    # A merged PR with no review round in the window whose review or gates record the guard saw is not a pass on its
+    # head, with which one, and whether a gates record passed on its head (a change whose floor is
     # none merges on that alone, which the harvest cannot tell from a skipped review: both are listed).
     unreviewed = [{"repo": k[0], "pr": k[1], "title": p.get("title"),
                    "merged_without_gates": unguarded(p, "gates"),
