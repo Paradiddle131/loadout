@@ -13,16 +13,7 @@ Cloud Storage's Always Free regions; BigQuery reservations and capacity commitme
 inserts (`bq insert`, no free tier); a `bq query` above the byte cap or with no cap at all; and the
 same writes sent with curl or wget to *.googleapis.com.
 
-Review agents (the collection's `agents/`, named bare or plugin-scoped in the hook's `agent_type`) get a
-stricter rule, since their brief forbids any live cloud call: a Bash command whose text, read whole (quotes,
-heredocs and `-c` strings included), names `gcloud`, `bq` or `gsutil`, a Google Cloud host, Google's client
-libraries, or a project variable (`GCP_PROJECT`, `LEDGER_LAB_GCP_PROJECT`, `CLOUDSDK_*`, `GOOGLE_*`) other than as
-a `$` read, or runs a command without the session's environment (`env -i`, `exec -c`, `sudo`), is refused; a reviewer searches code with the Grep tool, which this hook does not see.
-Every refusal of a review agent's command, this rule's or the spend rule's, is logged
-(`~/.claude/guard-refusals.log`) for `verdict.sh` to put on the round's record. A script that calls GCP without
-naming it in the command is not seen: a seatbelt for slips, not a wall.
-
-Reads the hook's JSON on stdin; prints a deny decision on stdout or nothing. The spend rule sees shell
+Reads the hook's JSON on stdin; prints a deny decision on stdout or nothing. It sees shell
 commands only, not code calling Google's client libraries: IAM covers those.
 Cap: $GCP_MAX_BYTES_BILLED (default 1 GiB), the value cloud/gcp/status.sh writes to ~/.bigqueryrc.
 """
@@ -35,7 +26,6 @@ import re
 import runpy
 import shlex
 import sys
-import time
 from pathlib import Path
 
 DEFAULT_CAP = 1 << 30
@@ -367,67 +357,6 @@ def verdict(command: str, depth: int = 0) -> str | None:
     return None
 
 
-AGENTS_DIR = Path(__file__).resolve().parents[2] / "agents"
-# The reviewer rule reads the command's whole text, every quote, heredoc and `-c` string included, so no shell syntax
-# routes around it: a cloud CLI named as a word, a Google Cloud host, a project variable named bare (a `$NAME` or
-# `${NAME...}` read passes), Google's client libraries, or `env -i`.
-REVIEWER_TEXT = (
-    (re.compile(r"(?<![\w.-])(gcloud|bq|gsutil)(?![\w.-])"), "a command naming `{0}`"),
-    (re.compile(r"[\w.-]*(?:googleapis\.com|\.run\.app|cloud\.google\.com|cloudfunctions\.net|appspot\.com|"
-                r"gcr\.io|pkg\.dev)\b", re.IGNORECASE), "a command naming a Google Cloud host"),
-    (re.compile(r"(?:(?<=-u)|(?<=[^$]\{)|(?<![${\w]))(GCP_PROJECT|LEDGER_LAB_GCP_PROJECT|CLOUDSDK_[A-Z0-9_]+|GOOGLE_[A-Z0-9_]+)(?![\w])"),
-     "a command naming `{0}` other than as a `$` read"),
-    (re.compile(r"google\.cloud|google\.auth|googleapiclient|@google-cloud/|google-auth-library|from\s+google\s+import"),
-     "a command naming Google's client library `{0}`"),
-    (re.compile(r"(?<![\w-])env(?:\s+-[\w-]*)*\s+(?:-[a-zA-Z]*i[a-zA-Z]*|--ignore-environment|-)(?=\s|$)"),
-     "`env -i`, which clears the project variables"),
-    (re.compile(r"(?<![\w-])(exec\s+(?:-\w*\s+)*-\w*c\w*|sudo)(?=\s|$)"),
-     "`{0}`, which runs a command without the session's environment"),
-)
-REVIEWER_ADVICE = (
-    " Review agents make no live cloud call, read or write, and leave the project variables as the session set"
-    " them, so a review agent's Bash command may not name them: search code with the Grep tool, and report a check"
-    " that needs them as `unverified`, naming this refusal (`refused by the GCP guard`). The refusal is logged for"
-    " the round's record."
-)
-
-
-def review_agent(event: dict) -> str | None:
-    """The review agent the hook fired in, or None: `agent_type` names one of `agents/*.md`, bare or plugin-scoped."""
-    kind = event.get("agent_type")
-    if not isinstance(kind, str) or not kind:
-        return None
-    name = kind.rsplit(":", 1)[-1]
-    return name if (AGENTS_DIR / f"{name}.md").is_file() else None
-
-
-def reviewer_verdict(command: str) -> str | None:
-    """What a review agent may not run: a command whose text names a cloud CLI, a Google Cloud host or a project
-    variable, or clears the environment. A seatbelt read from text: a script that calls GCP itself is not seen."""
-    for rx, what in REVIEWER_TEXT:
-        if m := rx.search(command):
-            return what.format(m.group(m.lastindex or 0))
-    return None
-
-
-REFUSALS = "guard-refusals.log"
-
-
-def log_reviewer_refusal(event: dict, reason: str) -> None:
-    """One line per refusal of a review agent's command, for `verdict.sh` to put on the round's record: the time, the
-    agent and the reason, which names at most a fixed word (a CLI, a variable or library name), never a host or
-    anything else of the command (it may hold a value the record must not)."""
-    try:
-        path = Path(os.environ.get("LOADOUT_GUARD_REFUSALS") or Path.home() / ".claude" / REFUSALS)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        when = time.strftime("%Y-%m-%dT%H:%MZ", time.gmtime())
-        agent = re.sub(r"[^\w:.-]", "", str(event.get("agent_type")))[:64]
-        with path.open("a", encoding="utf-8") as f:
-            f.write(f"{when} {agent}: {reason.replace(chr(10), ' ')}\n")
-    except Exception:  # noqa: BLE001 -- the log never changes or slows the decision
-        pass
-
-
 def note_refusal(rule: str) -> None:
     """Note a refusal in the collection's friction log (bin/friction): the guard and the rule, never the command."""
     try:
@@ -448,17 +377,11 @@ def main() -> int:
     if event.get("tool_name") != "Bash":
         return 0
     command = (event.get("tool_input") or {}).get("command") or ""
-    rule, advice = "spend", ADVICE
-    agent = None
+    rule = "spend"
     try:
-        agent = review_agent(event)
-        reason = reviewer_verdict(command) if agent else None
-        if reason:
-            rule, advice = "reviewer-cloud", REVIEWER_ADVICE
-        elif deep:
+        if deep:
             raise ValueError("its input is nested too deep to read")
-        else:
-            reason = verdict(command)
+        reason = verdict(command)
     except Exception as exc:  # noqa: BLE001 -- a guard bug must not wave a GCP command through
         rule = "guard-error"
         reason = (
@@ -466,8 +389,6 @@ def main() -> int:
             if re.search(r"gcloud|\bbq\b|googleapis", command)
             else None
         )
-    if reason and agent:
-        log_reviewer_refusal(event, reason)
     if reason:
         note_refusal(rule)
         print(
@@ -477,7 +398,7 @@ def main() -> int:
                         "hookEventName": "PreToolUse",
                         "permissionDecision": "deny",
                         "permissionDecisionReason": f"GCP $0 guard: refused {reason}."
-                        + advice,
+                        + ADVICE,
                     }
                 }
             )
