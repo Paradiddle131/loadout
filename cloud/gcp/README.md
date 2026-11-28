@@ -40,6 +40,14 @@ It cannot see code calling Google's client libraries: IAM is the fence there.
 The cap is `$GCP_MAX_BYTES_BILLED` (default 1 GiB per query).
 Tests: `uvx --from pytest==8.4.2 pytest -q cloud/gcp/tests`.
 
+## The reviewer guard
+
+`reviewer_guard.py` is a tripwire for a review agent's slip, beside the spend guard: it runs only when the hook's `agent_type` names one of this collection's review agents (`agents/`, bare or plugin-scoped), and every other call passes it untouched.
+It reads the Bash command split into shell words, across separators, subshells, substitutions, `bash -c`, `eval` and the common wrappers (`env`, `sudo`, `timeout`, `xargs`, ...), never as a substring of the whole text, so a `grep`, `git log -S`, `cat` or `echo` that only mentions a name passes.
+It refuses `gcloud`, `bq` or `gsutil` as the command word; a `*.googleapis.com` host given to any program but a text tool, or in a heredoc fed to one; a pytest run with `-m`, `-o`/`--override-ini`, `-p no:…`, `-c`/`--config-file` or `--noconftest`, setting `PYTEST_ADDOPTS`, and `make check` / `make test`; and setting, emptying, unsetting or un-exporting a project or proxy variable (`*GCP_PROJECT*`, `CLOUDSDK_*`, `HTTP(S)_PROXY`, `ALL_PROXY`, `NO_PROXY`), clearing the environment (`env -i`, `exec -c`) included.
+It does not catch a name built at run time (a variable, `eval` of one, encoded text, a script written then run), a library call inside code the reviewer runs but did not write, a cloud CLI given to another program (`find -exec`, `docker run`), or a reviewer that is not one of this collection's agents: the brief stays the rule.
+Its refusal goes only to the reviewer, as the hook's message; it writes no log.
+
 ## The kill switch
 
 Budgets alert; they don't stop spend.
