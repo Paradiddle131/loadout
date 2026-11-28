@@ -73,7 +73,6 @@ API_HOST = [
     "python3 -c \"import urllib.request as u; u.urlopen('https://bigquery.googleapis.com/x')\"",
     "uv run python -c \"import requests; requests.get('https://iam.googleapis.com/v1/x')\"",
     "node -e \"fetch('https://storage.googleapis.com/b')\"",
-    "python3 - <<'PY'\nimport urllib.request\nurllib.request.urlopen('https://storage.googleapis.com/b')\nPY",
 ]
 
 # A pytest run that widens the repo's selection, and the make targets that run the whole suite.
@@ -131,6 +130,7 @@ VARIABLES = [
     "readonly GCP_PROJECT=x",
     "read GCP_PROJECT < /dev/null",
     "printf -v GCP_PROJECT %s x",
+    "for GCP_PROJECT in a b; do true; done",
     "bash -lc 'unset GCP_PROJECT && true'",
 ]
 
@@ -174,6 +174,8 @@ ALLOWED = [
     "jq -r '.url | test(\"googleapis.com\")' f.json",
     "uv run pytest -q tests/x.py # not -m live",
     "mktemp -d",
+    "python3 cloud/gcp/guard.py <<'EOF'\n{\"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"curl https://x.googleapis.com\"}}\nEOF",
+    "echo '{\"tool_input\": {\"command\": \"gcloud info\"}}' | python3 cloud/gcp/reviewer_guard.py",
 ]
 
 

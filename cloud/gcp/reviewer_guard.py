@@ -11,7 +11,7 @@ It applies only when the hook input's `agent_type` names one of this collection'
 and the GCP spend guard (guard.py) keeps applying to everyone as before.
 
 It reads the Bash command split into words the way the shell would (shlex), across `;`, `&&`, `||`, `|`, `&`, newlines,
-`( )` subshells, `$( )` and backtick substitutions (quoted or not), `bash -c`, `eval`, `env -S`, a heredoc fed to a
+`( )` subshells, `$( )` and backtick substitutions outside single quotes (double-quoted too), `bash -c`, `eval`, `env -S`, a heredoc fed to a
 shell, and the wrappers `env`, `sudo`, `command`, `exec`, `timeout`, `nice`, `nohup`, `time`, `stdbuf`, `setsid`,
 `ionice` and `xargs`. It never matches a substring over the whole text, so a command that only mentions a name (a
 `grep`, `git log -S`, `cat`, an `echo`, a heredoc written to a file) passes.
@@ -19,18 +19,20 @@ shell, and the wrappers `env`, `sudo`, `command`, `exec`, `timeout`, `nice`, `no
 It refuses:
 - a cloud CLI as the command word: `gcloud`, `bq`, `gsutil`;
 - a Google API host (`*.googleapis.com`) in a word given to any program but a text tool (grep, rg, git, cat, sed, echo,
-  jq, gh, ...), or in a heredoc fed to one (`python3 - <<EOF`);
+  jq, gh, ...): `curl https://...`, `python3 -c "...urlopen('https://...')"`;
 - a pytest run that widens the repo's selection: `-m`, `-o`/`--override-ini`, `-p no:<plugin>`, `-c`/`--config-file`
   or `--noconftest`, in any spelling (`-oaddopts=`, `--override-ini=addopts=`, `-qm live`), and setting
   `PYTEST_ADDOPTS`; and `make check` / `make test`;
 - setting, emptying, unsetting or un-exporting a project or proxy variable (a name holding `GCP_PROJECT`, `CLOUDSDK_*`,
   `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, any case): `NAME=...` before a command or alone, `export`,
-  `declare`/`typeset`/`local`/`readonly`, `unset`, `export -n`, `declare +x`, `read NAME`, `printf -v NAME`,
+  `declare`/`typeset`/`local`/`readonly`, `unset`, `export -n`, `declare +x`, `read NAME`, `printf -v NAME`, `for NAME in`,
   `env -u NAME`, and clearing the whole environment (`env -i`, `exec -c`).
 
 It does not catch, by design:
 - a name built at run time: a variable (`$tool`), `eval` of one, encoded or concatenated text, a script written to a
-  file and run later, `source`, a heredoc fed to a program read from a variable;
+  file and run later, `source`, text piped into a shell (`echo ... | bash`);
+- a heredoc or stdin fed to a program other than a shell (`python3 - <<EOF` holding a host): a heredoc is read as text,
+  so a reviewer can pipe sample hook JSON naming a host into a guard under review;
 - a library call inside code the reviewer runs but did not write (a test, a repo script, `make lint`), and any program
   that reaches Google by another host or by an address it computes;
 - a cloud CLI given as an argument to a program other than the wrappers above (`find -exec`, `docker run ... gcloud`);
@@ -328,6 +330,8 @@ def variable_command(name: str, args: list[str]) -> str | None:
             if unexport and watched(a):
                 return f"un-exporting `{a}`"
         return None
+    if name == "for" and args and watched(args[0]):
+        return f"setting `{args[0]}` as a loop variable"
     if name == "read":
         hit = next((a for a in args if watched(a)), None)
         return f"setting `{hit}` with `read`" if hit else None
@@ -397,14 +401,7 @@ def check(command: str, depth: int = 0) -> str | None:
         for inner in substitutions(body) if expands else []:
             if reason := check(inner, depth + 1):
                 return reason
-        prog = heredoc_program(line)
-        if prog in SHELLS:
-            reason = check(body, depth + 1)
-        elif prog in TEXT_TOOLS:
-            reason = None
-        else:
-            reason = f"a Google API host in a heredoc fed to `{prog}`" if HOST.search(body) else None
-        if reason:
+        if heredoc_program(line) in SHELLS and (reason := check(body, depth + 1)):
             return reason
     for inner in substitutions(text):
         if reason := check(inner, depth + 1):
