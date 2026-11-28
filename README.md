@@ -26,6 +26,9 @@ claude plugin install loadout@loadout
 
 `claude plugin marketplace update loadout` takes the latest.
 
+To cap the effort of every subagent, reviewer, workflow agent and created session, set `LOADOUT_MAX_EFFORT` to `low`, `medium`, `high`, `xhigh` or `max`: in the cloud environment's variables in Settings, or under `env` in `~/.claude/settings.json` locally.
+It takes effect at the next session start; the loadout plugin's [`hooks/effort-cap.py`](hooks/effort-cap.py) refuses a call above it, and the `review` skill's plan and records cap every effort at it.
+
 **Any agent, picked skills:** both tools prompt for the skills and the agent when run bare, and copy only the skill folders named, with no hooks or settings.
 
 ```bash
