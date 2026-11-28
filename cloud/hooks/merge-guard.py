@@ -33,6 +33,13 @@ Not read, by design: a merge spelled so the words do not appear (a variable, an 
 `git commit -n`, `git config core.hooksPath`, a script or program that merges, the web UI. Hooks never see the
 commands a hook or script runs (save-work's push, merge.sh's merge).
 
+The effort cap: a review record whose marker carries `cap=<level>` (verdict.sh writes it when `LOADOUT_MAX_EFFORT`
+was set) counts only when this guard's own environment sets `LOADOUT_MAX_EFFORT` to a level at or below it; a capped
+record in a session with no cap, or with a value that is not a level, is refused. A record with no `cap=` is read
+as before. In hook mode the environment is the session's, which a Bash command cannot set; in `--check` mode it is
+the calling command's, so a variable prefixed to `merge.sh` or `--check` lowers the cap it compares with (a limit),
+and a change to the settings file the owner sets it in is not told from the owner's own (a limit).
+
 Each refusal in hook mode is noted in the friction log (bin/friction): the guard's name and the rule, never the
 command. Bounds: one 30 s budget per merge-tool decision, under the hook's 45 s timeout (a timed-out hook does
 not block); a merge it cannot check (GitHub unreadable, a guard failure, input it cannot parse) is
@@ -64,7 +71,9 @@ OWNER_MERGES = "owner-merges"  # a PR label: the merge is the owner's alone
 MARKER = re.compile(r"<!-- loadout:(gates|review)((?: [a-z]+=[^\s=]+)+) -->")
 TITLE = {"gates": re.compile(r"🤖 Gates: (success|failure)"),
          "review": re.compile(r"🤖 Review: (pass|fail) \((routine|standard|sensitive) tier\)")}
-FIELDS = {"gates": {"sha", "state"}, "review": {"sha", "state", "tier", "reviewed", "depth", "override"}}
+FIELDS = {"gates": {"sha", "state"}, "review": {"sha", "state", "tier", "reviewed", "depth", "override", "cap"}}
+EFFORT = {"low": 0, "medium": 1, "high": 2, "xhigh": 3, "max": 4}  # the review record's cap= levels
+CAP_VAR = "LOADOUT_MAX_EFFORT"  # the owner's effort cap, read from this guard's own (the session's) environment
 OVERRIDES = ("light", "focused", "full")  # what verdict.sh's --owner may set a round's depth to
 # The lines verdict.sh writes under the marker of an overridden round: the owner's words, or a repost's link to the
 # record it carries, which the guard follows to a record that quotes them.
@@ -213,7 +222,8 @@ def record_problem(kind: str, c: dict, head: str, trusted: list[dict] | None = N
             or (kind == "review" and fields.get("tier") not in RANK)
             or ("depth" in fields and fields["depth"] not in DEPTH)
             or ("override" in fields and (fields["override"] not in OVERRIDES
-                                          or fields["override"] != fields.get("depth")))):
+                                          or fields["override"] != fields.get("depth")))
+            or ("cap" in fields and fields["cap"] not in EFFORT)):
         return f"{where} has a malformed marker", {}
     state = fields["state"]
     said = title.group(1) if kind == "gates" else {"pass": "success", "fail": "failure"}[title.group(1)]
@@ -228,9 +238,26 @@ def record_problem(kind: str, c: dict, head: str, trusted: list[dict] | None = N
     if kind == "review" and "override" in fields and not owner_quoted(fields["override"], c, trusted or []):
         return (f"{where} carries override={fields['override']} but no `- Owner override:` line quoting the "
                 "owner's words, or one carried from a record of this PR that does, so the override does not count"), {}
+    if kind == "review" and "cap" in fields and (why := cap_problem(fields["cap"])):
+        return f"{where} {why}", {}
     if state != "success":
         return f"{where} says {state}", {"state": state}
     return "", fields
+
+
+def cap_problem(cap: str) -> str:
+    """Why a review record's `cap=` does not count in this session ('' when it does): it may not be below the owner's
+    cap in this guard's own environment, and a session with no cap accepts no capped record."""
+    mine = os.environ.get(CAP_VAR, "").strip()
+    if not mine:
+        return (f"carries cap={cap}, but this session sets no {CAP_VAR}, so its lenses ran below their planned "
+                "efforts under a cap the owner did not set")
+    if mine not in EFFORT:
+        return f"carries cap={cap}, and this session's {CAP_VAR} is {mine!r}, not a level, so the cap cannot be checked"
+    if EFFORT[cap] < EFFORT[mine]:
+        return (f"carries cap={cap}, below this session's {CAP_VAR}={mine}, so its lenses ran under a lower cap than "
+                "the owner set")
+    return ""
 
 
 def clones_by_name(name: str) -> list[Path]:

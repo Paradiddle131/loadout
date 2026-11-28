@@ -2,7 +2,7 @@
 """Builds and compares the PR comments gate_stamp.sh and verdict.sh post as records (lib.sh has the format).
 
   record.py build --kind gates|review --sha <head> --state success|failure --title <first line>
-                  [--tier <tier>] [--reviewed <sha>] [--depth <d>] [--override <d>] [--round <key=value>]...
+                  [--tier <tier>] [--reviewed <sha>] [--depth <d>] [--override <d>] [--cap <level>] [--round <key=value>]...
                   [--line <markdown line>]... [--file <raw output>] [--details <summary>]
     prints the body: the title, the marker line, the round line, the lines, and the raw output under <details> in
     a fence longer than any backtick run in it, clipped (with a note) so the whole body fits GitHub's comment limit.
@@ -32,7 +32,8 @@ only `lens` may repeat. A review round adds cycle, lenses, dupes, mustfix, nits,
 repost=1, lenses and mustfix only); a review record also carries depth, floor and planned (plan.py's: the depth
 the round ran at, the paths' floor, and the planned lenses with the verifier, or `none`), and cap=<level> when the
 owner's effort cap (`LOADOUT_MAX_EFFORT`) was set; a round whose depth the owner set carries override=<that depth> on
-its marker.
+its marker, and a round recorded under a cap carries cap=<level> on its marker too, which the merge guard compares
+with its own session's cap.
 """
 
 from __future__ import annotations
@@ -309,6 +310,10 @@ def build(a: argparse.Namespace) -> str:
         if a.override != a.depth or a.override == "none":
             sys.exit("record.py: --override names the depth the owner set (light, focused or full), the same as --depth")
         marker += f" override={a.override}"
+    if a.cap:
+        if a.kind != "review" or a.cap not in EFFORTS:
+            sys.exit(f"record.py: --cap is a review record's effort cap, one of {', '.join(EFFORTS)}")
+        marker += f" cap={a.cap}"
     marker += " -->"
     try:
         third = round_line(a.round)
@@ -360,6 +365,7 @@ def main() -> int:
     b.add_argument("--reviewed")
     b.add_argument("--depth", choices=["none", "light", "focused", "full"])
     b.add_argument("--override")
+    b.add_argument("--cap")
     b.add_argument("--round", action="append", default=[])
     b.add_argument("--line", action="append", default=[])
     b.add_argument("--file")

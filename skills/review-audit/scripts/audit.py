@@ -71,7 +71,7 @@ MARKER = re.compile(r"<!-- loadout:(gates|review|audit)((?: [a-z_]+=[^\s=]+)+) -
 TITLE = {"gates": re.compile(r"🤖 Gates: (success|failure)"),
          "review": re.compile(r"🤖 Review: (pass|fail) \((routine|standard|sensitive) tier\)"),
          "audit": re.compile(r"🤖 Audit: \d+ findings? re-checked \(session [A-Za-z0-9._-]{1,64}\)")}
-FIELDS = {"gates": {"sha", "state"}, "review": {"sha", "state", "tier", "reviewed", "depth", "override"},
+FIELDS = {"gates": {"sha", "state"}, "review": {"sha", "state", "tier", "reviewed", "depth", "override", "cap"},
           "audit": {"session", "backfill"}}
 DEPTHS = ("none", "light", "focused", "full")  # the review skill's plan.py ranks them
 SHA = re.compile(r"[0-9a-f]{40}")

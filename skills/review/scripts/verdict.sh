@@ -15,7 +15,8 @@
 #   The owner's effort cap, LOADOUT_MAX_EFFORT in the environment (low, medium, high, xhigh or max), lowers each
 #   planned effort above it to it, so a lens run at the cap is accepted when its plan was higher; it never raises one,
 #   and a lens above the cap is accepted here (the effort-cap hook refuses such a run). With a cap set, the round
-#   line carries cap=<level>; unset or empty is no cap, and any other value refuses the record.
+#   line and the marker carry cap=<level> (the merge guard refuses a marker whose cap is below its own session's, or
+#   any cap when its session has none); unset or empty is no cap, and any other value refuses the record.
 #   --owner quotes the owner's instruction that set this round's depth (the review skill's owner override): --depth is
 #   then taken as given (light, focused or full), below the floor too; the marker carries override=<depth>, which
 #   the merge guard accepts below the floor, and the record quotes the words. A --repost carries the reposted
@@ -200,11 +201,11 @@ plan_out=$(python3 "$here/plan.py" ${plan_args[@]+"${plan_args[@]}"} 2>"$why") |
   die "${reason#plan.py: }"
 }
 rm -f "$why"
-plan_head='' plan_depth='' plan_pairs='' plan_override='' plan_record=''
+plan_head='' plan_depth='' plan_pairs='' plan_override='' plan_record='' plan_cap=''
 while read -r k v; do
   case "$k" in
     head) plan_head=$v ;; depth) plan_depth=$v ;; pairs) plan_pairs=$v ;; override) plan_override=$v ;;
-    record) plan_record=$v ;;
+    record) plan_record=$v ;; cap) plan_cap=$v ;;
   esac
 done <<<"$plan_out"
 [ "$plan_head" = "$head" ] || die "PR $pr's head moved while the plan was read: run again"
@@ -282,7 +283,7 @@ if [ -n "$round_out" ]; then
 fi
 for p in ${plan_pair_list[@]+"${plan_pair_list[@]}"}; do round+=(--round "$p"); done
 build_record --kind review --sha "$head" --state "$state" --tier "$tier" --reviewed "$reviewed" --depth "$plan_depth" \
-  ${plan_override:+--override "$plan_override"} \
+  ${plan_override:+--override "$plan_override"} ${plan_cap:+--cap "$plan_cap"} \
   ${round[@]+"${round[@]}"} \
   --title "🤖 Review: $result ($tier tier)" ${lines[@]+"${lines[@]}"} ${file:+--file "$file"} \
   --details "Reviewer output (raw)" >"$tmp/body.md"

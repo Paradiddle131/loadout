@@ -31,7 +31,7 @@ aside):
 | `--depth` | the lead's argument | the lead | the depth is the higher of it and the floor; one below the floor refuses, unless `--owner` is passed |
 | `--owner` | the lead's argument, quoting the owner's instruction | the owner, by the review skill's rule | sets the depth to `--depth` exactly (light at least), recorded as `override=` with the quote; a later round narrows from it only at no greater depth |
 | `--reviewers`, `--lens` | the lead's arguments to verdict.sh | the lead | must cover every planned lens and the verifier, each planned lens at its planned effort or above; extra lenses are accepted |
-| `LOADOUT_MAX_EFFORT` | the environment | the owner, by the review skill's rule (the cloud environment's variables in Settings, or `env` in `~/.claude/settings.json`, read at session start); the scripts cannot tell it from one a lead exports, so `cap=` on the round line shows it to an audit | lowers each planned effort above it to it, never raises one; unset or empty is no cap, any value but the five levels refuses; recorded as `cap=` on the round line |
+| `LOADOUT_MAX_EFFORT` | the environment | the owner, by the review skill's rule (the cloud environment's variables in Settings, or `env` in `~/.claude/settings.json`, read at session start); the scripts cannot tell it from one a lead exports, so it goes on the marker as `cap=`, where the merge guard refuses one below its own session's cap, or any when its session has none | lowers each planned effort above it to it, never raises one; unset or empty is no cap, any value but the five levels refuses; recorded as `cap=` on the marker and the round line, and a repost carries the reposted round's |
 | `--pr` | the lead's argument | the lead | names the PR the record is posted on, so it can only describe that PR |
 | Repo (`REVIEW_REPO`, else `origin`'s URL) and the object store | the local clone | the lead | every object is read by a sha GitHub named; the code these scripts run from is stamped as `kit=` on the round line |
 | Current branch name | `git symbolic-ref HEAD`, in the preview without `--pr` only | the local clone | used only to find that branch's open PR; `record` always takes `--pr` |
@@ -62,7 +62,8 @@ path (raising or lowering it), else high for correctness-reviewer and control-pr
 that is not prose (*.md, *.txt, licence files), else medium. The verifier is medium unless a line sets it.
 The owner's cap, `LOADOUT_MAX_EFFORT` (low, medium, high, xhigh or max), then lowers every planned effort above it
 to it, the verifier's included; the preview prints the cap and each effort it lowered, and the record carries
-`cap=<level>` on its round line when one is set. An unset or empty variable is no cap; any other value refuses the
+`cap=<level>` on its marker and its round line when one is set (the merge guard compares the marker's with its
+own session's cap). An unset or empty variable is no cap; any other value refuses the
 preview and the record (never `floor`, which reads no effort). A lens may run above its planned effort, never below
 it, so a round accepts each lens at or above min(plan, cap); a run above the cap is the effort-cap hook's to refuse
 (hooks/effort-cap.py), never the record's. The merge guard never reads effort.
@@ -98,7 +99,7 @@ CAP_VAR = "LOADOUT_MAX_EFFORT"
 TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
 MARKER = re.compile(r"<!-- loadout:review((?: [a-z]+=[^\s=]+)+) -->")
 TITLE = re.compile(r"🤖 Review: (pass|fail) \((routine|standard|sensitive) tier\)")
-FIELDS = {"sha", "state", "tier", "reviewed", "depth", "override"}
+FIELDS = {"sha", "state", "tier", "reviewed", "depth", "override", "cap"}
 ROUND = re.compile("<!-- loadout" r":round((?: [a-z]+=[A-Za-z0-9._,:-]+)+) -->")
 RAW = re.compile(r"<details><summary>[^<\n]*</summary>\n\n(?:Clipped[^\n]*\n\n)?(`{3,})text\n(.*?)\1\n\n</details>",
                  re.S)
@@ -245,7 +246,8 @@ def record_fields(c: dict) -> dict | None:
     f = dict(pairs)
     if (len(f) != len(pairs) or not {"sha", "state", "tier", "reviewed"} <= set(f) <= FIELDS
             or not SHA.fullmatch(f["sha"]) or not SHA.fullmatch(f["reviewed"]) or f["tier"] not in tiers.RANK
-            or f.get("depth", "none") not in DEPTHS or f["state"] not in ("success", "failure")
+            or f.get("depth", "none") not in DEPTHS or f.get("cap", "low") not in ERANK
+            or f["state"] not in ("success", "failure")
             or {"pass": "success", "fail": "failure"}[title.group(1)] != f["state"] or title.group(2) != f["tier"]):
         return None
     rl = ROUND.fullmatch(lines[2].strip()) if len(lines) > 2 else None
@@ -470,9 +472,12 @@ def record_main(a: argparse.Namespace) -> int:
              "round": "reposted"}
         check_round(p, a.reviewers, [])
         pairs = [f"depth={f['depth']}", f"floor={change.floor}", f"planned={planned}"]
+        pairs += [f"cap={f['cap']}"] if f.get("cap") else []  # the reposted round's cap, so a repost never drops it
         print(f"head {change.head}\ntier {change.tier}\ndepth {f['depth']}\npairs {' '.join(pairs)}")
         if carried is not None:
             print(f"override {carried}")
+        if f.get("cap"):
+            print(f"cap {f['cap']}")
         if reposted.get("html_url"):
             print(f"record {reposted['html_url']}")
         return 0
@@ -483,6 +488,8 @@ def record_main(a: argparse.Namespace) -> int:
     print(f"head {change.head}\ntier {change.tier}\ndepth {p['depth']}\npairs {' '.join(pairs)}")
     if p["override"]:
         print(f"override {p['override']}")
+    if p["cap"]:
+        print(f"cap {p['cap']}")
     return 0
 
 

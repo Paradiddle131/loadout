@@ -357,11 +357,46 @@ def test_verdict_under_a_cap_refuses_a_lens_below_the_cap_or_below_a_lower_plan(
     assert dict(x for x in round_fields(w.comments()[-1]["body"]) if x[0] != "lens")["cap"] == "low"
 
 
+def capped_round(w: World, tmp_path: Path, head: str, cap: str, efforts: str = "low") -> subprocess.CompletedProcess[str]:
+    """A sensitive full round on `head`, every lens and the verifier at `efforts`, recorded under `cap`."""
+    args = ["12", "--tier", "sensitive", "--reviewers", ", ".join(SENSITIVE + [VER]), "--reviewed", head,
+            "--file", review_file(tmp_path, head, "PASS", "No findings.\n", "Blocking: none"), "--cycle", "1",
+            "--dupes", "0", "--nits", "0", "--depth", "full"]
+    for r in SENSITIVE + [VER]:
+        args += ["--lens", f"{r} model=opus effort={efforts} tokens=10 seconds=1 findings=0"]
+    return w.verdict(*args, cost=False, **{CAP: cap})
+
+
+def test_a_round_recorded_under_a_cap_carries_it_on_the_marker_the_merge_guard_reads(w: World,
+                                                                                    tmp_path: Path) -> None:
+    head = w.commit({"cloud/hooks/x.py": "x\n"})
+    done = capped_round(w, tmp_path, head, "low")  # a cap prefixed to one command, as a lead could
+    assert done.returncode == 0, done.stderr
+    assert w.comments()[-1]["body"].split("\n")[1] == (f"{REVIEW} sha={head} state=success tier=sensitive "
+                                                       f"reviewed={head} depth=full cap=low -->")
+
+
+def test_a_repost_carries_the_reposted_round_s_cap(w: World, tmp_path: Path) -> None:
+    head = w.commit({"cloud/hooks/x.py": "x\n"})
+    assert capped_round(w, tmp_path, head, "low").returncode == 0
+    w.main_moves({"README.md": "main moved\n"})
+    w.git(w.repo, "merge", "-q", "--no-edit", "origin/main")
+    w.push()
+    done = w.verdict("12", "--tier", "sensitive", "--reviewers", ", ".join(SENSITIVE + [VER]), "--reviewed", head,
+                     "--file", review_file(tmp_path, head, "PASS", "No findings.\n", "Blocking: none"), "--repost",
+                     cost=False)  # no cap in the reposting command: the reposted round's still shows
+    assert done.returncode == 0, done.stderr
+    body = w.comments()[-1]["body"]
+    assert body.split("\n")[1].endswith(f"reviewed={head} depth=full cap=low -->")
+    assert dict(x for x in round_fields(body) if x[0] != "lens")["cap"] == "low"
+
+
 def test_no_cap_writes_no_cap_pair(w: World, tmp_path: Path) -> None:
     head = w.commit({"src/app.py": "x = 2\n"})
     done = verdict(w, tmp_path, head, [COR, VER], "standard")
     assert done.returncode == 0, done.stderr
-    assert "cap" not in dict(round_fields(w.comments()[-1]["body"]))
+    body = w.comments()[-1]["body"]
+    assert "cap" not in dict(round_fields(body)) and " cap=" not in body.split("\n")[1]
 
 
 # Lab policy, and the floor no REVIEW.md line lowers.

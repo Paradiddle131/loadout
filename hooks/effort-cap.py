@@ -21,7 +21,8 @@ one of the five words, exactly, in lower case):
   in any case, must be an option `effort: '<level>'` (any quote, the key quoted or not) whose value is followed,
   past blanks and line breaks, by a `,` or a `}`, at or below the cap; anything else (a variable, a template, an expression, a comment
   that names it) refuses the whole call, since a computed value cannot be read from the text. `args` is read the
-  same way: a key that holds the word must hold a level at or below the cap, and a string that is the word refuses.
+  same way: a key that holds the word must hold a level at or below the cap, and every string in it is read as
+  script text, by the rule above (so JSON or code in a string carries no effort past it).
 - `mcp__<server>__create_session`: its `effort`, as for `Agent`.
 Every other tool passes.
 
@@ -206,9 +207,12 @@ def check_args(value: object, cap: str) -> None:
     elif isinstance(value, list):
         for v in value:
             check_args(v, cap)
-    elif isinstance(value, str) and value.strip().lower() == "effort":
-        raise Refusal("the workflow's args hold the word effort as a value, so the effort the script sets from them "
-                      "cannot be read")
+    elif isinstance(value, str):
+        # A string the script may parse or splice into code: held to the script's own rule.
+        try:
+            check_script(value, cap)
+        except Refusal as exc:
+            raise Refusal(f"in a string of the workflow's args, {exc}") from None
 
 
 # The decision.

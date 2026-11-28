@@ -222,8 +222,10 @@ def test_workflow_whose_script_cannot_be_read_refuses(home: Path, tmp_path: Path
 
 
 @pytest.mark.parametrize("args, passes", [
-    ({"effort": "low"}, True), ({"q": "reduce the effort of x"}, True), ({"effort": "high"}, False),
+    ({"effort": "low"}, True), ({"q": "plain words"}, True), ({"effort": "high"}, False),
     ({"opts": {"Effort": "max"}}, False), ({"k": "effort", "v": "max"}, False), ([{"effort": None}], False),
+    ({"o": '{"effort":"max"}'}, False), ('{"effort":"max"}', False), (["{effort: e}"], False),  # code in a string
+    ({"o": '{"effort":"low"}'}, True), ({"q": "reduce the effort of x"}, False),  # prose naming it refuses too
 ])
 def test_workflow_args_are_read_like_the_script(home: Path, args: object, passes: bool) -> None:
     reason, _ = run(call("Workflow", script=OK_SCRIPT, args=args), "medium", home)
@@ -233,10 +235,21 @@ def test_workflow_args_are_read_like_the_script(home: Path, args: object, passes
 # The plugin wiring.
 
 
-def test_the_loadout_plugin_registers_the_hook_for_the_three_tools() -> None:
+def test_the_loadout_plugin_registers_the_hook_for_the_three_tools(home: Path) -> None:
     import re
     hooks = json.loads((HOOKS / "hooks.json").read_text())["hooks"]["PreToolUse"]
-    (entry,) = [h for h in hooks if "effort-cap.py" in h["hooks"][0]["command"]]
+    (entry,) = [h for h in hooks if "effort-cap.py" in h["hooks"][0].get("command", "")]
+    (handler,) = entry["hooks"]
+    assert handler["type"] == "command"
+    # The registered command itself, as Claude Code runs it, refuses an above-cap call and passes one at the cap.
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
+    env.update({"HOME": str(home), VAR: "medium", "CLAUDE_PLUGIN_ROOT": str(ROOT)})
+    for effort, denied in (("high", True), ("medium", False)):
+        done = subprocess.run(["bash", "-c", handler["command"]], input=json.dumps(call("Agent", effort=effort)),
+                              env=env, capture_output=True, text=True, timeout=30)
+        assert done.returncode == 0, done.stderr
+        out = json.loads(done.stdout)["hookSpecificOutput"] if done.stdout.strip() else {}
+        assert (out.get("permissionDecision") == "deny") == denied, (effort, done.stdout)
     m = re.compile(entry["matcher"])
     for tool in ("Agent", "Task", "Workflow", "mcp__claude-code-remote__create_session"):
         assert m.fullmatch(tool), tool
