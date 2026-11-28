@@ -2,7 +2,7 @@
 name: review
 description: "Use before any change lands on a default branch, in any repo, attended or unattended: tier the change, stamp its gates, run fresh reviewers, verify their findings, fix, record the verdict, merge."
 metadata:
-  version: 17.0.0
+  version: 19.0.0
 ---
 
 # Review
@@ -37,7 +37,10 @@ The author of a change fixes it and never reviews it; with no fresh-context suba
 
 ## 3. Find
 
-Start the lenses `plan.py` prints as subagents in the foreground, on Opus at the effort it prints for each (medium, or high for `correctness-reviewer` and `control-prober` at `full` on sensitive code; a `REVIEW.md` `; effort:` line can change it), set in the call (the collection's default reviewer model, set explicitly because a subagent does not inherit the session's effort; a repo's instructions may name another); an effort may be raised, never lowered.
+Start the lenses `plan.py` prints as subagents in the foreground, on Opus at the effort it prints for each (medium, or high for `correctness-reviewer` and `control-prober` at `full` on sensitive code; a `REVIEW.md` `; effort:` line can change it), set in the call (the collection's default reviewer model, set explicitly because a subagent does not inherit the session's effort; a repo's instructions may name another); an effort may be raised, never lowered, except by the owner's cap.
+**Effort cap:** `LOADOUT_MAX_EFFORT` (`low`, `medium`, `high`, `xhigh` or `max`) is the owner's, set in the cloud environment's variables in Settings or in `env` of `~/.claude/settings.json` locally, and it takes effect at the next session start; unset, there is no cap.
+`plan.py` prints it and lowers each planned effort above it to it, `verdict.sh` accepts a lens run at the cap and records `cap=<level>` on the marker, and the `loadout` plugin's hook (`hooks/effort-cap.py`) refuses a lens started above it, or with no effort when its definition's own is above it; the owner alone sets or changes it.
+The merge guard holds that rule on the merge tool: it refuses a review record whose `cap=` is below its own session's `LOADOUT_MAX_EFFORT`, or any capped record in a session with no cap; a value prefixed to `merge.sh`, and an edit of the owner's settings file, are not told from the owner's (limits).
 In `focused`, the `first` lens runs alone, then the `then` lenses in parallel, each brief carrying the first lens's findings as raised this round (templates.md); otherwise every lens starts at once.
 Give each the brief in [`templates.md`](templates.md): the repo, the range `$(git merge-base <default> <head>)..<head>`, the issue body and its done-when quoted; each agent makes and removes its own detached worktree.
 Give no summary of the work; the PR body goes only to `claims-auditor`, or to a repo's own lens its `REVIEW.md` names that asks for it, as material under audit.
@@ -96,7 +99,7 @@ Done when every planned lens has returned its raw findings; remove the worktrees
 
 - Run `$R/scripts/verdict.sh --reviewed <sha> [--depth <d>]` (its header gives the other arguments) with the verifier's output unedited (the author may run it; the script cannot tell the verifier's output from a typed one, so the rule is to post it unedited); for a change whose floor is none, `verdict.sh --tier routine` may record that no reviewer ran, which the change's own author may run, and no record is required.
 - It recomputes the tier and refuses a lower one than the paths give, and refuses unless the PR head equals the reviewed commit or differs from it only by a clean merge of the default branch.
-- It computes the plan itself (`plan.py record`) and refuses a depth below the floor (unless `--owner` quotes the owner's override), a `--reviewers` set missing a planned lens or `finding-verifier`, and a planned lens whose `--lens` effort is below its planned effort; extra lenses and higher efforts are accepted.
+- It computes the plan itself (`plan.py record`) and refuses a depth below the floor (unless `--owner` quotes the owner's override), a `--reviewers` set missing a planned lens or `finding-verifier`, and a planned lens whose `--lens` effort is below its planned effort after the owner's cap (a lens at the cap passes when its plan was higher); extra lenses and higher efforts are accepted.
 - Above `routine` it takes the result from the output's header, its first lines: the first non-blank line `VERDICT:`, then `Reviewed:`, then `Blocking:`; it refuses an output that does not open with them, one whose lines name a commit other than `--reviewed`, one whose `Blocking:` line (right after `Reviewed:`) is missing, lists a must-fix whose harm is missing, under two words or made only of `blocking.py`'s filler words, or whose id opens no `###` line below it, fenced or not, lists none on a `FAIL` or any on a `PASS`, and a `--result` that contradicts its verdict.
 - It reads and posts the output as GitHub stores a comment (`record.py § stored` lists each rewrite), so a record holds the verifier's output as GitHub keeps it, not byte for byte: format characters such as zero-width and bidirectional ones are dropped, line-break, space and control characters are normalised, and every `![` reads `! [`.
   It refuses an output with any other line that starts with `VERDICT:`, `Reviewed:` or `Blocking:`, wherever it stands, in a code fence or indented too.
@@ -104,7 +107,7 @@ Done when every planned lens has returned its raw findings; remove the worktrees
 - Above `routine` it also takes the round's cost and shape, refusing a malformed or missing value: `--reviewers` names every agent that ran, the verifier included; `--cycle <n>` (1 for a first review), `--dupes <n>` (findings the verifier merged), `--nits <n>`, and one `--lens "<name> model=<m> effort=<e> tokens=<n> seconds=<n> findings=<n>"` per agent named there and no other, copied from the usage the harness printed when that agent returned (total tokens; duration in ms / 1000, rounded; findings raised, or kept for the verifier).
   The must-fix count comes from the `Blocking:` line, and the verifier's `Dismissals: re-ran <n>, promoted <m>` line in its header adds both numbers; it refuses an output whose header has no such line, two of them, or more promoted than re-ran.
   Re-posting a verdict after a clean merge of the default branch (step 6) takes `--repost` in place of that usage: no reviewer ran, so the record carries none.
-- A review record's marker carries `depth=<d>`, the depth the merge guard checks; its third line, which the guard does not read, carries `v=<this skill's version>` and `kit=<the collection commit the scripts ran from>`, then the round's numbers and `depth`, `floor` and `planned` (a gates record: the command's seconds); a table of the per-agent numbers follows the record's list.
+- A review record's marker carries `depth=<d>`, the depth the merge guard checks, and `cap=<level>` when a cap was set, which the merge guard compares with its session's; its third line, which the guard does not read, carries `v=<this skill's version>` and `kit=<the collection commit the scripts ran from>`, then the round's numbers and `depth`, `floor` and `planned`, and `cap` when the owner's cap is set (a gates record: the command's seconds); a table of the per-agent numbers follows the record's list.
 - Done when both records are `success` on the PR's head commit, or, for a change whose floor is none, the gates record is.
 
 ## 8. Merge

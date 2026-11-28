@@ -7,13 +7,14 @@
       quotes the owner's instruction that set it (an owner override: light, focused or full, on any path).
   plan.py record --pr <n> [--depth <d>] [--owner "<words>"] --reviewers <names> --lens "<name> ... effort=<e> ..."...
       what verdict.sh runs: the same plan, then refuses a reviewer set missing a planned lens or the verifier, or a
-      planned lens run below its planned effort; prints the marker's depth and the round line's pairs.
+      planned lens run below its planned effort (after the cap); prints the marker's depth and the round line's pairs.
   plan.py floor --base <ref> --head <ref>
       what the merge guard runs, like tier.sh: the tier and the depth floor of the paths, from a local clone.
 
 The preview and the record read the same inputs the same way, and neither takes a base, a head, a reviewed commit
 or a prior output from the lead: no option can change what verdict.sh records except to raise it, but for the
-owner's override (`--owner`), which sets the depth the owner named.
+owner's override (`--owner`), which sets the depth the owner named, and the owner's effort cap (`LOADOUT_MAX_EFFORT`),
+which lowers efforts and is recorded as `cap=` whenever it is set.
 
 Inputs, where each is read from, who controls it, and how a lead-controlled one can only raise the plan (`--owner`
 aside):
@@ -30,6 +31,7 @@ aside):
 | `--depth` | the lead's argument | the lead | the depth is the higher of it and the floor; one below the floor refuses, unless `--owner` is passed |
 | `--owner` | the lead's argument, quoting the owner's instruction | the owner, by the review skill's rule | sets the depth to `--depth` exactly (light at least), recorded as `override=` with the quote; a later round narrows from it only at no greater depth |
 | `--reviewers`, `--lens` | the lead's arguments to verdict.sh | the lead | must cover every planned lens and the verifier, each planned lens at its planned effort or above; extra lenses are accepted |
+| `LOADOUT_MAX_EFFORT` | the environment | the owner, by the review skill's rule (the cloud environment's variables in Settings, or `env` in `~/.claude/settings.json`, read at session start); the scripts cannot tell it from one a lead exports, so it goes on the marker as `cap=`, where the merge guard refuses one below its own session's cap, or any when its session has none | lowers each planned effort above it to it, never raises one; unset or empty is no cap, any value but the five levels refuses; recorded as `cap=` on the marker and the round line, and a repost carries the reposted round's |
 | `--pr` | the lead's argument | the lead | names the PR the record is posted on, so it can only describe that PR |
 | Repo (`REVIEW_REPO`, else `origin`'s URL) and the object store | the local clone | the lead | every object is read by a sha GitHub named; the code these scripts run from is stamped as `kit=` on the round line |
 | Current branch name | `git symbolic-ref HEAD`, in the preview without `--pr` only | the local clone | used only to find that branch's open PR; `record` always takes `--pr` |
@@ -57,8 +59,14 @@ nothing else is planned), and the sensitive set when one of its paths is sensiti
 In light it reruns the one lens; in full, the whole set. The verifier runs on every round with a lens.
 Effort per lens, the highest over the round's paths: a REVIEW.md `; effort: <lens>=<level>` on a line matching the
 path (raising or lowering it), else high for correctness-reviewer and control-prober at depth full on a sensitive path
-that is not prose (*.md, *.txt, licence files), else medium. The verifier is medium unless a line sets it. A lens may
-run above its planned effort, never below; the merge guard never reads effort.
+that is not prose (*.md, *.txt, licence files), else medium. The verifier is medium unless a line sets it.
+The owner's cap, `LOADOUT_MAX_EFFORT` (low, medium, high, xhigh or max), then lowers every planned effort above it
+to it, the verifier's included; the preview prints the cap and each effort it lowered, and the record carries
+`cap=<level>` on its marker and its round line when one is set (the merge guard compares the marker's with its
+own session's cap). An unset or empty variable is no cap; any other value refuses the
+preview and the record (never `floor`, which reads no effort). A lens may run above its planned effort, never below
+it, so a round accepts each lens at or above min(plan, cap); a run above the cap is the effort-cap hook's to refuse
+(hooks/effort-cap.py), never the record's. The merge guard never reads effort.
 """
 
 from __future__ import annotations
@@ -87,10 +95,11 @@ DEPTHS = tiers.DEPTHS
 DRANK = {d: i for i, d in enumerate(DEPTHS)}
 ERANK = {e: i for i, e in enumerate(tiers.EFFORTS)}
 HIGH_ON_CODE = {COR, CTL}
+CAP_VAR = "LOADOUT_MAX_EFFORT"
 TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
 MARKER = re.compile(r"<!-- loadout:review((?: [a-z]+=[^\s=]+)+) -->")
 TITLE = re.compile(r"🤖 Review: (pass|fail) \((routine|standard|sensitive) tier\)")
-FIELDS = {"sha", "state", "tier", "reviewed", "depth", "override"}
+FIELDS = {"sha", "state", "tier", "reviewed", "depth", "override", "cap"}
 ROUND = re.compile("<!-- loadout" r":round((?: [a-z]+=[A-Za-z0-9._,:-]+)+) -->")
 RAW = re.compile(r"<details><summary>[^<\n]*</summary>\n\n(?:Clipped[^\n]*\n\n)?(`{3,})text\n(.*?)\1\n\n</details>",
                  re.S)
@@ -237,7 +246,8 @@ def record_fields(c: dict) -> dict | None:
     f = dict(pairs)
     if (len(f) != len(pairs) or not {"sha", "state", "tier", "reviewed"} <= set(f) <= FIELDS
             or not SHA.fullmatch(f["sha"]) or not SHA.fullmatch(f["reviewed"]) or f["tier"] not in tiers.RANK
-            or f.get("depth", "none") not in DEPTHS or f["state"] not in ("success", "failure")
+            or f.get("depth", "none") not in DEPTHS or f.get("cap", "low") not in ERANK
+            or f["state"] not in ("success", "failure")
             or {"pass": "success", "fail": "failure"}[title.group(1)] != f["state"] or title.group(2) != f["tier"]):
         return None
     rl = ROUND.fullmatch(lines[2].strip()) if len(lines) > 2 else None
@@ -277,6 +287,18 @@ def prior_round(c: dict | None, change: Change) -> tuple[str, list[dict], str] |
 # The plan.
 
 
+def effort_cap() -> str | None:
+    """The owner's cap from the environment: a level, or None when unset or empty; Refused on any other value."""
+    raw = os.environ.get(CAP_VAR, "").strip()
+    if not raw:
+        return None
+    if raw not in ERANK:
+        raise Refused(f"{CAP_VAR} is {raw!r}, none of {', '.join(tiers.EFFORTS)}: the owner sets one of those, or "
+                      "leaves it unset for no cap (the cloud environment's variables in Settings, or `env` in "
+                      "~/.claude/settings.json), and it takes effect at the next session start")
+    return raw
+
+
 def ordered(lenses: set[str]) -> list[str]:
     return sorted(lenses, key=lambda x: (LENSES.index(x) if x in LENSES else len(LENSES), x))
 
@@ -293,7 +315,7 @@ def owner_quote(quote: str | None, want: str | None) -> str | None:
 
 
 def make_plan(change: Change, prior: tuple[str, list[dict], str] | None, want: str | None,
-              owner: str | None = None) -> dict:
+              owner: str | None = None, cap: str | None = None) -> dict:
     if want is not None and want not in DEPTHS:
         raise Refused(f"--depth is one of {', '.join(DEPTHS)} (got {want!r})")
     owner = owner_quote(owner, want)
@@ -343,10 +365,15 @@ def make_plan(change: Change, prior: tuple[str, list[dict], str] | None, want: s
     if run_:
         set_by = [e[VERIFIER] for p in paths for e in change.rated[p]["efforts"] if VERIFIER in e]
         effort[VERIFIER] = max(set_by, key=ERANK.get) if set_by else "medium"
+    uncapped = dict(effort)
+    if cap is not None:
+        effort = {x: min(e, cap, key=ERANK.get) for x, e in effort.items()}
+        if lowered := [f"{x} {uncapped[x]} to {cap}" for x in effort if effort[x] != uncapped[x]]:
+            why.append(f"the owner's cap ({CAP_VAR}={cap}) lowers {', '.join(lowered)}")
     return {"head": change.head, "tier": change.tier, "floor": change.floor, "depth": depth, "round": kind,
             "since": since, "first": first, "then": then, "verifier": VERIFIER if run_ else "", "effort": effort,
             "planned": run_ + ([VERIFIER] if run_ else []), "override": depth if owner is not None else None,
-            "why": why}
+            "cap": cap, "uncapped": uncapped, "why": why}
 
 
 def read_pr(repo: str, number: str) -> tuple[Change, list[dict], str]:
@@ -390,7 +417,10 @@ def read_pr(repo: str, number: str) -> tuple[Change, list[dict], str]:
 
 
 def check_round(p: dict, reviewers: str, lens_specs: list[str]) -> None:
-    """Refuses a reviewer set missing a planned lens or the verifier, or a planned lens run below its effort."""
+    """Refuses a reviewer set missing a planned lens or the verifier, or a planned lens run below its effort.
+
+    The plan's efforts are already capped (make_plan), so a lens at the cap passes when its plan was higher.
+    """
     try:
         ran = record.names(reviewers)
         specs = {x["name"]: x for x in (record.lens_spec(s) for s in lens_specs)}
@@ -402,8 +432,9 @@ def check_round(p: dict, reviewers: str, lens_specs: list[str]) -> None:
     low = [f"{x} ran at {specs[x]['effort']}, planned {e}" for x, e in p["effort"].items()
            if x in specs and ERANK[specs[x]["effort"]] < ERANK[e]]
     if low:
-        raise Refused(f"a planned lens ran below its planned effort ({'; '.join(low)}): an effort may be raised, "
-                      "never lowered")
+        capped = f", after the owner's cap {CAP_VAR}={p['cap']}" if p.get("cap") else ""
+        raise Refused(f"a planned lens ran below its planned effort{capped} ({'; '.join(low)}): an effort may be "
+                      "raised, never lowered")
 
 
 def record_main(a: argparse.Namespace) -> int:
@@ -441,18 +472,24 @@ def record_main(a: argparse.Namespace) -> int:
              "round": "reposted"}
         check_round(p, a.reviewers, [])
         pairs = [f"depth={f['depth']}", f"floor={change.floor}", f"planned={planned}"]
+        pairs += [f"cap={f['cap']}"] if f.get("cap") else []  # the reposted round's cap, so a repost never drops it
         print(f"head {change.head}\ntier {change.tier}\ndepth {f['depth']}\npairs {' '.join(pairs)}")
         if carried is not None:
             print(f"override {carried}")
+        if f.get("cap"):
+            print(f"cap {f['cap']}")
         if reposted.get("html_url"):
             print(f"record {reposted['html_url']}")
         return 0
-    p = make_plan(change, prior_round(newest_review(comments), change), a.depth, a.owner)
+    p = make_plan(change, prior_round(newest_review(comments), change), a.depth, a.owner, a.cap)
     check_round(p, a.reviewers, a.lens)
     pairs = [f"depth={p['depth']}", f"floor={p['floor']}", f"planned={','.join(p['planned']) or 'none'}"]
+    pairs += [f"cap={p['cap']}"] if p["cap"] else []
     print(f"head {change.head}\ntier {change.tier}\ndepth {p['depth']}\npairs {' '.join(pairs)}")
     if p["override"]:
         print(f"override {p['override']}")
+    if p["cap"]:
+        print(f"cap {p['cap']}")
     return 0
 
 
@@ -460,7 +497,7 @@ def preview_main(a: argparse.Namespace) -> int:
     repo = repo_name()
     change, comments, default = read_pr(repo, a.pr or current_pr(repo))
     p = {"pr": int(a.pr) if a.pr else None, "base": default, "tip": change.base,
-         **make_plan(change, prior_round(newest_review(comments), change), a.depth, a.owner)}
+         **make_plan(change, prior_round(newest_review(comments), change), a.depth, a.owner, a.cap)}
     if a.json:
         print(json.dumps(p))
         return 0
@@ -468,11 +505,15 @@ def preview_main(a: argparse.Namespace) -> int:
         print(f"{k}: {p[k]}")
     if p["override"]:
         print(f"override: depth {p['override']}, by the owner's words")
+    print(f"cap: {p['cap'] + ' (' + CAP_VAR + ')' if p['cap'] else 'none (' + CAP_VAR + ' unset)'}")
     print(f"since: {p['since'] or 'none (a first review)'}")
+
+    def shown(x: str) -> str:
+        e, was = p["effort"][x], p["uncapped"][x]
+        return f"{x} ({e}{', capped from ' + was if was != e else ''})"
     for k in ("first", "then"):
-        shown = ", ".join(f"{x} ({p['effort'][x]})" for x in p[k])
-        print(f"{k}: {shown or 'none'}")
-    print(f"verifier: {p['verifier'] + ' (' + p['effort'][VERIFIER] + ')' if p['verifier'] else 'none'}")
+        print(f"{k}: {', '.join(shown(x) for x in p[k]) or 'none'}")
+    print(f"verifier: {shown(p['verifier']) if p['verifier'] else 'none'}")
     print(f"why: {'; '.join(p['why'])}")
     return 0
 
@@ -512,6 +553,7 @@ def main(argv: list[str]) -> int:
     if getattr(a, "pr", None) is not None and not re.fullmatch(r"[0-9]+", a.pr):
         p.error("--pr is a PR number")
     try:
+        a.cap = None if handler is floor_main else effort_cap()  # floor reads no effort, so no cap either
         return handler(a)
     except Refused as exc:
         print(f"plan.py: {exc}", file=sys.stderr)

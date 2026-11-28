@@ -39,7 +39,7 @@ def env(tmp_path: Path) -> dict[str, str]:
     fx.mkdir()
     e = {**os.environ, **ID, "PATH": f"{bin_dir}:{os.environ['PATH']}", "STUB_DIR": str(fx),
          "REVIEW_REPO": "example-owner/example-repo", "HOME": str(tmp_path / "home")}
-    for k in ("DRY_RUN", "STUB_FAIL", "STUB_MANGLE", "STUB_REMOTE"):
+    for k in ("DRY_RUN", "STUB_FAIL", "STUB_MANGLE", "STUB_REMOTE", "LOADOUT_MAX_EFFORT"):
         e.pop(k, None)
     return e
 

@@ -9,7 +9,7 @@
       "name": "loadout",
       "source": "./",
       "strict": false,
-      "description": "Skills and review agents for any machine: PR and issue bodies, architecture diagrams, HTML report pages, owner debriefs, design grilling, writing for agents; one read-only reviewer per lens (correctness, claims, guardrails, leaks, controls, handoffs) and a verifier for their findings.",
+      "description": "Skills and review agents for any machine: PR and issue bodies, architecture diagrams, HTML report pages, owner debriefs, design grilling, writing for agents; one read-only reviewer per lens (correctness, claims, guardrails, leaks, controls, handoffs) and a verifier for their findings; a hook that holds the owner's effort cap (LOADOUT_MAX_EFFORT) on every subagent, workflow and created session.",
       "license": "MIT",
       "skills": [
         "./skills/"

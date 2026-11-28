@@ -5,7 +5,8 @@
 #
 # A record is a PR comment: its first line is for people (`🤖 Gates: success`, `🤖 Review: pass (standard
 # tier)`), its second line is one machine line, an HTML comment the merge guard (cloud/hooks/merge-guard.py)
-# parses:  <!-- loadout:<gates|review> sha=<head> state=success|failure [tier=<tier>] [reviewed=<sha>] -->
+# parses:  <!-- loadout:<gates|review> sha=<head> state=success|failure [tier=<tier>] [reviewed=<sha>] [depth=<d>]
+#           [override=<d>] [cap=<level>] -->
 # Its third line is the round line, for audits and people, which the guard does not read: the review path's version
 # (v=), the collection commit the scripts ran from (kit=) and the round's cost and shape (record.py has the format).
 # The guard counts only the newest unedited marker of each kind from the repo's owner, a member or a

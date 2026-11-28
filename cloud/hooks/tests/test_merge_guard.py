@@ -105,7 +105,7 @@ def guard_env(fx: Fx, gh: bool = True, **env: str) -> dict[str, str]:
     if gh and not (bin_dir / "gh").exists():
         STUB.chmod(0o755)
         (bin_dir / "gh").symlink_to(STUB)
-    e = {k: v for k, v in os.environ.items() if k != "GH_REPO"}
+    e = {k: v for k, v in os.environ.items() if k not in ("GH_REPO", "LOADOUT_MAX_EFFORT")}
     return {**e, **ID, "PATH": f"{bin_dir}:/usr/bin:/bin", "STUB_DIR": str(fx.d),
             "LOADOUT_FRICTION_LOG": str(fx.friction), **env}
 
@@ -831,6 +831,56 @@ def test_a_record_s_depth_is_checked_against_a_lab_policy_too(fx: Fx, tmp_path: 
     fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head, depth="light")))
     reason = mcp(fx, r, expectedHeadSha=head)
     assert reason and "full" in reason, reason
+
+
+# The owner's effort cap: a review record's cap= counts only at or above this session's LOADOUT_MAX_EFFORT.
+
+
+def capped(head: str, cap: str) -> str:
+    return record("review", sha=head).replace(" -->", f" cap={cap} -->", 1)
+
+
+def merge_under(fx: Fx, cwd: Path, head: str, cap: str | None) -> str | None:
+    data = {"owner": "example-owner", "repo": "example-repo", "pullNumber": 12, "expectedHeadSha": head}
+    return run(fx, {"tool_name": "mcp__github__merge_pull_request", "tool_input": data}, cwd,
+               **({"LOADOUT_MAX_EFFORT": cap} if cap is not None else {}))
+
+
+@pytest.mark.parametrize("record_cap, session_cap", [("medium", "medium"), ("high", "medium"), ("max", "low")])
+def test_a_capped_review_merges_at_or_above_the_session_s_cap(fx: Fx, tmp_path: Path, record_cap: str,
+                                                              session_cap: str) -> None:
+    r, head, _ = change(tmp_path, fx, {"src/app.py": "x = 2\n"})
+    fx.comments(comment(record("gates", sha=head)), comment(capped(head, record_cap)))
+    assert merge_under(fx, r, head, session_cap) is None
+
+
+@pytest.mark.parametrize("record_cap, session_cap, why", [
+    ("low", "medium", "below this session's LOADOUT_MAX_EFFORT=medium"),  # a lead's own lower cap
+    ("low", None, "sets no LOADOUT_MAX_EFFORT"),  # a cap the owner never set
+    ("low", "", "sets no LOADOUT_MAX_EFFORT"),
+    ("medium", "huge", "not a level"),
+    ("Low", "medium", "malformed"),
+    ("", "medium", "malformed"),
+])
+def test_a_review_under_a_lower_or_unset_cap_refuses(fx: Fx, tmp_path: Path, record_cap: str,
+                                                     session_cap: str | None, why: str) -> None:
+    r, head, _ = change(tmp_path, fx, {"src/app.py": "x = 2\n"})
+    fx.comments(comment(record("gates", sha=head)), comment(capped(head, record_cap)))
+    reason = merge_under(fx, r, head, session_cap)
+    assert reason and why in reason, reason
+
+
+def test_a_review_with_no_cap_merges_as_before_under_any_session_cap(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"src/app.py": "x = 2\n"})
+    fx.comments(comment(record("gates", sha=head)), comment(record("review", sha=head)))
+    for cap in (None, "low", "max"):
+        assert merge_under(fx, r, head, cap) is None, cap
+
+
+def test_a_capped_review_holds_a_floor_none_merge_too(fx: Fx, tmp_path: Path) -> None:
+    r, head, _ = change(tmp_path, fx, {"docs/x.md": "x\n"})
+    fx.comments(comment(record("gates", sha=head)), comment(capped(head, "low")))
+    assert "sets no LOADOUT_MAX_EFFORT" in merge_under(fx, r, head, None)
 
 
 # The owner's override (verdict.sh --owner): a record whose override= names its own depth passes below the floor.

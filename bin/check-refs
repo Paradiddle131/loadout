@@ -6,8 +6,8 @@ Checked in every tracked Markdown, HTML, shell and Python file:
 - relative Markdown links `[text](path)`, anchors stripped, must name a file or directory;
 - repo paths written in backticks (`skills/<name>/SKILL.md`, `bin/check-generic.sh`) must exist, from the
   repo root, the file's folder or its skill's root;
-- plugin skill names (`<plugin>:<name>`, for each plugin in `.claude-plugin/marketplace.json`) must name a
-  skill that plugin ships.
+- plugin-scoped names (`<plugin>:<name>`, for each plugin in `.claude-plugin/marketplace.json`) must name a
+  skill or an agent (a file under its `agents/`) that plugin ships.
 
 Links into a tracker (`../../issues/N`), URLs, placeholders (`<name>`, `*`, `{a,b}`) and paths
 outside the repo are skipped. Run with no arguments; exits 1 and lists each broken reference.
@@ -22,7 +22,7 @@ from pathlib import Path
 
 ROOT = Path(subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True,
                            check=True).stdout.strip())
-TOP = ("bin/", "skills/", "cloud/", "ways/", ".githooks/", ".claude-plugin/")
+TOP = ("bin/", "skills/", "cloud/", "ways/", "hooks/", ".githooks/", ".claude-plugin/")
 SUFFIXES = {".md", ".html", ".sh", ".py", ".cjs", ".js", ".json", ""}
 LINK = re.compile(r"\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 TICK = re.compile(r"`([^`\s]+)`")
@@ -51,6 +51,8 @@ def plugin_skills():
                 names.add(base.name)
             else:
                 names |= {d.name for d in base.iterdir() if (d / "SKILL.md").exists()}
+        agents = ROOT / plugin.get("source", "./") / "agents"
+        names |= {f.stem for f in agents.glob("*.md")} if agents.is_dir() else set()
         skills[plugin["name"]] = names
     return skills
 
@@ -95,7 +97,7 @@ def main():
                     problems.append(f"{rel}:{n}: `{token}` names nothing in this repo")
             for plugin, name in skill.findall(line):
                 if name not in skills.get(plugin, set()):
-                    problems.append(f"{rel}:{n}: {plugin}:{name} is no skill of the {plugin} plugin")
+                    problems.append(f"{rel}:{n}: {plugin}:{name} is no skill or agent of the {plugin} plugin")
     for p in problems:
         print(p)
     print(f"check-refs: {'%d broken' % len(problems) if problems else 'every reference resolves'}", file=sys.stderr)
