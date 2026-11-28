@@ -134,7 +134,49 @@ VARIABLES = [
     "bash -lc 'unset GCP_PROJECT && true'",
 ]
 
-DENIED = CLOUD_CLI + API_HOST + WIDENING + VARIABLES
+# A backslash-newline joins lines (and words): the command after it is the one before it, continued.
+LINE_CONTINUATIONS = [
+    "uv run pytest -q \\\n  -o addopts= tests/x.py",
+    "pytest tests \\\n  -m live",
+    "uv run pytest -q tests/x.py \\\n  --override-ini=addopts=",
+    "uv run pytest -o\\\naddopts= tests/x.py",
+    "gc\\\nloud info",
+    "cd wt && \\\n  bq ls",
+    "unset \\\n  GCP_PROJECT",
+    "env -u \\\n  GCP_PROJECT true",
+    "GCP_PROJECT= \\\n  uv run pytest tests",
+    'bash -c "gcloud \\\n info"',
+    "make \\\n  check",
+]
+
+# A value-taking shell option before `-c` takes its value; the `-c` script is still read.
+SHELL_OPTIONS = [
+    "bash -o pipefail -c 'gcloud info'",
+    "bash -euo pipefail -c 'unset GCP_PROJECT'",
+    "bash -e -o pipefail -x -c 'make check'",
+    "bash +o posix -c 'bq ls'",
+    "bash -O extglob -c 'gcloud info'",
+    "bash --rcfile /dev/null -c 'gsutil ls'",
+    "bash -co pipefail 'gcloud info'",
+    "sh -ceu 'gcloud info'",
+    "timeout 30 bash -o pipefail -c 'uv run pytest -m live tests'",
+]
+
+# A comment ends at its newline: the next line is still a command of its own.
+COMMENTS = [
+    "cd /tmp  # go there\ngcloud info",
+    "git status # check\nunset GCP_PROJECT",
+    "uv run pytest -q x.py # quick\nmake check",
+    "echo hi # it's a note\ngcloud info",
+    'echo hi # an "open quote\nbq ls',
+    "true # see <<EOF\ngcloud info\nEOF",
+    "true # a trailing backslash \\\ngcloud info",
+    "true # $(\ngsutil ls",
+    "ls; # done\nenv -u GCP_PROJECT true",
+    "bash -c 'git status # check\ngcloud info'",
+]
+
+DENIED = CLOUD_CLI + API_HOST + WIDENING + VARIABLES + LINE_CONTINUATIONS + SHELL_OPTIONS + COMMENTS
 
 # The ordinary reads a review needs.
 ALLOWED = [
@@ -174,6 +216,13 @@ ALLOWED = [
     "jq -r '.url | test(\"googleapis.com\")' f.json",
     "uv run pytest -q tests/x.py # not -m live",
     "mktemp -d",
+    "uv run pytest -q \\\n  tests/x.py \\\n  tests/y.py",
+    "echo 'a \\\n -m live' | cat",
+    "git status  # then gcloud info and unset GCP_PROJECT",
+    "# gcloud info\ngit status",
+    "bash -o pipefail -c 'git status | head -3'",
+    "bash -o pipefail script.sh",
+    "git log -1 # see <<EOF\ngit status",
     "python3 cloud/gcp/guard.py <<'EOF'\n{\"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"curl https://x.googleapis.com\"}}\nEOF",
     "echo '{\"tool_input\": {\"command\": \"gcloud info\"}}' | python3 cloud/gcp/reviewer_guard.py",
 ]

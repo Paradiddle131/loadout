@@ -117,11 +117,49 @@ def review_agent(event: dict) -> bool:
     return isinstance(kind, str) and kind.rsplit(":", 1)[-1] in REVIEW_AGENTS
 
 
+WORD_BREAKS = set(" \t\r\n;&|()")
+
+
+def shell_text(text: str) -> str:
+    """`text` as the shell reads it before splitting words: each backslash-newline outside single quotes removed (a
+    line continuation joins the lines), and each comment (a `#` that starts a word, outside quotes) removed up to, not
+    including, its newline, so the next line stays a command of its own."""
+    out: list[str] = []
+    i, quote, n = 0, None, len(text)
+    while i < n:
+        c = text[i]
+        if quote == "'":
+            out.append(c)
+            quote = None if c == "'" else quote
+            i += 1
+        elif c == "\\":
+            if text.startswith("\n", i + 1):
+                i += 2
+                continue
+            out.append(text[i : i + 2])
+            i += 2
+        elif quote == '"':
+            out.append(c)
+            quote = None if c == '"' else quote
+            i += 1
+        elif c in "'\"":
+            out.append(c)
+            quote, i = c, i + 1
+        elif c == "#" and (not out or out[-1][-1] in WORD_BREAKS):
+            end = text.find("\n", i)
+            i = n if end < 0 else end
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
 def tokenize(text: str) -> list[str] | None:
+    """Shell words and operators of `text`, which `shell_text` has already cleared of comments and continuations."""
     lex = shlex.shlex(text, posix=True, punctuation_chars=";&|()\n")
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
-    lex.commenters = "#"
+    lex.commenters = ""
     try:
         return list(lex)
     except ValueError:
@@ -183,7 +221,7 @@ def split_heredocs(command: str) -> tuple[str, list[tuple[str, str, bool]]]:
         line = lines[i]
         kept.append(line)
         i += 1
-        for m in HEREDOC.finditer(line):
+        for m in HEREDOC.finditer(shell_text(line)):  # a `<<` inside a comment starts no heredoc
             strip, delim, body = m.group(1) == "-", m.group(3), []
             while i < len(lines) and (lines[i].lstrip("\t") if strip else lines[i]) != delim:
                 body.append(lines[i])
@@ -344,18 +382,31 @@ def variable_command(name: str, args: list[str]) -> str | None:
     return None
 
 
+SHELL_VALUE_LONG = {"--rcfile", "--init-file"}
+
+
 def shell_script(args: list[str]) -> str | None:
-    """The command string a shell is given with `-c` (`bash -c`, `bash -lc`, `sh -ec`)."""
-    seen_c = False
-    for a in args:
-        if not seen_c:
-            if a.startswith("-") and not a.startswith("--") and "c" in a[1:]:
-                seen_c = True
-            elif not a.startswith("-"):
-                return None  # a script file
-        elif not a.startswith("-"):
-            return a
-    return None
+    """The command string a shell is given with `-c` (`bash -c`, `bash -lc`, `bash -euo pipefail -c`): its first word
+    after the options. Options that take a value (`-o`/`+o`, `-O`/`+O`, `--rcfile`, `--init-file`) take the next word,
+    so the value is not read as the script or a script file."""
+    seen_c, j = False, 0
+    while j < len(args):
+        a = args[j]
+        j += 1
+        if a == "--":
+            break
+        if a.startswith("--"):
+            j += a in SHELL_VALUE_LONG
+            continue
+        if a[:1] in ("-", "+") and len(a) > 1:
+            for ch in a[1:]:
+                if ch in "oO":
+                    j += 1  # its value
+                elif ch == "c" and a[0] == "-":
+                    seen_c = True
+            continue
+        return a if seen_c else None  # the script, or a script file
+    return args[j] if seen_c and j < len(args) else None
 
 
 def check_segment(seg: list[str], depth: int) -> str | None:
@@ -382,7 +433,7 @@ def check_segment(seg: list[str], depth: int) -> str | None:
 
 def heredoc_program(line: str) -> str | None:
     """The command word of the segment on `line` that holds a heredoc's `<<`."""
-    tokens = tokenize(line)
+    tokens = tokenize(shell_text(line))
     if tokens is None:
         return None
     for seg in segments(tokens):
@@ -403,6 +454,7 @@ def check(command: str, depth: int = 0) -> str | None:
                 return reason
         if heredoc_program(line) in SHELLS and (reason := check(body, depth + 1)):
             return reason
+    text = shell_text(text)
     for inner in substitutions(text):
         if reason := check(inner, depth + 1):
             return reason
