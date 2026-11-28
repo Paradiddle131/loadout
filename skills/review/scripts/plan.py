@@ -14,7 +14,7 @@
 The preview and the record read the same inputs the same way, and neither takes a base, a head, a reviewed commit
 or a prior output from the lead: no option can change what verdict.sh records except to raise it, but for the
 owner's override (`--owner`), which sets the depth the owner named, and the owner's effort cap (`LOADOUT_MAX_EFFORT`),
-which lowers efforts and is recorded as `cap=` wherever it lowered one or not.
+which lowers efforts and is recorded as `cap=` whenever it is set.
 
 Inputs, where each is read from, who controls it, and how a lead-controlled one can only raise the plan (`--owner`
 aside):
