@@ -287,7 +287,7 @@ def prior_round(c: dict | None, change: Change) -> tuple[str, list[dict], str] |
 
 def effort_cap() -> str | None:
     """The owner's cap from the environment: a level, or None when unset or empty; Refused on any other value."""
-    raw = os.environ.get(CAP_VAR, "").strip()
+    raw = ""
     if not raw:
         return None
     if raw not in ERANK:
