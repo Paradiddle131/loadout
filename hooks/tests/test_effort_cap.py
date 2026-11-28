@@ -202,6 +202,17 @@ def test_workflow_script_path_and_saved_name_are_read(home: Path, tmp_path: Path
     (home / ".claude/workflows").mkdir(parents=True)
     (home / ".claude/workflows/mine.js").write_text("agent('x', {effort: 'low'})\n")
     assert run(call("Workflow", cwd=proj, name="mine"), "low", home)[0] is None
+    # A name that resolves to several scripts (by file name or meta name, project or user): each is checked.
+    (proj / ".claude/workflows/other-file.js").write_text(
+        "export const meta = { name: 'mine', description: 'd' }\nagent('x', {effort: 'high'})\n")
+    assert "high" in run(call("Workflow", cwd=proj / "sub", name="mine"), "low", home)[0]
+
+
+def test_agent_definitions_are_read_from_the_project_root_above_the_cwd(home: Path, tmp_path: Path) -> None:
+    proj = tmp_path / "proj"
+    (proj / "deep/er").mkdir(parents=True)
+    agent_file(proj / ".claude/agents", "rooted", "max")
+    assert "max" in run(call("Agent", cwd=proj / "deep/er", subagent_type="rooted"), "high", home)[0]
 
 
 @pytest.mark.parametrize("inp", [{"name": "built-in-or-unknown"}, {"resumeFromRunId": "run-1"},

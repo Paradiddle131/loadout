@@ -11,11 +11,12 @@ one of the five words, exactly, in lower case):
 - `Agent` (`Task` in older builds): the call's `effort`, refused above the cap or when it is not a level. With no
   `effort`, the definition `subagent_type` names: `<plugin>:<name>` is looked up in that plugin's `agents/` folder
   (this plugin's own, else the install paths `~/.claude/plugins/installed_plugins.json` lists for it), a bare name
-  in `<cwd>/.claude/agents/`, `~/.claude/agents/` and this plugin's `agents/`, matched against each file's
+  in `.claude/agents/` from the `cwd` up, `~/.claude/agents/` and this plugin's `agents/`, matched against each file's
   frontmatter `name` and its file name, case-insensitively; every match counts, and one whose `effort` is above the
   cap or not a level refuses.
-- `Workflow`: the script, from `scriptPath` (relative to the call's `cwd`), else `script`, else `name` looked up as
-  `.claude/workflows/<name>.js` from the `cwd` up and in `~/.claude/workflows/`; a call whose script it cannot read
+- `Workflow`: the script, from `scriptPath` (relative to the call's `cwd`), else `script`, else `name`: every file in
+  `.claude/workflows/` from the `cwd` up and in `~/.claude/workflows/` whose file name or `meta` name is that name,
+  all of them checked; a call whose script it cannot read
   (a built-in workflow, a bare `resumeFromRunId`) is refused. Every appearance of the word `effort` in the script,
   in any case, must be an option `effort: '<level>'` (any quote, the key quoted or not) whose value is followed,
   past blanks and line breaks, by a `,` or a `}`, at or below the cap; anything else (a variable, a template, an expression, a comment
@@ -123,7 +124,7 @@ def definitions(subagent_type: str, cwd: Path, env: dict[str, str]) -> list[tupl
         dirs = plugin_dirs(plugin, env)
     else:
         name = wanted
-        dirs = [cwd / ".claude" / "agents", config_dir(env) / "agents", ROOT / "agents"]
+        dirs = [d / ".claude" / "agents" for d in (cwd, *cwd.parents)] + [config_dir(env) / "agents", ROOT / "agents"]
     found, seen = [], set()
     for d in dirs:
         for f in sorted(d.rglob("*.md")) if d.is_dir() else []:
@@ -165,12 +166,20 @@ def workflow_script(inp: dict, cwd: Path, env: dict[str, str]) -> str:
     if isinstance(inp.get("script"), str):
         return inp["script"]
     name = inp.get("name")
-    if isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9._-]+", name) and ".." not in name:
-        places = [d / ".claude" / "workflows" / f"{name}.js" for d in (cwd, *cwd.parents)]
-        places.append(config_dir(env) / "workflows" / f"{name}.js")
-        for p in places:
-            if p.is_file():
-                return p.read_text(encoding="utf-8", errors="replace")
+    if isinstance(name, str) and name.strip():
+        # Every saved script the name may resolve to, by file name or by its meta name: all of them are checked.
+        dirs = [d / ".claude" / "workflows" for d in (cwd, *cwd.parents)] + [config_dir(env) / "workflows"]
+        meta = re.compile(r"""\bname\s*:\s*(['"`])""" + re.escape(name.strip()) + r"\1")
+        found = []
+        for d in dirs:
+            for f in sorted(d.iterdir()) if d.is_dir() else []:
+                if not f.is_file():
+                    continue
+                text = f.read_text(encoding="utf-8", errors="replace")
+                if f.stem.lower() == name.strip().lower() or meta.search(text):
+                    found.append(text)
+        if found:
+            return "\n".join(found)
     raise Refusal("the hook cannot read this workflow's script (a built-in or unknown name, or a resume without "
                   "scriptPath), so the efforts it sets cannot be checked against the cap; pass the script inline or "
                   "by scriptPath")
