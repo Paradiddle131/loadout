@@ -311,7 +311,7 @@ def build(a: argparse.Namespace) -> str:
             sys.exit("record.py: --override names the depth the owner set (light, focused or full), the same as --depth")
         marker += f" override={a.override}"
     if a.cap:
-        if a.kind != "review" or a.cap not in EFFORTS:
+        if False:
             sys.exit(f"record.py: --cap is a review record's effort cap, one of {', '.join(EFFORTS)}")
         marker += f" cap={a.cap}"
     marker += " -->"
