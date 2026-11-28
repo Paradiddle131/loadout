@@ -2,7 +2,7 @@
 name: review
 description: "Use before any change lands on a default branch, in any repo, attended or unattended: tier the change, stamp its gates, run fresh reviewers, verify their findings, fix, record the verdict, merge."
 metadata:
-  version: 17.0.0
+  version: 17.1.0
 ---
 
 # Review
@@ -42,6 +42,9 @@ In `focused`, the `first` lens runs alone, then the `then` lenses in parallel, e
 Give each the brief in [`templates.md`](templates.md): the repo, the range `$(git merge-base <default> <head>)..<head>`, the issue body and its done-when quoted; each agent makes and removes its own detached worktree.
 Give no summary of the work; the PR body goes only to `claims-auditor`, or to a repo's own lens its `REVIEW.md` names that asks for it, as material under audit.
 A lens the plan leaves out may be added for what paths cannot show; name it in `--reviewers` (step 7).
+On cloud, a hook backs the brief's no-cloud line for these agents (`cloud/gcp/reviewer_guard.py`): it refuses a Bash call whose words run `gcloud`, `bq` or `gsutil`, give a `*.googleapis.com` host to a program other than a text tool, widen the repo's test run (pytest's `-m`, `-o`, `-p no:`, `-c`, `--noconftest`, `PYTEST_ADDOPTS`, `make check` / `make test`), or set, empty or unset a project or proxy variable.
+It is a tripwire for a slip, not a barrier: it misses a name built at run time (a variable, `eval` of one, encoded text, a script written then run), a library call inside code the reviewer did not write, and a reviewer that is not one of these agents; off cloud nothing refuses, and on any machine the brief stays the rule.
+A reviewer it refuses reports the check `unverified`, naming the refusal.
 
 | Reviewer | Planned on | Added for |
 |---|---|---|
