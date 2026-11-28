@@ -55,6 +55,8 @@ Set both on every delegation and in every agent definition (`model` and `effort`
 - Effort is high for an item the `review` skill's tier rule makes `sensitive` (its defaults or the repo's `REVIEW.md`), medium otherwise.
 - No stronger model or higher effort by default, even when the lead runs on one; raise it for an item only with a reason in its brief.
 - Where the delegation call takes no effort, delegate to an agent definition that sets it; this collection's agents (the `review` skill's reviewers, the `handoff-auditor`) carry both fields.
+- The owner's cap, `LOADOUT_MAX_EFFORT` (`low`, `medium`, `high`, `xhigh` or `max`; unset means none), bounds every effort above: set each call's effort to the lower of the rule's and the cap, also on a call to an agent definition whose own effort is higher.
+  The owner sets it in the cloud environment's variables in Settings, or in `env` of `~/.claude/settings.json` locally; it takes effect at the next session start, and the `loadout` plugin's hook (`hooks/effort-cap.py`) refuses an `Agent`, `Workflow` or `create_session` call above it.
 
 ## Reports, fix rounds and integration
 

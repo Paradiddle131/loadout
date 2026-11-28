@@ -30,8 +30,9 @@ skill); never the repo under review. Keys are lowercase letters; values are lett
 only `lens` may repeat. A review round adds cycle, lenses, dupes, mustfix, nits, one lens=<name>:<model>:<effort>:
 <tokens>:<seconds>:<findings> per agent, and dismissals and promoted from the verifier's one header line (a re-post:
 repost=1, lenses and mustfix only); a review record also carries depth, floor and planned (plan.py's: the depth
-the round ran at, the paths' floor, and the planned lenses with the verifier, or `none`); a round whose depth the
-owner set carries override=<that depth> on its marker.
+the round ran at, the paths' floor, and the planned lenses with the verifier, or `none`), and cap=<level> when the
+owner's effort cap (`LOADOUT_MAX_EFFORT`) was set; a round whose depth the owner set carries override=<that depth> on
+its marker.
 """
 
 from __future__ import annotations

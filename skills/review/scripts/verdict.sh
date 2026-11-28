@@ -10,8 +10,12 @@
 #   branch's tip, the PR's newest trusted review record) and REVIEW.md on that tip; plan.py's header has the rules and
 #   the table of its inputs. --depth raises the plan's depth above the paths' floor, never below it, except under
 #   --owner (light at least). Above routine, --reviewers must name every planned lens and finding-verifier, and each
-#   planned lens's --lens effort must be at least its planned effort; extra lenses are accepted. The depth goes on the marker (depth=), and depth, floor and
-#   planned on the round line.
+#   planned lens's --lens effort must be at least its planned effort; extra lenses are accepted. The depth goes on the
+#   marker (depth=), and depth, floor and planned on the round line.
+#   The owner's effort cap, LOADOUT_MAX_EFFORT in the environment (low, medium, high, xhigh or max), lowers each
+#   planned effort above it to it, so a lens run at the cap is accepted when its plan was higher; it never raises one,
+#   and a lens above the cap is accepted here (the effort-cap hook refuses such a run). With a cap set, the round
+#   line carries cap=<level>; unset or empty is no cap, and any other value refuses the record.
 #   --owner quotes the owner's instruction that set this round's depth (the review skill's owner override): --depth is
 #   then taken as given (light, focused or full), below the floor too; the marker carries override=<depth>, which
 #   the merge guard accepts below the floor, and the record quotes the words. A --repost carries the reposted

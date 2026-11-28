@@ -233,3 +233,11 @@ def test_the_loadout_plugin_registers_the_hook_for_the_three_tools() -> None:
         assert not m.fullmatch(tool), tool
     plugins = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text())["plugins"]
     assert [p for p in plugins if p["name"] == "loadout"][0]["source"] == "./"  # hooks/hooks.json is its default
+
+
+@pytest.mark.parametrize("doc", ["skills/review/SKILL.md", "skills/delegating/SKILL.md", "RULES.md"])
+def test_the_docs_say_where_the_owner_sets_the_cap_and_when_it_holds(doc: str) -> None:
+    text = (ROOT / doc).read_text(encoding="utf-8")
+    for words in (VAR, "the cloud environment's variables in Settings", "`env` of `~/.claude/settings.json`",
+                  "next session start"):
+        assert words in text, (doc, words)

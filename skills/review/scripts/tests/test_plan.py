@@ -256,6 +256,114 @@ def test_verdict_refuses_a_lens_run_below_its_planned_effort_and_accepts_one_abo
     assert done.returncode == 0, done.stderr
 
 
+# The owner's effort cap (LOADOUT_MAX_EFFORT): it lowers a planned effort, never raises one.
+
+CAP = "LOADOUT_MAX_EFFORT"
+
+
+def test_the_cap_lowers_each_planned_effort_above_it_and_is_printed(w: World) -> None:
+    base_has(w, {"REVIEW.md": "## Sensitive\n- `guard/**`; lenses: control-prober; effort: finding-verifier=max\n"})
+    w.commit({"guard/check.py": "x\n"})
+    code, p, err = plan(w, "--depth", "full", **{CAP: "medium"})
+    assert code == 0, err
+    assert p["cap"] == "medium"
+    assert p["effort"] == {COR: "medium", GRD: "medium", CTL: "medium", VER: "medium"}
+    assert p["uncapped"] == {COR: "high", GRD: "medium", CTL: "high", VER: "max"}
+    assert any(CAP in x and "high to medium" in x for x in p["why"]), p["why"]
+    done = subprocess.run([sys.executable, str(PLAN), "--pr", "12", "--depth", "full"], cwd=w.repo,
+                          env={**w.env, CAP: "medium"}, capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    assert f"cap: medium ({CAP})" in done.stdout
+    assert f"{COR} (medium, capped from high)" in done.stdout and f"{GRD} (medium)" in done.stdout
+    assert f"verifier: {VER} (medium, capped from max)" in done.stdout
+
+
+@pytest.mark.parametrize("cap", [None, ""])
+def test_no_cap_plans_as_before_and_says_so(w: World, cap: str | None) -> None:
+    w.commit({"cloud/hooks/x.py": "x\n"})
+    code, p, err = plan(w, "--depth", "full", **({CAP: cap} if cap is not None else {}))
+    assert code == 0, err
+    assert p["cap"] is None and p["effort"][COR] == "high"
+    done = subprocess.run([sys.executable, str(PLAN), "--pr", "12"], cwd=w.repo, env={**w.env, CAP: ""},
+                          capture_output=True, text=True, timeout=60)
+    assert f"cap: none ({CAP} unset)" in done.stdout, done.stderr
+
+
+def test_the_cap_never_raises_a_planned_effort(w: World) -> None:
+    base_has(w, {"REVIEW.md": "## Paths\n- `lib/**`; effort: correctness-reviewer=low\n"})
+    w.commit({"lib/x.py": "x\n"})
+    for cap in ("medium", "max"):
+        code, p, err = plan(w, **{CAP: cap})
+        assert code == 0, err
+        assert p["effort"] == {COR: "low", VER: "medium"}, (cap, p["effort"])
+
+
+@pytest.mark.parametrize("cap", ["huge", "Medium", "HIGH", "none", "0"])
+def test_a_cap_outside_the_five_levels_refuses_the_plan_and_the_record(w: World, tmp_path: Path, cap: str) -> None:
+    head = w.commit({"cloud/hooks/x.py": "x\n"})
+    code, _, err = plan(w, **{CAP: cap})
+    assert code == 2 and CAP in err and repr(cap) in err
+    done = w.verdict("12", "--tier", "sensitive", "--reviewers", ", ".join(SENSITIVE + [VER]), "--reviewed", head,
+                     "--file", review_file(tmp_path, head, "PASS", "No findings.\n", "Blocking: none"), **{CAP: cap})
+    assert done.returncode != 0 and CAP in done.stderr and w.writes() == []
+
+
+def test_floor_reads_no_cap(w: World) -> None:
+    head = w.commit({"cloud/hooks/x.py": "x\n"})
+    done = subprocess.run([sys.executable, str(PLAN), "floor", "--base", "origin/main", "--head", head], cwd=w.repo,
+                          env={**w.env, CAP: "huge"}, capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0 and done.stdout.strip() == "sensitive focused", done.stderr
+
+
+def test_verdict_accepts_a_lens_at_the_cap_when_its_plan_was_higher_and_records_the_cap(w: World,
+                                                                                       tmp_path: Path) -> None:
+    head = w.commit({"cloud/hooks/x.py": "x\n"})
+    at_cap = {COR: "medium", GRD: "medium", VER: "medium"}
+    # planned high for correctness-reviewer: refused with no cap
+    done = verdict(w, tmp_path, head, SENSITIVE + [VER], "sensitive", depth="full", effort=at_cap)
+    assert done.returncode == 2 and "effort" in done.stderr and w.writes() == []
+    blocking, text = ("Blocking: none", "No findings.\n")
+    args = ["12", "--tier", "sensitive", "--reviewers", ", ".join(SENSITIVE + [VER]), "--reviewed", head,
+            "--file", review_file(tmp_path, head, "PASS", text, blocking), "--cycle", "1", "--dupes", "0",
+            "--nits", "0", "--depth", "full"]
+    for r in SENSITIVE + [VER]:
+        args += ["--lens", f"{r} model=opus effort={at_cap[r]} tokens=10 seconds=1 findings=0"]
+    done = w.verdict(*args, cost=False, **{CAP: "medium"})
+    assert done.returncode == 0, done.stderr
+    f = dict(x for x in round_fields(w.comments()[-1]["body"]) if x[0] != "lens")
+    assert f["cap"] == "medium" and f["depth"] == "full"
+
+
+def test_verdict_under_a_cap_refuses_a_lens_below_the_cap_or_below_a_lower_plan(w: World, tmp_path: Path) -> None:
+    head = w.commit({"cloud/hooks/x.py": "x\n"})
+    blocking, text = ("Blocking: none", "No findings.\n")
+
+    def under(cap: str, efforts: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        args = ["12", "--tier", "sensitive", "--reviewers", ", ".join(SENSITIVE + [VER]), "--reviewed", head,
+                "--file", review_file(tmp_path, head, "PASS", text, blocking), "--cycle", "1", "--dupes", "0",
+                "--nits", "0", "--depth", "full"]
+        for r in SENSITIVE + [VER]:
+            args += ["--lens", f"{r} model=opus effort={efforts.get(r, 'medium')} tokens=10 seconds=1 findings=0"]
+        return w.verdict(*args, cost=False, **{CAP: cap})
+
+    done = under("medium", {COR: "low"})  # below the cap, the plan having been high
+    assert done.returncode == 2 and COR in done.stderr and f"{CAP}=medium" in done.stderr and w.writes() == []
+    done = under("xhigh", {GRD: "low"})  # below a plan (medium) that the cap does not touch
+    assert done.returncode == 2 and GRD in done.stderr and w.writes() == []
+    done = under("xhigh", {COR: "medium"})  # the plan (high) is below the cap, so the cap lowers nothing
+    assert done.returncode == 2 and COR in done.stderr and w.writes() == []
+    done = under("low", {COR: "max", GRD: "max"})  # above the cap: the hook's to refuse, never the record's
+    assert done.returncode == 0, done.stderr
+    assert dict(x for x in round_fields(w.comments()[-1]["body"]) if x[0] != "lens")["cap"] == "low"
+
+
+def test_no_cap_writes_no_cap_pair(w: World, tmp_path: Path) -> None:
+    head = w.commit({"src/app.py": "x = 2\n"})
+    done = verdict(w, tmp_path, head, [COR, VER], "standard")
+    assert done.returncode == 0, done.stderr
+    assert "cap" not in dict(round_fields(w.comments()[-1]["body"]))
+
+
 # Lab policy, and the floor no REVIEW.md line lowers.
 
 
