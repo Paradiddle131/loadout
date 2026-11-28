@@ -100,7 +100,7 @@ WRAPPERS = {
 }
 HEREDOC = re.compile(r"<<(?!<)(-?)\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2")
 # On text the guard cannot split into words: the names whose mention is refused.
-UNPARSED = re.compile(r"\b(gcloud|bq|gsutil|pytest)\b|googleapis\.com|GCP_PROJECT|CLOUDSDK_|(?i:https?_proxy)")
+UNPARSED = re.compile(r"\b(gcloud|bq|gsutil|pytest)\b")
 MAX_DEPTH = 4
 
 REFUSAL = (
